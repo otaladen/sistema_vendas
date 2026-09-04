@@ -12,6 +12,7 @@ enum MainMenuSubDestino {
   vendasListagem,
   vendasRelatorios,
   cadastrosProdutos,
+  cadastrosListaPrecoExterna,
   cadastrosKitsOrcamento,
   cadastrosPromocoes,
   cadastrosMotoristas,
@@ -43,6 +44,7 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
       case MainMenuSubDestino.vendasRelatorios:
         return MainMenuDestino.vendas;
       case MainMenuSubDestino.cadastrosProdutos:
+      case MainMenuSubDestino.cadastrosListaPrecoExterna:
       case MainMenuSubDestino.cadastrosKitsOrcamento:
       case MainMenuSubDestino.cadastrosPromocoes:
       case MainMenuSubDestino.cadastrosMotoristas:
@@ -80,6 +82,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return 'Relatorios';
       case MainMenuSubDestino.cadastrosProdutos:
         return 'Produtos';
+      case MainMenuSubDestino.cadastrosListaPrecoExterna:
+        return 'Precos Itinga';
       case MainMenuSubDestino.cadastrosKitsOrcamento:
         return 'Kits de orcamento';
       case MainMenuSubDestino.cadastrosPromocoes:
@@ -135,6 +139,8 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
         return Icons.assessment_outlined;
       case MainMenuSubDestino.cadastrosProdutos:
         return Icons.inventory_2_outlined;
+      case MainMenuSubDestino.cadastrosListaPrecoExterna:
+        return Icons.price_change_outlined;
       case MainMenuSubDestino.cadastrosKitsOrcamento:
         return Icons.widgets_outlined;
       case MainMenuSubDestino.cadastrosPromocoes:
@@ -199,6 +205,7 @@ extension MainMenuSubDestinoExt on MainMenuSubDestino {
           PermissaoUsuario.gerenciarUsuarios,
         );
       case MainMenuSubDestino.cadastrosProdutos:
+      case MainMenuSubDestino.cadastrosListaPrecoExterna:
       case MainMenuSubDestino.cadastrosKitsOrcamento:
       case MainMenuSubDestino.cadastrosPromocoes:
       case MainMenuSubDestino.cadastrosMotoristas:
@@ -248,6 +255,7 @@ abstract final class MainMenuSubDestinoHelper {
 
   static const _cadastros = [
     MainMenuSubDestino.cadastrosProdutos,
+    MainMenuSubDestino.cadastrosListaPrecoExterna,
     MainMenuSubDestino.cadastrosKitsOrcamento,
     MainMenuSubDestino.cadastrosPromocoes,
     MainMenuSubDestino.cadastrosMotoristas,

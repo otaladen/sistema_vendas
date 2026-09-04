@@ -149,6 +149,16 @@ class CancelarVendaUi {
         clienteRepository: clienteRepository,
       );
       exigeFiscal = fiscalSvc.vendaExigeCancelamentoFiscal(vendaAtual);
+      final bloqueio =
+          vendaRepository.mensagemBloqueioCancelamentoVenda(vendaAtual.id);
+      if (bloqueio != null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(bloqueio)),
+          );
+        }
+        return CancelarVendaUiResultado.erro;
+      }
     } else {
       fiscalSvc = null;
       exigeFiscal =

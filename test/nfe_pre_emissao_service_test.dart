@@ -97,10 +97,12 @@ void main() {
       origem: 'cadastro',
     );
 
+    // Sem FiscalConfigStore local: mesmo caminho do terminal (emissao no PC1).
     final r = NfePreEmissaoService.avaliar(
       venda: venda,
       cliente: clienteContribuinte(),
       ibge: ibge,
+      emissaoNoServidor: true,
     );
 
     expect(r.podeEmitir, isTrue);

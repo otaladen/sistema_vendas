@@ -163,6 +163,149 @@ class CaixaSessaoRepository {
     });
   }
 
+  /// Abre sessao no mesmo mutex (evita race entre terminais).
+  ///
+  /// Retorna mapa com chaves: `ok`, `jaAberto`, `sessao`, `terminais`.
+  /// Em conflito um-caixa: lanca [StateError] com prefixo `caixa_ja_aberto:`.
+  Future<Map<String, dynamic>> abrirSessaoAtomica({
+    required String terminalId,
+    required String operador,
+    required double fundoTroco,
+    required bool umCaixaAbertoPorLoja,
+    bool propagarRede = true,
+  }) async {
+    final id = terminalId.trim();
+    final op = operador.trim();
+    if (id.isEmpty || op.isEmpty) {
+      throw ArgumentError('terminalId e operador obrigatorios');
+    }
+    final fundo = fundoTroco < 0 ? 0.0 : fundoTroco;
+    return _serializar(() async {
+      final mapa = await _listarTodasSessoesInterno(migrarLegado: false);
+      final local = mapa[id];
+      if (local?.aberto == true) {
+        return {
+          'ok': true,
+          'jaAberto': true,
+          'sessao': local!,
+          'terminais': Map<String, CaixaSessao>.from(mapa),
+        };
+      }
+      if (umCaixaAbertoPorLoja) {
+        for (final e in mapa.entries) {
+          if (e.key != id && e.value.aberto) {
+            throw StateError(
+              'caixa_ja_aberto:${e.value.terminalId}|${e.value.operador}',
+            );
+          }
+        }
+      }
+      final sessao = CaixaSessao(
+        terminalId: id,
+        aberto: true,
+        operador: op,
+        aberturaEm: DateTime.now(),
+        fundoTroco: fundo,
+        suprimentos: 0,
+        sangrias: 0,
+        atualizadoEm: DateTime.now(),
+      );
+      mapa[id] = sessao;
+      await _persistirMapa(mapa);
+      CaixaStatusHub.instance.publicarDasSessoes(mapa);
+      if (propagarRede) {
+        _propagarCaixaRede();
+      }
+      return {
+        'ok': true,
+        'jaAberto': false,
+        'sessao': sessao,
+        'terminais': Map<String, CaixaSessao>.from(mapa),
+      };
+    });
+  }
+
+  /// Fecha sessao no mesmo mutex (evita race entre terminais).
+  ///
+  /// Em conflito de outro terminal sem forcar: lanca [StateError]
+  /// `caixa_outro_terminal:...`.
+  Future<Map<String, dynamic>> fecharSessaoAtomica({
+    required String terminalId,
+    required bool forcar,
+    required bool umCaixaAbertoPorLoja,
+    bool propagarRede = true,
+  }) async {
+    final id = terminalId.trim();
+    if (id.isEmpty) {
+      throw ArgumentError('terminalId obrigatorio');
+    }
+    return _serializar(() async {
+      final mapa = await _listarTodasSessoesInterno(migrarLegado: false);
+
+      CaixaSessao? alvo;
+      if (mapa[id]?.aberto == true) {
+        alvo = mapa[id];
+      } else if (forcar || umCaixaAbertoPorLoja) {
+        for (final s in mapa.values) {
+          if (s.aberto) {
+            alvo = s;
+            break;
+          }
+        }
+      }
+
+      if (alvo == null || !alvo.aberto) {
+        return {
+          'ok': true,
+          'jaFechado': true,
+          'sessao': null,
+          'terminais': Map<String, CaixaSessao>.from(mapa),
+          'fechadasCount': mapa.values.where((s) => !s.aberto).length,
+        };
+      }
+
+      if (!forcar && !umCaixaAbertoPorLoja && alvo.terminalId != id) {
+        throw StateError(
+          'caixa_outro_terminal:${alvo.terminalId}|${alvo.operador}',
+        );
+      }
+
+      CaixaSessao fechar(CaixaSessao s) => s.copyWith(
+            aberto: false,
+            operador: '',
+            limparAbertura: true,
+            fundoTroco: 0,
+            suprimentos: 0,
+            sangrias: 0,
+            atualizadoEm: DateTime.now(),
+          );
+
+      final fechada = fechar(alvo);
+      mapa[fechada.terminalId] = fechada;
+
+      if (forcar) {
+        for (final e in mapa.entries.toList()) {
+          if (e.value.aberto && e.key != fechada.terminalId) {
+            mapa[e.key] = fechar(e.value);
+          }
+        }
+      }
+
+      await _persistirMapa(mapa);
+      CaixaStatusHub.instance.publicarDasSessoes(mapa);
+      if (propagarRede) {
+        _propagarCaixaRede();
+      }
+      return {
+        'ok': true,
+        'jaFechado': false,
+        'sessao': fechada,
+        'terminais': Map<String, CaixaSessao>.from(mapa),
+        'fechadasCount': mapa.values.where((s) => !s.aberto).length,
+      };
+    });
+  }
+
   Future<void> salvarSessaoLocal(CaixaSessao sessao, {bool propagarRede = true}) async {
     await _serializar(() async {
       final todas = await _listarTodasSessoesInterno(migrarLegado: false);

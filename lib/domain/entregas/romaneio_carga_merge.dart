@@ -13,6 +13,7 @@ class RomaneioCargaLinha {
     required this.codigoSku,
     required this.unidade,
     required this.quantidadeTotal,
+    this.escalaFracionada = false,
     this.rotuloLote = '',
   });
 
@@ -20,10 +21,22 @@ class RomaneioCargaLinha {
   final String nomeProduto;
   final String codigoSku;
   final String unidade;
+
+  /// Soma persistida (pode estar em milésimos se [escalaFracionada]).
   final int quantidadeTotal;
+
+  /// Produto fracionado / CX→m²: [quantidadeTotal] esta em milésimos.
+  final bool escalaFracionada;
 
   /// Texto FEFO para separacao (ex.: "Retirar do LOTE: ...").
   final String rotuloLote;
+
+  /// Qtd para UI/PDF (2; 18,9) — nao o inteiro bruto 2000/18900.
+  String get quantidadeTotalTexto =>
+      EntregaVendaHelper.formatarQuantidadeRomaneioConsolidada(
+        quantidadeTotal,
+        escalaFracionada: escalaFracionada,
+      );
 }
 
 /// Soma quantidades por produto para romaneio e conferencia de carga.
@@ -31,7 +44,12 @@ abstract final class RomaneioCargaMerge {
   RomaneioCargaMerge._();
 
   static String chaveMergeDeItem(ItemVenda item) {
-    final pid = item.produto.targetId;
+    var pid = 0;
+    try {
+      pid = item.produto.targetId;
+    } catch (_) {
+      pid = 0;
+    }
     if (pid > 0) return 'p:$pid';
     return 'n:${item.nomeProduto.trim().toLowerCase()}';
   }
@@ -98,6 +116,9 @@ abstract final class RomaneioCargaMerge {
         if (un.isEmpty) un = 'UN';
         un = un.toUpperCase();
         final rotuloLote = _rotuloLoteItem(item);
+        final escala = EntregaVendaHelper.quantidadeRomaneioUsaEscalaFracionada(
+          item,
+        );
         final prev = acumulado[chave];
         if (prev == null) {
           acumulado[chave] = RomaneioCargaLinha(
@@ -106,6 +127,7 @@ abstract final class RomaneioCargaMerge {
             codigoSku: sku,
             unidade: un,
             quantidadeTotal: q,
+            escalaFracionada: escala,
             rotuloLote: rotuloLote,
           );
         } else {
@@ -119,6 +141,7 @@ abstract final class RomaneioCargaMerge {
             codigoSku: prev.codigoSku,
             unidade: prev.unidade,
             quantidadeTotal: prev.quantidadeTotal + q,
+            escalaFracionada: prev.escalaFracionada || escala,
             rotuloLote: rotulos.join(' | '),
           );
         }

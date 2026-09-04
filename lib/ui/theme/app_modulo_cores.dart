@@ -7,6 +7,7 @@ import 'app_semantic_colors.dart';
 /// Sub-itens de hubs (cadastros, vendas, financeiro) sem [MainMenuDestino].
 enum AppModuloId {
   produtos,
+  listaPrecoExterna,
   kitsOrcamento,
   promocoes,
   motoristasCadastro,
@@ -73,6 +74,8 @@ abstract final class AppModuloCores {
     switch (id) {
       case AppModuloId.produtos:
         return harmonizar(scheme, 38);
+      case AppModuloId.listaPrecoExterna:
+        return harmonizar(scheme, 12);
       case AppModuloId.kitsOrcamento:
         return harmonizar(scheme, 55);
       case AppModuloId.promocoes:

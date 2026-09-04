@@ -95,7 +95,7 @@ pw.Widget pwRomaneioSecaoCargaConsolidada({
                 _pwCelCorpoRomaneio(l.codigoSku, fsLin, base),
                 _pwCelCorpoRomaneio(l.unidade, fsLin, base),
                 _pwCelCorpoRomaneio(
-                  '${l.quantidadeTotal}',
+                  l.quantidadeTotalTexto,
                   fsLin,
                   base,
                   negrito: true,

@@ -224,14 +224,22 @@ class DashboardAlertasService {
             tipo: DashboardAlertaTipo.backupAtrasado,
             titulo: backup.saude == BackupSaude.critico
                 ? 'Backup urgente'
-                : 'Backup recomendado',
-            detalhe: horas == null || horas <= 0
-                ? 'Nenhum backup recente neste PC'
-                : 'Ultimo backup ha $horas hora(s)',
+                : backup.saude == BackupSaude.configIncompleta
+                    ? 'Backup sem pasta de destino'
+                    : 'Backup recomendado',
+            detalhe: backup.automaticoSemDestino
+                ? 'Ative o automatico so apos selecionar a pasta de destino'
+                : (horas == null || horas <= 0
+                    ? 'Nenhum backup recente neste PC'
+                    : 'Ultimo backup ha $horas hora(s)'),
             icone: Icons.backup_outlined,
             destino: MainMenuDestino.configuracoes,
             configSecaoId: 'backup',
-            prioridade: backup.saude == BackupSaude.critico ? 12 : 35,
+            prioridade: backup.saude == BackupSaude.critico
+                ? 12
+                : backup.saude == BackupSaude.configIncompleta
+                    ? 20
+                    : 35,
           ),
         );
       }

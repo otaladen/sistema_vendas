@@ -253,7 +253,7 @@ class _ConferenciaCargaConsolidadaListaState
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 Text(
-                  'SKU ${l.codigoSku} · ${l.unidade} · Qtd total: ${l.quantidadeTotal}',
+                  'SKU ${l.codigoSku} · ${l.unidade} · Qtd total: ${l.quantidadeTotalTexto}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 if (temPendente)

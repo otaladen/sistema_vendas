@@ -122,130 +122,128 @@ void registerCaixaRoutes(Router router, LanApiDeps d) {
   });
 
   router.post('/api/caixa/sessoes/abrir', (Request r) async {
-    final body = await lanApiReadJsonMap(r);
-    if (body == null) {
-      return lanApiJson({'error': 'JSON invalido'}, status: 400);
-    }
-    final terminalId = (body['terminalId'] ?? '').toString().trim();
-    final operador = (body['operador'] ?? '').toString().trim();
-    final fundo = (body['fundoTroco'] as num?)?.toDouble() ?? 0;
-    if (terminalId.isEmpty || operador.isEmpty) {
-      return lanApiJson(
-        {'error': 'terminalId e operador obrigatorios'},
-        status: 400,
+    try {
+      final body = await lanApiReadJsonMap(r);
+      if (body == null) {
+        return lanApiJson({'error': 'JSON invalido'}, status: 400);
+      }
+      final terminalId = (body['terminalId'] ?? '').toString().trim();
+      final operador = (body['operador'] ?? '').toString().trim();
+      final fundo = (body['fundoTroco'] as num?)?.toDouble() ?? 0;
+      if (terminalId.isEmpty || operador.isEmpty) {
+        return lanApiJson(
+          {'error': 'terminalId e operador obrigatorios'},
+          status: 400,
+        );
+      }
+      final config = await configRepo.carregarEmpresaConfig();
+      final resultado = await repo.abrirSessaoAtomica(
+        terminalId: terminalId,
+        operador: operador,
+        fundoTroco: fundo,
+        umCaixaAbertoPorLoja: config.umCaixaAbertoPorLoja,
       );
-    }
-    final config = await configRepo.carregarEmpresaConfig();
-    final mapa = await repo.listarTodasSessoes();
-    final local = mapa[terminalId];
-    if (local?.aberto == true) {
+      _avisarCaixaMudou(d);
+      final sessao = resultado['sessao'] as CaixaSessao;
+      final terminais =
+          resultado['terminais'] as Map<String, CaixaSessao>;
       return lanApiJson({
         'ok': true,
-        'jaAberto': true,
-        'sessao': local!.toMap(),
-        'terminais': mapa.map((k, v) => MapEntry(k, v.toMap())),
+        'jaAberto': resultado['jaAberto'] == true,
+        'sessao': sessao.toMap(),
+        'terminais': terminais.map((k, v) => MapEntry(k, v.toMap())),
       });
-    }
-    if (config.umCaixaAbertoPorLoja) {
-      for (final e in mapa.entries) {
-        if (e.key != terminalId && e.value.aberto) {
-          return lanApiJson({
-            'error': 'caixa_ja_aberto',
-            'message':
-                'Somente um caixa pode ficar aberto por loja. '
-                'Terminal ${e.value.terminalId} esta aberto'
-                '${e.value.operador.trim().isNotEmpty ? ' (operador: ${e.value.operador})' : ''}. '
-                'Aderira automaticamente a sessao existente.',
-            'sessaoAberta': e.value.toMap(),
-          }, status: 409);
-        }
+    } on ArgumentError catch (e) {
+      return lanApiJson({'error': e.message}, status: 400);
+    } on StateError catch (e) {
+      final msg = '$e';
+      if (msg.contains('caixa_ja_aberto:')) {
+        final resto = msg.split('caixa_ja_aberto:').last;
+        final partes = resto.split('|');
+        final tid = partes.isNotEmpty ? partes.first.trim() : '';
+        final op = partes.length > 1 ? partes[1].trim() : '';
+        return lanApiJson({
+          'error': 'caixa_ja_aberto',
+          'message':
+              'Somente um caixa pode ficar aberto por loja. '
+              'Terminal $tid esta aberto'
+              '${op.isNotEmpty ? ' (operador: $op)' : ''}. '
+              'Aderira automaticamente a sessao existente.',
+          'sessaoAberta': {
+            'terminalId': tid,
+            'operador': op,
+            'aberto': true,
+          },
+        }, status: 409);
       }
+      return lanApiJson({'error': msg}, status: 409);
+    } catch (e) {
+      return lanApiJson(
+        {'ok': false, 'error': 'Falha ao abrir caixa', 'code': 'caixa_abrir'},
+        status: 500,
+      );
     }
-    final sessao = CaixaSessao(
-      terminalId: terminalId,
-      aberto: true,
-      operador: operador,
-      aberturaEm: DateTime.now(),
-      fundoTroco: fundo < 0 ? 0 : fundo,
-      suprimentos: 0,
-      sangrias: 0,
-      atualizadoEm: DateTime.now(),
-    );
-    await repo.salvarSessaoLocal(sessao, propagarRede: true);
-    _avisarCaixaMudou(d);
-    final atualizado = await repo.listarTodasSessoes();
-    return lanApiJson({
-      'ok': true,
-      'sessao': sessao.toMap(),
-      'terminais': atualizado.map((k, v) => MapEntry(k, v.toMap())),
-    });
   });
 
   /// Fecha a sessao do terminal, ou (com forcar / um-caixa) a sessao aberta da loja.
   router.post('/api/caixa/sessoes/fechar', (Request r) async {
-    final body = await lanApiReadJsonMap(r);
-    if (body == null) {
-      return lanApiJson({'error': 'JSON invalido'}, status: 400);
-    }
-    final terminalId = (body['terminalId'] ?? '').toString().trim();
-    final forcar = body['forcar'] == true;
-    if (terminalId.isEmpty) {
-      return lanApiJson({'error': 'terminalId obrigatorio'}, status: 400);
-    }
-    final config = await configRepo.carregarEmpresaConfig();
-    final mapa = await repo.listarTodasSessoes();
-
-    // Preferencia: sessao deste terminal; senao qualquer aberta se forcar ou um-caixa.
-    CaixaSessao? alvo;
-    if (mapa[terminalId]?.aberto == true) {
-      alvo = mapa[terminalId];
-    } else if (forcar || config.umCaixaAbertoPorLoja) {
-      alvo = _primeiraAberta(mapa);
-    }
-
-    if (alvo == null || !alvo.aberto) {
+    try {
+      final body = await lanApiReadJsonMap(r);
+      if (body == null) {
+        return lanApiJson({'error': 'JSON invalido'}, status: 400);
+      }
+      final terminalId = (body['terminalId'] ?? '').toString().trim();
+      final forcar = body['forcar'] == true;
+      if (terminalId.isEmpty) {
+        return lanApiJson({'error': 'terminalId obrigatorio'}, status: 400);
+      }
+      final config = await configRepo.carregarEmpresaConfig();
+      final resultado = await repo.fecharSessaoAtomica(
+        terminalId: terminalId,
+        forcar: forcar,
+        umCaixaAbertoPorLoja: config.umCaixaAbertoPorLoja,
+      );
+      _avisarCaixaMudou(d);
+      final terminais =
+          resultado['terminais'] as Map<String, CaixaSessao>;
+      final sessao = resultado['sessao'] as CaixaSessao?;
       return lanApiJson({
         'ok': true,
-        'jaFechado': true,
-        'terminais': mapa.map((k, v) => MapEntry(k, v.toMap())),
+        'jaFechado': resultado['jaFechado'] == true,
+        if (sessao != null) 'sessao': sessao.toMap(),
+        'terminais': terminais.map((k, v) => MapEntry(k, v.toMap())),
+        'fechadasCount': resultado['fechadasCount'] ??
+            terminais.values.where((s) => !s.aberto).length,
       });
-    }
-
-    // Fechar sessao de outro terminal sem forcar / sem um-caixa: pede confirmacao.
-    if (!forcar &&
-        !config.umCaixaAbertoPorLoja &&
-        alvo.terminalId != terminalId) {
-      return lanApiJson({
-        'error': 'caixa_outro_terminal',
-        'message':
-            'Caixa aberto em ${alvo.terminalId}'
-            '${alvo.operador.trim().isNotEmpty ? ' (${alvo.operador})' : ''}. '
-            'Confirme o fechamento remoto.',
-        'sessaoAberta': alvo.toMap(),
-      }, status: 409);
-    }
-
-    final fechada = _fecharSessao(alvo);
-    await repo.salvarSessaoLocal(fechada, propagarRede: true);
-
-    // Com forcar: encerra TODAS as sessoes abertas (limpa orfaos).
-    if (forcar) {
-      final restantes = await repo.listarTodasSessoes();
-      for (final s in restantes.values) {
-        if (s.aberto && s.terminalId != fechada.terminalId) {
-          await repo.salvarSessaoLocal(_fecharSessao(s), propagarRede: true);
-        }
+    } on ArgumentError catch (e) {
+      return lanApiJson({'error': e.message}, status: 400);
+    } on StateError catch (e) {
+      final msg = '$e';
+      if (msg.contains('caixa_outro_terminal:')) {
+        final resto = msg.split('caixa_outro_terminal:').last;
+        final partes = resto.split('|');
+        final tid = partes.isNotEmpty ? partes.first.trim() : '';
+        final op = partes.length > 1 ? partes[1].trim() : '';
+        return lanApiJson({
+          'error': 'caixa_outro_terminal',
+          'message':
+              'Caixa aberto em $tid'
+              '${op.isNotEmpty ? ' ($op)' : ''}. '
+              'Confirme o fechamento remoto.',
+          'sessaoAberta': {
+            'terminalId': tid,
+            'operador': op,
+            'aberto': true,
+          },
+        }, status: 409);
       }
+      return lanApiJson({'error': msg}, status: 409);
+    } catch (e) {
+      return lanApiJson(
+        {'ok': false, 'error': 'Falha ao fechar caixa', 'code': 'caixa_fechar'},
+        status: 500,
+      );
     }
-
-    _avisarCaixaMudou(d);
-    final atualizado = await repo.listarTodasSessoes();
-    return lanApiJson({
-      'ok': true,
-      'sessao': fechada.toMap(),
-      'terminais': atualizado.map((k, v) => MapEntry(k, v.toMap())),
-      'fechadasCount': atualizado.values.where((s) => !s.aberto).length,
-    });
   });
 
   /// Forca o fechamento de TODAS as sessoes abertas (desbloqueio de orfaos).

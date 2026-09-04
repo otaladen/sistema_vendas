@@ -22,6 +22,7 @@ class ItemVenda {
     this.promocaoId = 0,
     this.promocaoNomeSnapshot = '',
     this.loteConsumosJson = '',
+    this.precoUnitarioManual = false,
     this.botaForaAplicado = false,
     this.percentualBotaForaAplicado = 0,
     this.lojaOrigemMercadoria = '',
@@ -62,6 +63,9 @@ class ItemVenda {
 
   /// JSON: [{"loteId":1,"numeroLote":"001","dataValidade":"...","qtd":5}]
   String loteConsumosJson;
+
+  /// Preco digitado/autorizado no PDV (Ctrl+P). Nao reaplicar catalogo/promo ao fechar.
+  bool precoUnitarioManual;
 
   /// Desconto Bota-Fora aplicado automaticamente no PDV.
   bool botaForaAplicado;

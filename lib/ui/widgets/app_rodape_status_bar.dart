@@ -58,6 +58,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
       _atualizarRelogio();
     });
     SyncPresenceHub.instance.addListener(_onPresencaHub);
+    LanApiServerHub.instance.addListener(_onServidorHub);
     LanApiEventHub.instance.addListener(_onApiHub);
     _terminalLeve = LanApiEventHub.instance.modoTerminal;
     _aplicarHubSeDisponivel();
@@ -68,6 +69,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
   @override
   void dispose() {
     SyncPresenceHub.instance.removeListener(_onPresencaHub);
+    LanApiServerHub.instance.removeListener(_onServidorHub);
     LanApiEventHub.instance.removeListener(_onApiHub);
     _relogioTimer?.cancel();
     _presencaTimer?.cancel();
@@ -76,12 +78,21 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
 
   void _onPresencaHub() {
     if (!mounted) return;
+    if (_modoServidor && LanApiServerHub.instance.ativo) {
+      _aplicarPresencaServidorLocal();
+      return;
+    }
     final hub = SyncPresenceHub.instance;
     setState(() {
       _consultandoPresenca = false;
       _estacoesOnline = hub.activeCount;
       _rotulosEstacoes = List<String>.from(hub.labels);
     });
+  }
+
+  void _onServidorHub() {
+    if (!mounted || !_modoServidor) return;
+    _aplicarPresencaServidorLocal();
   }
 
   void _onApiHub() {
@@ -149,7 +160,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
       // PC1: conta terminais no WebSocket da API :8788.
       _aplicarPresencaServidorLocal();
       _presencaTimer = Timer.periodic(
-        const Duration(seconds: 30),
+        const Duration(seconds: 5),
         (_) => _aplicarPresencaServidorLocal(),
       );
       return;
@@ -168,14 +179,15 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
     if (!mounted) return;
     final hubApi = LanApiServerHub.instance;
     if (!hubApi.ativo) {
-      // API ainda nao subiu: tenta hub de sync (celulares) como fallback.
-      unawaited(_atualizarPresenca());
+      setState(() {
+        _consultandoPresenca = true;
+      });
       return;
     }
     hubApi.publicarPresencaNoHub();
     final snap = hubApi.presencaSnapshot;
     if (snap == null) return;
-    final n = (snap['activeCount'] as num?)?.toInt() ?? 0;
+    final n = (snap['activeCount'] as num?)?.toInt() ?? hubApi.terminaisWsAtivos;
     final raw = snap['stations'];
     final rotulos = <String>[];
     if (raw is List) {
@@ -195,6 +207,12 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
       _estacoesOnline = n;
       _rotulosEstacoes = rotulos;
     });
+  }
+
+  /// Ex.: "0 terminais conectados", "1 terminal conectado".
+  static String _textoTerminaisConectados(int n) {
+    if (n == 1) return '1 terminal conectado';
+    return '$n terminais conectados';
   }
 
   Future<void> _atualizarPresenca() async {
@@ -250,10 +268,10 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
     if (_modoServidor) {
       if (_rotulosEstacoes.isEmpty) {
         return _estacoesOnline == null
-            ? 'API de terminais'
-            : 'Servidor · ${_estacoesOnline!} conectado(s) na API (8788)';
+            ? 'API de terminais (porta 8788)'
+            : 'Servidor · ${_textoTerminaisConectados(_estacoesOnline!)} na API (8788)';
       }
-      return '${_rotulosEstacoes.length} conectado(s) na API:\n'
+      return '${_textoTerminaisConectados(_rotulosEstacoes.length)} na API:\n'
           '${_rotulosEstacoes.map((l) => '• $l').join('\n')}';
     }
     final offline = _estacoesOnline == null && !_consultandoPresenca;
@@ -308,7 +326,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
           ? 'Servidor · …'
           : offline
               ? 'Servidor · API offline'
-              : 'Servidor · ${_estacoesOnline!} conectado(s)';
+              : 'Servidor · ${_textoTerminaisConectados(_estacoesOnline!)}';
       return Tooltip(
         message: _syncTooltip,
         child: Row(
@@ -383,7 +401,9 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
             ? 'off'
             : _estacoesOnline == null
                 ? '…'
-                : '${_estacoesOnline!} conectado(s)';
+                : _modoServidor
+                    ? _textoTerminaisConectados(_estacoesOnline!)
+                    : '${_estacoesOnline!} conectado(s)';
 
     return Tooltip(
       message: _syncTooltip,

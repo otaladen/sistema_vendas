@@ -100,6 +100,7 @@ class LanApiServer {
       SyncPresenceHub.instance.aplicarMap(snap);
     } catch (_) {}
     _broadcastJson({'type': 'presence', ...snap});
+    LanApiServerHub.instance.avisarMudanca();
   }
 
   Future<void> iniciar({int porta = 8788}) async {
@@ -184,6 +185,7 @@ class LanApiServer {
     );
 
     final handler = Pipeline()
+        .addMiddleware(_catchErrors())
         .addMiddleware(_cors())
         .addMiddleware(_auth())
         .addHandler(router.call);
@@ -292,6 +294,29 @@ class LanApiServer {
     }
   }
 
+  /// Captura excecoes nao tratadas nas rotas e devolve JSON 500 limpo
+  /// (sem pilha interna no corpo da resposta).
+  Middleware _catchErrors() {
+    return (inner) {
+      return (request) async {
+        try {
+          return await inner(request);
+        } catch (e, st) {
+          debugPrint('LanApiServer erro nao tratado [${request.method} '
+              '${request.requestedUri.path}]: $e\n$st');
+          return lanApiJson(
+            {
+              'ok': false,
+              'error': 'Erro interno do servidor',
+              'code': 'internal_error',
+            },
+            status: 500,
+          );
+        }
+      };
+    };
+  }
+
   Middleware _cors() {
     return (inner) {
       return (request) async {
@@ -354,7 +379,7 @@ class LanApiServer {
 }
 
 /// Singleton de processo para o shell do servidor iniciar/parar a API.
-class LanApiServerHub {
+class LanApiServerHub extends ChangeNotifier {
   LanApiServerHub._();
   static final instance = LanApiServerHub._();
 
@@ -391,6 +416,11 @@ class LanApiServerHub {
     SyncPresenceHub.instance.aplicarMap(snap);
   }
 
+  /// Rodape / config: API subiu, parou ou mudou a lista de terminais WS.
+  void avisarMudanca() {
+    notifyListeners();
+  }
+
   Future<void> iniciar(LanApiServer server, {required int porta}) async {
     if (_server?.emExecucao == true && _server?.portaAtiva == porta) {
       return;
@@ -399,11 +429,13 @@ class LanApiServerHub {
     _server = server;
     await server.iniciar(porta: porta);
     publicarPresencaNoHub();
+    notifyListeners();
   }
 
   Future<void> parar() async {
     await _server?.parar();
     _server = null;
+    notifyListeners();
   }
 
   void notificar(String entity, {List<int>? ids}) {
@@ -419,6 +451,7 @@ class LanApiServerHub {
         e == 'conta_pagar' ||
         e == 'financeiro' ||
         e == 'recado_loja' ||
+        e == 'lista_preco_externa' ||
         e == 'nfe_importada') {
       SyncRefreshHub.instance.notificarDadosAtualizados();
     }

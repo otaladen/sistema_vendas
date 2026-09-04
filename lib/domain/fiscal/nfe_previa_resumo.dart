@@ -1,4 +1,5 @@
 import '../../config/fiscal_config.dart';
+import '../../services/fiscal_config_store.dart';
 
 /// Resumo legivel do payload NF-e para conferencia antes do envio.
 class NfePreviaResumo {
@@ -86,8 +87,9 @@ abstract final class NfePreviaResumoBuilder {
 
     return NfePreviaResumo(
       referencia: referencia,
-      ambiente: FiscalConfig.ambiente,
-      emitenteCnpj: (payload['cnpj_emitente'] ?? FiscalConfig.cnpjEmitente)
+      ambiente: FiscalConfigStore.efetivo.ambiente,
+      emitenteCnpj: (payload['cnpj_emitente'] ??
+              FiscalConfigStore.efetivo.cnpjEmitente)
           .toString(),
       destinatarioNome: (payload['nome_destinatario'] ?? '').toString(),
       destinatarioDocumento: doc,

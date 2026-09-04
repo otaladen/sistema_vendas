@@ -1,5 +1,7 @@
 import '../model/item_venda.dart';
 import '../model/venda.dart';
+import 'produto_embalagem.dart';
+import 'quantidade_venda_util.dart';
 
 /// Tipos de entrega por item e na venda (inclui [tipoMisto] no cabecalho).
 class EntregaVendaHelper {
@@ -92,6 +94,27 @@ class EntregaVendaHelper {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Retirada formal de patio em futura/carreto — impede cancelamento simples.
+  ///
+  /// Em "leva agora", [ItemVenda.quantidadeJaRetirada] e preenchido na baixa do
+  /// cupom/finalizacao; isso **nao** bloqueia cancelar NFC-e/venda (ha estorno).
+  static bool vendaTemRetiradaPatioQueBloqueiaCancelamento(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    try {
+      final lista = itens ?? List<ItemVenda>.from(venda.itens);
+      for (final i in lista) {
+        if (i.quantidadeJaRetirada <= 0) continue;
+        final tipo = tipoEfetivoItem(i);
+        if (tipo == tipoRetiradaFutura || tipo == tipoEntregaLoja) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
   }
 
   /// Orcamentos antigos (tipo so no cabecalho): replica no item antes de finalizar.
@@ -277,6 +300,10 @@ class EntregaVendaHelper {
   }
 
   /// Mesma regra da tela Entregas / romaneio consolidado.
+  ///
+  /// Retorna o valor **persistido** (pode estar em milésimos se o produto for
+  /// fracionado). Para UI/valor monetario use [quantidadeRomaneioCargaExibicao]
+  /// e [textoQuantidadeRomaneioCarga].
   static int quantidadeRomaneioCarga(
     Venda venda,
     ItemVenda item, {
@@ -293,6 +320,70 @@ class EntregaVendaHelper {
       );
     }
     return item.quantidadeParaExibicaoEntrega(false);
+  }
+
+  /// Quantidade do romaneio na unidade de venda (2; 18,9; 0,5) — nao milésimos.
+  static double quantidadeRomaneioCargaExibicao(
+    Venda venda,
+    ItemVenda item, {
+    List<ItemVenda>? itens,
+  }) {
+    final raw = quantidadeRomaneioCarga(venda, item, itens: itens);
+    if (raw <= 0) return 0;
+    return ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+      produto: item.produtoOuNull,
+      quantidadeArmazenada: raw,
+    );
+  }
+
+  /// Texto da quantidade para Entregas / "Itens do pedido" (igual listagem).
+  static String textoQuantidadeRomaneioCarga(
+    Venda venda,
+    ItemVenda item, {
+    List<ItemVenda>? itens,
+  }) {
+    final raw = quantidadeRomaneioCarga(venda, item, itens: itens);
+    if (raw <= 0) return '0';
+    return ProdutoEmbalagem.textoQuantidadeArmazenada(
+      produto: item.produtoOuNull,
+      quantidadeArmazenada: raw,
+    );
+  }
+
+  /// Subtotal da linha na carga (qtd de exibicao × preco unitario).
+  static double subtotalRomaneioCarga(
+    Venda venda,
+    ItemVenda item, {
+    List<ItemVenda>? itens,
+  }) {
+    return quantidadeRomaneioCargaExibicao(venda, item, itens: itens) *
+        item.precoUnitario;
+  }
+
+  /// True se [quantidadeArmazenada] desta linha usa escala milésimos.
+  static bool quantidadeRomaneioUsaEscalaFracionada(ItemVenda item) {
+    final p = item.produtoOuNull;
+    if (p == null) return false;
+    final raw = item.quantidade;
+    if (raw <= 0) return false;
+    return ProdutoEmbalagem.leituraUsaEscalaFracionada(p, raw) ||
+        ProdutoEmbalagem.estoqueUsaEscalaFracionada(p);
+  }
+
+  /// Formata soma persistida do romaneio consolidado para exibicao.
+  static String formatarQuantidadeRomaneioConsolidada(
+    int quantidadeArmazenadaTotal, {
+    required bool escalaFracionada,
+  }) {
+    if (quantidadeArmazenadaTotal <= 0) return '0';
+    final q = QuantidadeVendaUtil.valorExibicao(
+      quantidadeArmazenadaTotal,
+      fracionada: escalaFracionada,
+    );
+    return QuantidadeVendaUtil.formatarExibicao(
+      q,
+      fracionada: escalaFracionada,
+    );
   }
 
   /// Escopo persistido da conferencia (`g:grupo` ou `s:vendaId`).

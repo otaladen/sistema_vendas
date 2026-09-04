@@ -704,6 +704,7 @@ class LanApiClient {
         precoCustoUnitario: (e['precoCustoUnitario'] as num?)?.toDouble() ?? 0,
         promocaoId: (e['promocaoId'] as num?)?.toInt() ?? 0,
         promocaoNomeSnapshot: (e['promocaoNomeSnapshot'] ?? '').toString(),
+        precoUnitarioManual: e['precoUnitarioManual'] == true,
         lojaOrigemMercadoria: (e['lojaOrigemMercadoria'] ?? '').toString(),
         buscarNaLojaStatus: (e['buscarNaLojaStatus'] ?? '').toString(),
         quantidadeBuscarNaLoja:
@@ -2243,6 +2244,53 @@ class LanApiClient {
 
   Future<Map<String, dynamic>> salvarListaCompra(Map<String, dynamic> body) =>
       _postJson('/api/lista-compra', body);
+
+  Future<List<Map<String, dynamic>>> listarListasPrecoExternas() async {
+    final m = await _getJson('/api/listas-preco-externas');
+    final list = m['items'];
+    if (list is! List) return [];
+    return list
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>?> obterListaPrecoExterna(String id) async {
+    final chave = id.trim();
+    if (chave.isEmpty) return null;
+    try {
+      final m = await _getJson(
+        '/api/listas-preco-externas/$chave',
+        aceitarErroJson: true,
+      );
+      final item = m['item'];
+      if (m['ok'] == true && item is Map) {
+        return Map<String, dynamic>.from(item);
+      }
+      return null;
+    } on LanApiException {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> importarListaPrecoExternaPdf({
+    required List<int> bytes,
+    required String arquivoOrigem,
+  }) =>
+      _postJson(
+        '/api/listas-preco-externas/import',
+        {
+          'contentBase64': base64Encode(bytes),
+          'arquivoOrigem': arquivoOrigem,
+        },
+        timeout: const Duration(seconds: 120),
+      );
+
+  Future<void> excluirListaPrecoExterna(String id) async {
+    final chave = id.trim();
+    if (chave.isEmpty) return;
+    await _postJson('/api/listas-preco-externas/$chave/excluir', {});
+  }
 
   Future<List<Map<String, dynamic>>> listarRecados() async {
     final m = await _getJson('/api/recados');

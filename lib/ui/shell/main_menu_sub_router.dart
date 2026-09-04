@@ -26,6 +26,7 @@ import '../fiscal/relatorio_fiscal_mensal_page.dart';
 import '../fornecedores_page.dart';
 import '../funcionarios_page.dart';
 import '../kits_orcamento_page.dart';
+import '../lista_preco_externa_page.dart';
 import '../listagem_vendas_page.dart';
 import '../motoristas_page.dart';
 import '../nfe_importadas_page.dart';
@@ -81,6 +82,8 @@ class MainMenuSubRouter {
           printService: deps.printService,
           usuarioLogado: u,
         );
+      case MainMenuSubDestino.cadastrosListaPrecoExterna:
+        return const ListaPrecoExternaPage();
       case MainMenuSubDestino.cadastrosKitsOrcamento:
         final kitRepo =
             deps.kitOrcamentoRepository ??

@@ -284,6 +284,7 @@ class SyncEntityCodec {
         'promocaoId': i.promocaoId,
         'promocaoNomeSnapshot': i.promocaoNomeSnapshot,
         'loteConsumosJson': i.loteConsumosJson,
+        'precoUnitarioManual': i.precoUnitarioManual,
         'botaForaAplicado': i.botaForaAplicado,
         'percentualBotaForaAplicado': i.percentualBotaForaAplicado,
         'lojaOrigemMercadoria': i.lojaOrigemMercadoria,
@@ -474,6 +475,7 @@ class SyncEntityCodec {
       promocaoId: (m['promocaoId'] as num?)?.toInt() ?? 0,
       promocaoNomeSnapshot: (m['promocaoNomeSnapshot'] ?? '').toString(),
       loteConsumosJson: (m['loteConsumosJson'] ?? '').toString(),
+      precoUnitarioManual: m['precoUnitarioManual'] == true,
       botaForaAplicado: m['botaForaAplicado'] == true,
       percentualBotaForaAplicado:
           (m['percentualBotaForaAplicado'] as num?)?.toDouble() ?? 0,

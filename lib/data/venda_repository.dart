@@ -253,6 +253,7 @@ class ItemVendaInput {
     this.tipoEntregaItem = EntregaVendaHelper.tipoRetirada,
     this.promocaoId = 0,
     this.promocaoNomeSnapshot = '',
+    this.precoUnitarioManual = false,
     this.botaForaAplicado = false,
     this.percentualBotaForaAplicado = 0,
   });
@@ -264,6 +265,7 @@ class ItemVendaInput {
   final String tipoEntregaItem;
   final int promocaoId;
   final String promocaoNomeSnapshot;
+  final bool precoUnitarioManual;
   final bool botaForaAplicado;
   final double percentualBotaForaAplicado;
 }
@@ -293,6 +295,7 @@ ItemVenda _criarItemVendaFromInput(
     tipoEntregaItem: EntregaVendaHelper.normalizarTipoItem(input.tipoEntregaItem),
     promocaoId: input.promocaoId,
     promocaoNomeSnapshot: input.promocaoNomeSnapshot,
+    precoUnitarioManual: input.precoUnitarioManual,
     botaForaAplicado: input.botaForaAplicado,
     percentualBotaForaAplicado: input.percentualBotaForaAplicado,
   );
@@ -2691,6 +2694,7 @@ class VendaRepository {
   }
 
   /// Preco promocional na data de fechamento; mantem desconto implicito ja aplicado.
+  /// Linhas com [ItemVenda.precoUnitarioManual] (Ctrl+P no PDV) nao sao sobrescritas.
   void _reaplicarPromocoesAoFecharOrcamento(
     Venda venda,
     DateTime dataFechamento, {
@@ -2705,6 +2709,13 @@ class VendaRepository {
     for (final item in lista) {
       final produto = item.produto.target;
       if (produto == null) continue;
+
+      if (item.precoUnitarioManual) {
+        somaItens += item.subtotal;
+        custo += item.subtotalCusto;
+        continue;
+      }
+
       final tipoLista = item.precoTipo == PromocaoCadastro.precoTipoPromo
           ? 'preco1'
           : item.precoTipo;
@@ -2728,6 +2739,17 @@ class VendaRepository {
           );
         }
       }
+
+      // Legado: orcamento salvo antes da flag — preco divergente sem promo = manual.
+      final divergente = (item.precoUnitario - precoUnit).abs() > 0.009;
+      if (divergente && item.promocaoId == 0 && r.promocaoId == 0) {
+        item.precoUnitarioManual = true;
+        _db.itemVendaBox.put(item);
+        somaItens += item.subtotal;
+        custo += item.subtotalCusto;
+        continue;
+      }
+
       item.precoUnitario = precoUnit;
       item.precoTipo = r.precoTipo;
       item.promocaoId = r.promocaoId;
@@ -5675,6 +5697,28 @@ class VendaRepository {
     );
   }
 
+  /// Motivo que impede [cancelarVenda], ou null se puder seguir.
+  /// Use antes do cancelamento fiscal na SEFAZ para evitar nota cancelada e venda viva.
+  String? mensagemBloqueioCancelamentoVenda(int vendaId) {
+    final venda = _db.vendaBox.get(vendaId);
+    if (venda == null) return 'Venda $vendaId nao encontrada.';
+    if (venda.cancelada) return 'Venda $vendaId ja esta cancelada.';
+    if (venda.status == 'orcamento') return null;
+    final itens = _itensDaVendaGarantidos(venda);
+    if (EntregaVendaHelper.vendaTemRetiradaPatioQueBloqueiaCancelamento(
+      venda,
+      itens: itens,
+    )) {
+      return 'Nao e possivel cancelar: ja houve retirada de mercadoria '
+          '(retirada futura/carreto) nesta venda. Use devolucao/troca.';
+    }
+    if (itens.any((i) => i.quantidadeDevolvida > 0)) {
+      return 'Nao e possivel cancelar: existem devolucoes/trocas registradas '
+          'nesta venda.';
+    }
+    return null;
+  }
+
   void cancelarVenda(
     int vendaId, {
     String motivo = '',
@@ -5700,15 +5744,22 @@ class VendaRepository {
         throw StateError('Venda $vendaId ja esta cancelada.');
       }
 
+      final itens = _itensDaVendaGarantidos(venda);
+      // "Leva agora" marca quantidadeJaRetirada na baixa do cupom — isso NAO
+      // bloqueia cancelar (ha estorno). So bloqueia retirada formal de patio.
       if (venda.status != 'orcamento' &&
-          venda.itens.any((i) => i.quantidadeJaRetirada > 0)) {
+          EntregaVendaHelper.vendaTemRetiradaPatioQueBloqueiaCancelamento(
+            venda,
+            itens: itens,
+          )) {
         throw StateError(
-          'Nao e possivel cancelar: ja houve retirada de mercadoria nesta venda.',
+          'Nao e possivel cancelar: ja houve retirada de mercadoria '
+          '(retirada futura/carreto) nesta venda. Use devolucao/troca.',
         );
       }
 
       if (venda.status != 'orcamento' &&
-          venda.itens.any((i) => i.quantidadeDevolvida > 0)) {
+          itens.any((i) => i.quantidadeDevolvida > 0)) {
         throw StateError(
           'Nao e possivel cancelar: existem devolucoes/trocas registradas nesta venda.',
         );

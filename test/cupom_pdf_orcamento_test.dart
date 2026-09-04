@@ -16,6 +16,23 @@ void main() {
     expect(fmt.width, greaterThan(0));
   });
 
+  test('bobina 72mm gera pagina 80mm com margem lateral segura', () {
+    final layout = ConfigLayoutImpressao.padraoOrcamento();
+    expect(layout.larguraPaginaPdfMm, 72);
+    final fmt = CupomPdfLayout.formatoPaginaOrcamentoSalvar(
+      modelo: EmpresaModeloPdf.bobina,
+      layout: layout,
+    );
+    final larguraMm = fmt.width / PdfPageFormat.mm;
+    final margemEsqMm = fmt.marginLeft / PdfPageFormat.mm;
+    expect(larguraMm, closeTo(80, 0.05));
+    expect(margemEsqMm, greaterThanOrEqualTo(4));
+    expect(
+      CupomPdfLayout.larguraUtilConteudoMm(layout),
+      lessThanOrEqualTo(72),
+    );
+  });
+
   test('formatoPaginaOrcamentoSalvar a4 mantem A4', () {
     const layout = ConfigLayoutImpressao();
     final fmt = CupomPdfLayout.formatoPaginaOrcamentoSalvar(

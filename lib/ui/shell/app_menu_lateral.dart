@@ -558,6 +558,8 @@ Color _corSub(BuildContext context, MainMenuSubDestino sub) {
     MainMenuSubDestino.vendasListagem => AppModuloId.listagemVendas,
     MainMenuSubDestino.vendasRelatorios => AppModuloId.relatoriosVendas,
     MainMenuSubDestino.cadastrosProdutos => AppModuloId.produtos,
+    MainMenuSubDestino.cadastrosListaPrecoExterna =>
+      AppModuloId.listaPrecoExterna,
     MainMenuSubDestino.cadastrosKitsOrcamento => AppModuloId.kitsOrcamento,
     MainMenuSubDestino.cadastrosPromocoes => AppModuloId.promocoes,
     MainMenuSubDestino.cadastrosMotoristas => AppModuloId.motoristasCadastro,

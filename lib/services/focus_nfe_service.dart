@@ -17,6 +17,8 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
+import '../domain/fiscal/endereco_fiscal_ibge_resolver.dart';
+import '../domain/fiscal/fiscal_texto_schema.dart';
 import '../domain/fiscal/focus_documento_fiscal_url.dart';
 import '../domain/fiscal/icms_focus_item_helper.dart';
 import '../domain/fiscal/ibscbs_focus_item_helper.dart';
@@ -316,21 +318,22 @@ class FocusNfeDestinatarioNfe {
       );
     }
     final ie = cliente.inscricaoEstadual.replaceAll(RegExp(r'\D'), '');
+    final numeroRaw = end.numero.trim().isEmpty ? 'S/N' : end.numero.trim();
     return FocusNfeDestinatarioNfe(
-      nome: cliente.nomeRazao.trim(),
+      nome: FiscalTextoSchema.nome(cliente.nomeRazao),
       documento: doc,
       inscricaoEstadual: ie,
       indicadorInscricaoEstadual: _indicadorIeCliente(cliente),
-      logradouro: end.endereco.trim(),
-      numero: end.numero.trim().isEmpty ? 'S/N' : end.numero.trim(),
-      bairro: end.bairro.trim(),
-      municipio: end.cidade.trim(),
+      logradouro: FiscalTextoSchema.logradouro(end.endereco),
+      numero: FiscalTextoSchema.numero(numeroRaw),
+      bairro: FiscalTextoSchema.bairro(end.bairro),
+      municipio: FiscalTextoSchema.municipio(end.cidade),
       codigoMunicipioIbge: codigoMunicipioIbge.replaceAll(RegExp(r'\D'), ''),
       uf: end.uf.trim().toUpperCase(),
       cep: end.cep.replaceAll(RegExp(r'\D'), ''),
       telefone: cliente.telefone.replaceAll(RegExp(r'\D'), ''),
       email: cliente.email.trim(),
-      complemento: end.referencia.trim(),
+      complemento: FiscalTextoSchema.complemento(end.referencia),
     );
   }
 
@@ -349,23 +352,47 @@ class FocusNfeDestinatarioNfe {
         '(logradouro, bairro, municipio, UF e cMun IBGE).',
       );
     }
+    final nomeEmit = emit.razaoSocial.trim().isNotEmpty
+        ? emit.razaoSocial.trim()
+        : emit.nomeFantasia.trim();
+    final numeroRaw =
+        emit.numero.trim().isEmpty ? 'S/N' : emit.numero.trim();
     return FocusNfeDestinatarioNfe(
-      nome: emit.razaoSocial.trim().isNotEmpty
-          ? emit.razaoSocial.trim()
-          : emit.nomeFantasia.trim(),
+      nome: FiscalTextoSchema.nome(nomeEmit),
       documento: doc,
       inscricaoEstadual: ie,
       indicadorInscricaoEstadual: ie.isNotEmpty ? '1' : '9',
-      logradouro: emit.logradouro.trim(),
-      numero: emit.numero.trim().isEmpty ? 'S/N' : emit.numero.trim(),
-      bairro: emit.bairro.trim(),
-      municipio: emit.municipio.trim(),
+      logradouro: FiscalTextoSchema.logradouro(emit.logradouro),
+      numero: FiscalTextoSchema.numero(numeroRaw),
+      bairro: FiscalTextoSchema.bairro(emit.bairro),
+      municipio: FiscalTextoSchema.municipio(emit.municipio),
       codigoMunicipioIbge: ibge,
       uf: emit.uf.trim().toUpperCase(),
       cep: emit.cep.replaceAll(RegExp(r'\D'), ''),
       telefone: emit.telefone.replaceAll(RegExp(r'\D'), ''),
       email: emit.email.trim(),
-      complemento: emit.complemento.trim(),
+      complemento: FiscalTextoSchema.complemento(emit.complemento),
+    );
+  }
+
+  /// Copia com textos cortados aos limites do schema (envio Focus/SEFAZ).
+  FocusNfeDestinatarioNfe normalizadoParaSchema() {
+    final numeroRaw = numero.trim().isEmpty ? 'S/N' : numero.trim();
+    return FocusNfeDestinatarioNfe(
+      nome: FiscalTextoSchema.nome(nome),
+      documento: documento,
+      inscricaoEstadual: inscricaoEstadual,
+      indicadorInscricaoEstadual: indicadorInscricaoEstadual,
+      logradouro: FiscalTextoSchema.logradouro(logradouro),
+      numero: FiscalTextoSchema.numero(numeroRaw),
+      bairro: FiscalTextoSchema.bairro(bairro),
+      municipio: FiscalTextoSchema.municipio(municipio),
+      codigoMunicipioIbge: codigoMunicipioIbge,
+      uf: uf,
+      cep: cep,
+      telefone: telefone,
+      email: email,
+      complemento: FiscalTextoSchema.complemento(complemento),
     );
   }
 
@@ -714,12 +741,32 @@ class FocusNfeService {
         ? FocusNfeEmissaoSefaz.tipoEmissaoContingenciaOfflineNfce
         : FocusNfeEmissaoSefaz.tipoEmissaoNormal;
 
+    EnderecoCliente? enderecoEntrega;
+    String? codigoMunicipioIbge;
+    var ufDestinoEfetiva = ufDestino;
+    if (entregaDomicilio) {
+      final prep = await _prepararEnderecoEntregaNfce(
+        venda: venda,
+        cliente: cliente,
+      );
+      if (prep.erro != null) {
+        return FocusNfeEmissaoResultado.erro(prep.erro!);
+      }
+      enderecoEntrega = prep.endereco;
+      codigoMunicipioIbge = prep.codigoMunicipioIbge;
+      if ((enderecoEntrega?.uf ?? '').trim().length == 2) {
+        ufDestinoEfetiva = enderecoEntrega!.uf.trim().toUpperCase();
+      }
+    }
+
     final emissaoBase = DateTime.now();
     var payload = montarPayloadNfce(
       venda,
       cliente: cliente,
-      ufDestino: ufDestino,
+      ufDestino: ufDestinoEfetiva,
       entregaDomicilio: entregaDomicilio,
+      enderecoEntrega: enderecoEntrega,
+      codigoMunicipioIbge: codigoMunicipioIbge,
       tipoEmissao: tipoEmissao,
       formaEmissao: formaUrl,
       dataEmissao: emissaoBase,
@@ -738,8 +785,10 @@ class FocusNfeService {
       payload = montarPayloadNfce(
         venda,
         cliente: cliente,
-        ufDestino: ufDestino,
+        ufDestino: ufDestinoEfetiva,
         entregaDomicilio: entregaDomicilio,
+        enderecoEntrega: enderecoEntrega,
+        codigoMunicipioIbge: codigoMunicipioIbge,
         tipoEmissao: FocusNfeEmissaoSefaz.tipoEmissaoContingenciaOfflineNfce,
         formaEmissao: FocusNfeFormaEmissaoUrl.contingenciaOfflineNfce,
         dataEmissao: DateTime.now(),
@@ -1448,6 +1497,8 @@ class FocusNfeService {
     Cliente? cliente,
     String ufDestino = FiscalConfig.ufEmitente,
     bool entregaDomicilio = false,
+    EnderecoCliente? enderecoEntrega,
+    String? codigoMunicipioIbge,
     String tipoEmissao = FocusNfeEmissaoSefaz.tipoEmissaoNormal,
     FocusNfeFormaEmissaoUrl formaEmissao = FocusNfeFormaEmissaoUrl.normal,
     DateTime? dataEmissao,
@@ -1465,13 +1516,34 @@ class FocusNfeService {
     }
 
     final valorProdutos = _somaValorBrutoItens(itensPayload);
-    final desconto = venda.descontoImplicitoTotal;
+    // SEFAZ rejeicao 537: vDesc do total deve = soma dos vDesc dos itens.
+    // Desconto do PDV/caixa e implicito na venda; rateia nos itens Focus.
+    // total<=0: venda incompleta nos testes/rascunho — nao tratar bruto como desconto.
+    final descontoVenda =
+        venda.total > 0.009 ? venda.descontoImplicitoTotal : 0.0;
+    _aplicarDescontoRateadoNosItens(itensPayload, descontoVenda);
+    final desconto = _somaValorDescontoItens(itensPayload);
     final frete = venda.valorFrete;
     final valorTotal = (valorProdutos + frete - desconto)
         .clamp(0, double.infinity)
         .toDouble();
 
     final docDest = _documentoDestinatario(cliente);
+    final endEntrega = enderecoEntrega ??
+        (cliente == null ? null : escolherEnderecoEntregaNfce(cliente, venda));
+    final ufDestEfetiva = (endEntrega?.uf.trim().isNotEmpty == true)
+        ? endEntrega!.uf.trim().toUpperCase()
+        : ufDestino.trim().toUpperCase();
+
+    if (entregaDomicilio) {
+      _validarEntregaDomicilioNfce(
+        cliente: cliente,
+        documento: docDest,
+        endereco: endEntrega,
+        codigoMunicipioIbge: codigoMunicipioIbge,
+      );
+    }
+
     final contingenciaOffline =
         tipoEmissao == FocusNfeEmissaoSefaz.tipoEmissaoContingenciaOfflineNfce;
     final dataEmissaoIso = dataEmissaoFocus(
@@ -1488,11 +1560,15 @@ class FocusNfeService {
       'natureza_operacao': _config.naturezaOperacaoNfce,
       'data_emissao': dataEmissaoIso,
       'tipo_documento': '1',
-      'local_destino': _localDestino(ufDestino),
+      'local_destino': _localDestino(
+        ufDestEfetiva,
+        ufDestinatario: ufDestEfetiva,
+      ),
       'finalidade_emissao': '1',
       'consumidor_final': '1',
       'presenca_comprador': entregaDomicilio ? '4' : '1',
-      'modalidade_frete': '9',
+      // Entrega a domicilio: frete por conta do emitente (loja/carreto).
+      'modalidade_frete': entregaDomicilio ? '0' : '9',
       'valor_produtos': _formatarDecimal(valorProdutos),
       'valor_desconto': _formatarDecimal(desconto),
       'valor_frete': _formatarDecimal(frete),
@@ -1514,11 +1590,20 @@ class FocusNfeService {
       } else if (docDest.length == 14) {
         payload['cnpj_destinatario'] = docDest;
       }
-      final nome = cliente?.nomeRazao.trim() ?? '';
+      final nome = FiscalTextoSchema.nome(cliente?.nomeRazao ?? '');
       if (nome.isNotEmpty) {
         payload['nome_destinatario'] = nome;
       }
       payload['indicador_inscricao_estadual_destinatario'] = '9';
+    }
+
+    if (entregaDomicilio && endEntrega != null) {
+      payload.addAll(
+        _camposEnderecoDestinatarioNfce(
+          endEntrega,
+          codigoMunicipioIbge: codigoMunicipioIbge,
+        ),
+      );
     }
 
     return payload;
@@ -1533,6 +1618,7 @@ class FocusNfeService {
     FocusNfeDadosLogistica? logistica,
     String tipoEmissao = FocusNfeEmissaoSefaz.tipoEmissaoNormal,
   }) {
+    destinatario = destinatario.normalizadoParaSchema();
     destinatario.validar();
 
     final ufDestino = destinatario.uf.trim().toUpperCase();
@@ -1551,7 +1637,11 @@ class FocusNfeService {
     }
 
     final valorProdutos = _somaValorBrutoItens(itens);
-    final desconto = venda.descontoImplicitoTotal;
+    // Mesma regra da NFC-e (rejeicao 537): desconto no total e nos itens.
+    final descontoVenda =
+        venda.total > 0.009 ? venda.descontoImplicitoTotal : 0.0;
+    _aplicarDescontoRateadoNosItens(itens, descontoVenda);
+    final desconto = _somaValorDescontoItens(itens);
     final frete = venda.valorFrete;
     final valorTotal = (valorProdutos + frete - desconto)
         .clamp(0, double.infinity)
@@ -1724,6 +1814,7 @@ class FocusNfeService {
     required List<FocusNfeItemDevolucao> itensDevolucao,
     String motivo = '',
   }) {
+    destinatario = destinatario.normalizadoParaSchema();
     destinatario.validar();
 
     final ufDestino = destinatario.uf.trim().toUpperCase();
@@ -1824,6 +1915,7 @@ class FocusNfeService {
     required List<FocusNfeItemDevolucao> itensDevolucao,
     String motivo = '',
   }) {
+    destinatario = destinatario.normalizadoParaSchema();
     destinatario.validar();
 
     final ufDestino = destinatario.uf.trim().toUpperCase();
@@ -2526,6 +2618,155 @@ class FocusNfeService {
     return null;
   }
 
+  /// Escolhe o endereco do cadastro que melhor casa com [Venda.enderecoEntrega].
+  static EnderecoCliente? escolherEnderecoEntregaNfce(
+    Cliente cliente,
+    Venda venda,
+  ) {
+    final lista = cliente.listarEnderecos();
+    final texto = venda.enderecoEntrega.trim().toLowerCase();
+    if (texto.isNotEmpty && lista.isNotEmpty) {
+      for (final e in lista) {
+        final resumo = e.resumo().trim().toLowerCase();
+        if (resumo.isNotEmpty &&
+            (texto.contains(resumo) || resumo.contains(texto))) {
+          return e;
+        }
+        final rua = e.endereco.trim().toLowerCase();
+        if (rua.length >= 3 && texto.contains(rua)) return e;
+      }
+    }
+    return cliente.enderecoPadraoEntrega();
+  }
+
+  Future<({String? erro, EnderecoCliente? endereco, String? codigoMunicipioIbge})>
+      _prepararEnderecoEntregaNfce({
+    required Venda venda,
+    Cliente? cliente,
+  }) async {
+    if (cliente == null) {
+      return (
+        erro:
+            'NFC-e de entrega a domicilio exige cliente identificado '
+            'com CPF/CNPJ e endereco completo no cadastro.',
+        endereco: null,
+        codigoMunicipioIbge: null,
+      );
+    }
+    final doc = _documentoDestinatario(cliente);
+    if (doc == null) {
+      return (
+        erro:
+            'NFC-e de entrega a domicilio exige CPF ou CNPJ do cliente. '
+            'Atualize o cadastro e tente reemitir.',
+        endereco: null,
+        codigoMunicipioIbge: null,
+      );
+    }
+    final preferido = escolherEnderecoEntregaNfce(cliente, venda);
+    final resolvido = await EnderecoFiscalIbgeResolver.resolverParaCliente(
+      cliente,
+      enderecoPreferido: preferido,
+    );
+    if (!resolvido.sucesso || resolvido.endereco == null) {
+      return (
+        erro:
+            'NFC-e de entrega a domicilio: ${resolvido.mensagem} '
+            'Informe CEP, logradouro, numero, bairro, cidade e UF no cadastro '
+            'do cliente e tente reemitir.',
+        endereco: null,
+        codigoMunicipioIbge: null,
+      );
+    }
+    final faltando = _faltasEnderecoEntregaNfce(
+      resolvido.endereco!,
+      codigoMunicipioIbge: resolvido.codigoIbge,
+    );
+    if (faltando.isNotEmpty) {
+      return (
+        erro:
+            'NFC-e de entrega a domicilio sem endereco completo do destinatario '
+            '(faltando: ${faltando.join(', ')}). Atualize o cadastro do cliente.',
+        endereco: null,
+        codigoMunicipioIbge: null,
+      );
+    }
+    return (
+      erro: null,
+      endereco: resolvido.endereco,
+      codigoMunicipioIbge: resolvido.codigoIbge,
+    );
+  }
+
+  static void _validarEntregaDomicilioNfce({
+    required Cliente? cliente,
+    required String? documento,
+    required EnderecoCliente? endereco,
+    String? codigoMunicipioIbge,
+  }) {
+    if (cliente == null || documento == null) {
+      throw FocusNfeValidacaoException(
+        'NFC-e de entrega a domicilio exige cliente com CPF/CNPJ.',
+      );
+    }
+    if (endereco == null) {
+      throw FocusNfeValidacaoException(
+        'NFC-e de entrega a domicilio sem o endereco do destinatario. '
+        'Cadastre o endereco do cliente (CEP, rua, numero, bairro, cidade e UF).',
+      );
+    }
+    final faltando = _faltasEnderecoEntregaNfce(
+      endereco,
+      codigoMunicipioIbge: codigoMunicipioIbge,
+    );
+    if (faltando.isNotEmpty) {
+      throw FocusNfeValidacaoException(
+        'NFC-e de entrega a domicilio sem o endereco do destinatario '
+        '(faltando: ${faltando.join(', ')}).',
+      );
+    }
+  }
+
+  static List<String> _faltasEnderecoEntregaNfce(
+    EnderecoCliente endereco, {
+    String? codigoMunicipioIbge,
+  }) {
+    final faltando = <String>[];
+    if (endereco.endereco.trim().length < 2) faltando.add('logradouro');
+    if (endereco.bairro.trim().length < 2) faltando.add('bairro');
+    if (endereco.cidade.trim().length < 2) faltando.add('municipio');
+    if (endereco.uf.trim().length != 2) faltando.add('UF');
+    final cep = endereco.cep.replaceAll(RegExp(r'\D'), '');
+    if (cep.length != 8) faltando.add('CEP');
+    final ibge = (codigoMunicipioIbge ?? endereco.codigoIbge)
+        .replaceAll(RegExp(r'\D'), '');
+    if (ibge.length != 7) faltando.add('codigo IBGE do municipio');
+    return faltando;
+  }
+
+  static Map<String, dynamic> _camposEnderecoDestinatarioNfce(
+    EnderecoCliente endereco, {
+    String? codigoMunicipioIbge,
+  }) {
+    final ibge = (codigoMunicipioIbge ?? endereco.codigoIbge)
+        .replaceAll(RegExp(r'\D'), '');
+    final numeroRaw = endereco.numero.trim().isEmpty
+        ? 'S/N'
+        : endereco.numero.trim();
+    final complemento = FiscalTextoSchema.complemento(endereco.referencia);
+    return {
+      'logradouro_destinatario':
+          FiscalTextoSchema.logradouro(endereco.endereco),
+      'numero_destinatario': FiscalTextoSchema.numero(numeroRaw),
+      if (complemento.isNotEmpty) 'complemento_destinatario': complemento,
+      'bairro_destinatario': FiscalTextoSchema.bairro(endereco.bairro),
+      'municipio_destinatario': FiscalTextoSchema.municipio(endereco.cidade),
+      'codigo_municipio_destinatario': ibge,
+      'uf_destinatario': endereco.uf.trim().toUpperCase(),
+      'cep_destinatario': endereco.cep.replaceAll(RegExp(r'\D'), ''),
+    };
+  }
+
   static String _localDestino(String ufDestino, {String? ufDestinatario}) {
     final emitente = FiscalConfig.ufEmitente.toUpperCase();
     final dest = (ufDestinatario ?? ufDestino).trim().toUpperCase();
@@ -2552,6 +2793,74 @@ class FocusNfeService {
       total += bruto;
     }
     return total;
+  }
+
+  static double _somaValorDescontoItens(List<Map<String, dynamic>> itens) {
+    var total = 0.0;
+    for (final item in itens) {
+      final d =
+          double.tryParse(item['valor_desconto']?.toString() ?? '') ?? 0;
+      total += d;
+    }
+    return (total * 100).roundToDouble() / 100.0;
+  }
+
+  /// Rateia desconto implicito da venda em `valor_desconto` de cada item.
+  ///
+  /// Evita rejeicao SEFAZ 537 (total do desconto difere do somatorio dos itens).
+  /// Centavos residuais ficam no ultimo item com valor_bruto > 0. Recalcula
+  /// IBS/CBS sobre (valor_bruto - valor_desconto).
+  static void _aplicarDescontoRateadoNosItens(
+    List<Map<String, dynamic>> itens,
+    double descontoTotal,
+  ) {
+    if (itens.isEmpty) return;
+    final desc = (descontoTotal * 100).roundToDouble() / 100.0;
+    if (desc <= 0.009) return;
+
+    final brutos = <double>[];
+    var somaBruto = 0.0;
+    for (final item in itens) {
+      final b = double.tryParse(item['valor_bruto']?.toString() ?? '') ?? 0.0;
+      brutos.add(b);
+      somaBruto += b;
+    }
+    if (somaBruto <= 0.0001) return;
+
+    final descEfetivo = desc > somaBruto ? somaBruto : desc;
+    final totalCents = (descEfetivo * 100).round();
+    final alocados = List<int>.filled(itens.length, 0);
+    var somaAlocada = 0;
+    var ultimo = -1;
+    for (var i = 0; i < brutos.length; i++) {
+      if (brutos[i] > 0.0001) ultimo = i;
+    }
+    if (ultimo < 0) return;
+
+    for (var i = 0; i < itens.length; i++) {
+      if (i == ultimo || brutos[i] <= 0.0001) continue;
+      var cents = ((totalCents * brutos[i]) / somaBruto).floor();
+      final maxCents = (brutos[i] * 100).round();
+      if (cents > maxCents) cents = maxCents;
+      if (cents < 0) cents = 0;
+      alocados[i] = cents;
+      somaAlocada += cents;
+    }
+
+    var resto = totalCents - somaAlocada;
+    final maxUltimo = (brutos[ultimo] * 100).round();
+    if (resto > maxUltimo) resto = maxUltimo;
+    if (resto < 0) resto = 0;
+    alocados[ultimo] = resto;
+
+    for (var i = 0; i < itens.length; i++) {
+      if (alocados[i] <= 0) continue;
+      final valorDesc = alocados[i] / 100.0;
+      itens[i]['valor_desconto'] = _formatarDecimal(valorDesc);
+      final base =
+          (brutos[i] - valorDesc).clamp(0.0, double.infinity).toDouble();
+      itens[i].addAll(IbscbsFocusItemHelper.camposItem(baseCalculo: base));
+    }
   }
 
   static String _formatarDecimal(num valor) => valor.toStringAsFixed(2);

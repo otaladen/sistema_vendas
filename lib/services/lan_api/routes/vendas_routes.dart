@@ -87,6 +87,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
           tipoEntregaItem: (m['tipoEntregaItem'] ?? '').toString(),
           promocaoId: (m['promocaoId'] as num?)?.toInt() ?? 0,
           promocaoNomeSnapshot: (m['promocaoNomeSnapshot'] ?? '').toString(),
+          precoUnitarioManual: m['precoUnitarioManual'] == true,
         );
       }).toList();
       final pagamentoMap = Map<String, dynamic>.from(pagamentoRaw);
@@ -175,6 +176,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
           tipoEntregaItem: (m['tipoEntregaItem'] ?? '').toString(),
           promocaoId: (m['promocaoId'] as num?)?.toInt() ?? 0,
           promocaoNomeSnapshot: (m['promocaoNomeSnapshot'] ?? '').toString(),
+          precoUnitarioManual: m['precoUnitarioManual'] == true,
         );
       }).toList();
       final pagamentoMap = Map<String, dynamic>.from(pagamentoRaw);
@@ -354,6 +356,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
               'precoCustoUnitario': i.precoCustoUnitario,
               'promocaoId': i.promocaoId,
               'promocaoNomeSnapshot': i.promocaoNomeSnapshot,
+              'precoUnitarioManual': i.precoUnitarioManual,
               'lojaOrigemMercadoria': i.lojaOrigemMercadoria,
               'buscarNaLojaStatus': i.buscarNaLojaStatus,
               'quantidadeBuscarNaLoja': i.quantidadeBuscarNaLoja,
@@ -558,6 +561,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
           tipoEntregaItem: (m['tipoEntregaItem'] ?? '').toString(),
           promocaoId: (m['promocaoId'] as num?)?.toInt() ?? 0,
           promocaoNomeSnapshot: (m['promocaoNomeSnapshot'] ?? '').toString(),
+          precoUnitarioManual: m['precoUnitarioManual'] == true,
         ),
         permitirVendaSemEstoque: body['permitirVendaSemEstoque'] == true,
       );

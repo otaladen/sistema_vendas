@@ -61,6 +61,7 @@ class EmpresaConfig {
     this.redePortaServidor = 8788,
     this.redeServidorUrl = '',
     this.redeSyncToken = '',
+    // So fica true apos o usuario escolher pasta de destino valida.
     this.backupAutomaticoAtivo = false,
     this.backupAutomaticoPasta = '',
     this.backupAutomaticoIntervaloMinutos = 1440,
@@ -867,9 +868,14 @@ class AppConfigRepository {
       _kBackupAutomaticoIntervaloMinutos,
       config.backupAutomaticoIntervaloMinutos.clamp(15, 10080),
     );
+    // Nunca diminuir o timestamp: um salvarEmpresaConfig com config antiga
+    // (carregada antes do backup) nao pode apagar o ultimo backup e gerar rajada.
+    final ultimoIncoming =
+        config.ultimoBackupAutomaticoMs < 0 ? 0 : config.ultimoBackupAutomaticoMs;
+    final ultimoExistente = prefs.getInt(_kBackupAutomaticoUltimoMs) ?? 0;
     await prefs.setInt(
       _kBackupAutomaticoUltimoMs,
-      config.ultimoBackupAutomaticoMs < 0 ? 0 : config.ultimoBackupAutomaticoMs,
+      ultimoIncoming > ultimoExistente ? ultimoIncoming : ultimoExistente,
     );
     await prefs.setInt(
       _kBackupRetencaoMaxCopias,
@@ -1030,11 +1036,12 @@ class AppConfigRepository {
   }
 
   Future<void> atualizarUltimoBackupAutomaticoMs(int epochMs) async {
+    final ms = epochMs < 0 ? 0 : epochMs;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(
-      _kBackupAutomaticoUltimoMs,
-      epochMs < 0 ? 0 : epochMs,
-    );
+    // Manter as duas chaves alinhadas: carregarEmpresaConfig aplica a chave
+    // local (SyncLocalConfig) por cima da global.
+    await prefs.setInt(_kBackupAutomaticoUltimoMs, ms);
+    await SyncLocalConfig.atualizarUltimoBackupMs(ms);
   }
 
   Future<BackupRegistroManual> carregarRegistroBackupManual() async {

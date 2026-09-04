@@ -88,6 +88,20 @@ class CadastrosPage extends StatelessWidget {
               onTap: () =>
                   _abrir(context, MainMenuSubDestino.cadastrosProdutos),
             ),
+          if (_mostrar(MainMenuSubDestino.cadastrosListaPrecoExterna))
+            HubNavButton(
+              icon: Icons.price_change_outlined,
+              corDestaque: AppModuloCores.modulo(
+                context,
+                AppModuloId.listaPrecoExterna,
+              ),
+              titulo: 'Precos Itinga',
+              habilitado: _podeCadastros,
+              onTap: () => _abrir(
+                context,
+                MainMenuSubDestino.cadastrosListaPrecoExterna,
+              ),
+            ),
           if (_mostrar(MainMenuSubDestino.cadastrosKitsOrcamento))
             HubNavButton(
               icon: Icons.widgets_outlined,

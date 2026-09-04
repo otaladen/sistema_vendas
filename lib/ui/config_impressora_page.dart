@@ -187,8 +187,10 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
           ),
           const SizedBox(height: _erpGap16),
           Text(
-            'PDF / Windows Print Manager e ideal para orcamentos A4. '
-            'ESC/POS termico envia bytes direto (USB/COM ou IP:9100) com corte e gaveta.',
+            'Na Epson TM-T20 (e termicas parecidas), use ESC/POS: a fonte e '
+            'nativa da impressora e as letras nao saem picotadas. '
+            'PDF/Windows e melhor para A4; em bobina o driver rasteriza e a '
+            'qualidade cai.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: cs.onSurface.withValues(alpha: 0.68),
               height: 1.4,
@@ -198,7 +200,9 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
           RadioListTile<String>(
             contentPadding: EdgeInsets.zero,
             title: const Text('Modo PDF / Windows Print Manager'),
-            subtitle: const Text('Orcamentos A4 e cupom via driver do Windows'),
+            subtitle: const Text(
+              'A4 e cupom/orcamento via driver (pode picotar na termica)',
+            ),
             value: 'pdf',
             groupValue: _modoImpressaoBalcao,
             onChanged: _carregando
@@ -210,7 +214,9 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
           RadioListTile<String>(
             contentPadding: EdgeInsets.zero,
             title: const Text('Modo ESC/POS termico direto'),
-            subtitle: const Text('Cupom 80mm/58mm via USB, COM ou rede (9100)'),
+            subtitle: const Text(
+              'Cupom e orcamento 80mm/58mm (recomendado na TM-T20)',
+            ),
             value: 'escpos',
             groupValue: _modoImpressaoBalcao,
             onChanged: _carregando

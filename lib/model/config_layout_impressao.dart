@@ -344,6 +344,9 @@ class ConfigLayoutImpressao {
         linhaQuantidadePreco: true,
         // LGPD: CPF/CNPJ do cliente nao sai no papel de cotacao.
         exibirDocumentoCliente: false,
+        // Area util 72 mm em papel 80 mm (evita corte a esquerda na direta).
+        larguraPaginaPdfMm: 72,
+        margemPaginaMm: 2,
       );
 
   /// Bematech MP-4200 TH e termicas 80 mm com area util ~72 mm.

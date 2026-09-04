@@ -8,35 +8,53 @@ import 'package:sistema_vendas/data/venda_repository.dart';
 import 'package:sistema_vendas/domain/entrega_venda_helper.dart';
 import 'package:sistema_vendas/model/produto.dart';
 
+String? _prepararObjectBoxDll() {
+  final candidates = [
+    r'c:\Projetos\sistema_vendas\build\windows\x64\runner\Debug',
+    r'c:\Projetos\sistema_vendas\build\windows\x64\runner\Release',
+    r'c:\Projetos\sistema_vendas\build\windows\x64\_deps\objectbox-download-src\lib',
+  ];
+  for (final dir in candidates) {
+    final dll = File('$dir${Platform.pathSeparator}objectbox.dll');
+    if (dll.existsSync()) {
+      try {
+        final path = Platform.environment['PATH'] ?? '';
+        if (!path.toLowerCase().contains(dir.toLowerCase())) {
+          Platform.environment['PATH'] = '$dir${Platform.pathSeparator}$path';
+        }
+      } catch (_) {
+        // Ambiente de teste pode ter Platform.environment imutavel.
+      }
+      break;
+    }
+  }
+  Directory? probeDir;
+  try {
+    probeDir = Directory.systemTemp.createTempSync('sv_obx_probe_');
+    final probe = ObjectBox.createForTest(probeDir);
+    probe.close();
+    return null;
+  } catch (e) {
+    return 'objectbox.dll indisponivel neste ambiente — '
+        'teste de integracao pulado ($e)';
+  } finally {
+    try {
+      probeDir?.deleteSync(recursive: true);
+    } catch (_) {}
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   SharedPreferences.setMockInitialValues({});
+  final skipObjectBox = _prepararObjectBoxDll();
 
+  group(
+    'estoque reserva ObjectBox',
+    () {
   late Directory tempDir;
   late ObjectBox db;
   late VendaRepository vendas;
-
-  setUpAll(() {
-    final candidates = [
-      r'c:\Projetos\sistema_vendas\build\windows\x64\runner\Debug',
-      r'c:\Projetos\sistema_vendas\build\windows\x64\runner\Release',
-      r'c:\Projetos\sistema_vendas\build\windows\x64\_deps\objectbox-download-src\lib',
-    ];
-    for (final dir in candidates) {
-      final dll = File('$dir${Platform.pathSeparator}objectbox.dll');
-      if (dll.existsSync()) {
-        try {
-          final path = Platform.environment['PATH'] ?? '';
-          if (!path.toLowerCase().contains(dir.toLowerCase())) {
-            Platform.environment['PATH'] = '$dir${Platform.pathSeparator}$path';
-          }
-        } catch (_) {
-          // Ambiente de teste pode ter Platform.environment imutavel.
-        }
-        break;
-      }
-    }
-  });
 
   setUp(() {
     enterSyncApplySilencioso();
@@ -498,4 +516,115 @@ void main() {
     expect(venda.tipoEntrega, EntregaVendaHelper.tipoRetiradaFutura);
     expect(venda.entregaPendente, isTrue);
   });
+
+  test(
+    'finalizar preserva preco unitario manual do PDV (nao reaplica catalogo)',
+    () {
+      final produto = produtoBase();
+      // Catalogo 3.50; PDV autorizou 2.80 manualmente.
+      final orcId = vendas.registrarOrcamento(
+        [
+          ItemVendaInput(
+            produtoId: produto.id,
+            quantidade: 2,
+            precoUnitario: 2.80,
+            precoUnitarioManual: true,
+            tipoEntregaItem: EntregaVendaHelper.tipoRetirada,
+          ),
+        ],
+        pagamento: DadosPagamentoOrcamento(
+          formaPagamento: 'dinheiro',
+          quantidadeParcelas: 1,
+        ),
+        entrega: DadosEntregaOrcamento(
+          tipoEntrega: EntregaVendaHelper.tipoRetirada,
+          valorFrete: 0,
+        ),
+      );
+
+      final antes = vendas.listarItensPorVenda(orcId).first;
+      expect(antes.precoUnitario, closeTo(2.80, 0.001));
+      expect(antes.precoUnitarioManual, isTrue);
+      expect(vendas.obterPorId(orcId)!.total, closeTo(5.60, 0.001));
+
+      vendas.converterOrcamentoParaVenda(orcId);
+
+      final depois = vendas.listarItensPorVenda(orcId).first;
+      expect(depois.precoUnitario, closeTo(2.80, 0.001));
+      expect(depois.precoUnitarioManual, isTrue);
+      expect(vendas.obterPorId(orcId)!.total, closeTo(5.60, 0.001));
+    },
+  );
+
+  test(
+    'cancelar venda leva agora com quantidadeJaRetirada (baixa cupom) e permitido',
+    () {
+      final produto = produtoBase(estoque: 20);
+      final orcId = vendas.registrarOrcamento(
+        [
+          ItemVendaInput(
+            produtoId: produto.id,
+            quantidade: 2,
+            precoUnitario: 3.5,
+            tipoEntregaItem: EntregaVendaHelper.tipoRetirada,
+          ),
+        ],
+        pagamento: DadosPagamentoOrcamento(
+          formaPagamento: 'dinheiro',
+          quantidadeParcelas: 1,
+        ),
+        entrega: DadosEntregaOrcamento(
+          tipoEntrega: EntregaVendaHelper.tipoRetirada,
+          valorFrete: 0,
+        ),
+      );
+
+      vendas.converterOrcamentoParaVenda(orcId);
+      final item = vendas.listarItensPorVenda(orcId).first;
+      // Baixa automatica do cupom / leva agora.
+      expect(item.quantidadeJaRetirada, greaterThan(0));
+      expect(vendas.mensagemBloqueioCancelamentoVenda(orcId), isNull);
+
+      vendas.cancelarVenda(orcId, motivo: 'Teste cancelamento NFC-e');
+      final venda = vendas.obterPorId(orcId)!;
+      expect(venda.cancelada, isTrue);
+      expect(db.produtoBox.get(produto.id)!.estoqueReal, 20);
+    },
+  );
+
+  test(
+    'finalizar preserva preco divergente legado sem flag (inferencia manual)',
+    () {
+      final produto = produtoBase();
+      final orcId = vendas.registrarOrcamento(
+        [
+          ItemVendaInput(
+            produtoId: produto.id,
+            quantidade: 1,
+            precoUnitario: 9.90,
+            // Sem flag — orcamentos antigos antes da correcao.
+            tipoEntregaItem: EntregaVendaHelper.tipoRetirada,
+          ),
+        ],
+        pagamento: DadosPagamentoOrcamento(
+          formaPagamento: 'pix',
+          quantidadeParcelas: 1,
+        ),
+        entrega: DadosEntregaOrcamento(
+          tipoEntrega: EntregaVendaHelper.tipoRetirada,
+          valorFrete: 0,
+        ),
+      );
+
+      vendas.converterOrcamentoParaVenda(orcId);
+
+      final item = vendas.listarItensPorVenda(orcId).first;
+      expect(item.precoUnitario, closeTo(9.90, 0.001));
+      expect(item.precoUnitarioManual, isTrue);
+      expect(vendas.obterPorId(orcId)!.total, closeTo(9.90, 0.001));
+    },
+  );
+    },
+    skip: skipObjectBox,
+  );
 }

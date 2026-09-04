@@ -780,12 +780,15 @@ class _EntregasPageState extends State<EntregasPage>
     }
   }
 
+  /// Valor persistido (comparacoes / falta). UI usa [_textoQuantidadeExibicaoEntrega].
   int _quantidadeExibicaoEntrega(Venda v, ItemVenda item) =>
       EntregaVendaHelper.quantidadeRomaneioCarga(v, item);
 
-  double _subtotalExibicaoEntrega(Venda v, ItemVenda item) {
-    return _quantidadeExibicaoEntrega(v, item) * item.precoUnitario;
-  }
+  String _textoQuantidadeExibicaoEntrega(Venda v, ItemVenda item) =>
+      EntregaVendaHelper.textoQuantidadeRomaneioCarga(v, item);
+
+  double _subtotalExibicaoEntrega(Venda v, ItemVenda item) =>
+      EntregaVendaHelper.subtotalRomaneioCarga(v, item);
 
   /// Mesma base da listagem de vendas (venda finalizada, itens ainda devolviveis).
   bool _podeRegistrarDevolucaoTrocaBase(Venda v) {
@@ -3091,7 +3094,7 @@ class _EntregasPageState extends State<EntregasPage>
                       children: [
                         Expanded(
                           child: Text(
-                            '${_quantidadeExibicaoEntrega(venda, item)}x ${item.nomeProduto}',
+                            '${_textoQuantidadeExibicaoEntrega(venda, item)}x ${item.nomeProduto}',
                           ),
                         ),
                         SizedBox(
@@ -3535,12 +3538,13 @@ class _EntregasPageState extends State<EntregasPage>
                           separatorBuilder: (_, _) => const Divider(height: 10),
                           itemBuilder: (context, index) {
                             final item = itensLista[index];
-                            final q = _quantidadeExibicaoEntrega(exibir, item);
+                            final qTxt =
+                                _textoQuantidadeExibicaoEntrega(exibir, item);
                             final sub = _subtotalExibicaoEntrega(exibir, item);
                             return _linhaItemDetalheEntrega(
                               context,
                               item: item,
-                              quantidade: q,
+                              quantidadeTexto: qTxt,
                               subtotal: sub,
                               origemVenda: exibir.lojaOrigemMercadoria,
                               cargaSaiu: exibir.cargaSaiu,
@@ -3580,7 +3584,7 @@ class _EntregasPageState extends State<EntregasPage>
   Widget _linhaItemDetalheEntrega(
     BuildContext context, {
     required ItemVenda item,
-    required int quantidade,
+    required String quantidadeTexto,
     required double subtotal,
     String origemVenda = '',
     bool cargaSaiu = false,
@@ -3608,7 +3612,7 @@ class _EntregasPageState extends State<EntregasPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${quantidade}x  ${item.nomeProduto}',
+                '${quantidadeTexto}x  ${item.nomeProduto}',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               Text(tipo, style: Theme.of(context).textTheme.labelSmall),
@@ -3631,9 +3635,9 @@ class _EntregasPageState extends State<EntregasPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              width: 48,
+              width: 56,
               child: Text(
-                '${quantidade}x',
+                '${quantidadeTexto}x',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),

@@ -59,11 +59,35 @@ class LocalBackupValidation {
     }
   }
 
+  /// Formata bytes em B / KB / MB / GB (ex.: 4532 KB → "4.4 MB").
+  static String formatarTamanhoBytes(int bytes) {
+    var b = bytes;
+    if (b < 0) b = 0;
+    const kb = 1024.0;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    if (b >= gb) {
+      return '${(b / gb).toStringAsFixed(2)} GB';
+    }
+    if (b >= mb) {
+      return '${(b / mb).toStringAsFixed(1)} MB';
+    }
+    if (b >= kb) {
+      return '${(b / kb).toStringAsFixed(1)} KB';
+    }
+    return '$b B';
+  }
+
+  /// [tamanhoKb] como no manifesto/historico (pode ser fracionario).
+  static String formatarTamanhoKb(num tamanhoKb) {
+    if (tamanhoKb <= 0) return '—';
+    return formatarTamanhoBytes((tamanhoKb * 1024).round());
+  }
+
   static String descreverTamanhoBanco(Directory dadosAplicacao) {
     final mdb = localizarDataMdb(dadosAplicacao);
     if (mdb == null) return 'banco nao encontrado';
-    final kb = (mdb.lengthSync() / 1024).toStringAsFixed(1);
-    return '$kb KB';
+    return formatarTamanhoBytes(mdb.lengthSync());
   }
 
   static void validarCadastroProdutos(Directory pastaBackup) {

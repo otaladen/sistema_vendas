@@ -25,7 +25,7 @@ abstract final class ConferenciaCargaValidacao {
     for (final linha in linhas) {
       if (mapa[linha.chaveMerge] == true) continue;
       pendentes.add(
-        '${linha.nomeProduto} · ${linha.quantidadeTotal} ${linha.unidade}',
+        '${linha.nomeProduto} · ${linha.quantidadeTotalTexto} ${linha.unidade}',
       );
     }
     if (pendentes.isEmpty) return;

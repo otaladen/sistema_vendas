@@ -25,6 +25,10 @@ class AutoBackupService {
     ObjectBox? objectBox,
     LanSyncScheduler? lanSyncScheduler,
   }) async {
+    // TODO(backlog): Trava global de execucao simultanea (mutex/lock) entre
+    // AutoBackupService, "Executar backup agora", backup ao fechar, headless
+    // e remoto — mapeada para versoes futuras. Por ora mantem apenas a flag
+    // booleana `_emExecucao` em memoria neste servico.
     if (_emExecucao) return;
     // Celular: backup automatico fecha o ObjectBox e congela o app.
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) return;
@@ -33,7 +37,16 @@ class AutoBackupService {
     final config = await repository.carregarEmpresaConfig();
     if (!config.backupAutomaticoAtivo) return;
     final pasta = config.backupAutomaticoPasta.trim();
-    if (pasta.isEmpty) return;
+    if (pasta.isEmpty) {
+      // Evita agendamento fantasma: automatico ligado sem destino.
+      await repository.salvarEmpresaConfig(
+        config.copyWith(backupAutomaticoAtivo: false),
+      );
+      await repository.registrarFalhaBackupAutomatico(
+        'Backup automatico desativado: pasta de destino nao configurada.',
+      );
+      return;
+    }
 
     final intervalo = Duration(
       minutes: config.backupAutomaticoIntervaloMinutos.clamp(15, 10080),
@@ -62,6 +75,11 @@ class AutoBackupService {
 
     _emExecucao = true;
     try {
+      // Reserva o horario antes da copia longa: se ultimoMs estava 0 (ou a
+      // gravacao atrasar), o timer de 5 min nao dispara outra copia em paralelo.
+      final reservadoMs = DateTime.now().millisecondsSinceEpoch;
+      await repository.atualizarUltimoBackupAutomaticoMs(reservadoMs);
+
       final escopo = await repository.carregarBackupAutomaticoEscopo();
       final resultado = await LocalBackupService.executar(
         destinoRaiz: destinoRaiz,

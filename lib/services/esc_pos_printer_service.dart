@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import '../data/app_config_repository.dart';
 import 'esc_pos_commands.dart';
 import 'esc_pos_cupom_builder.dart';
+import 'esc_pos_orcamento_builder.dart';
 import 'esc_pos_transport.dart';
 import 'gaveta_esc_pos_service.dart';
 
@@ -78,6 +79,40 @@ class EscPosPrinterService {
         cortar: cortar,
         abrirGaveta: abrirGaveta,
       );
+
+  /// Orcamento em fonte nativa ESC/POS (Epson TM-T20 e similares).
+  static Future<EscPosImpressaoResultado> imprimirOrcamentoDireto(
+    OrcamentoEscPosDados dados, {
+    bool cortar = true,
+  }) async {
+    final config = dados.config;
+    try {
+      final bytes = EscPosOrcamentoBuilder.montar(
+        dados,
+        largura: EscPosLarguraBobina.fromConfig(config.escPosLargura),
+        cortar: cortar,
+      );
+      await EscPosTransport.enviar(
+        EscPosDestino.fromConfig(
+          tipo: config.escPosDestino,
+          impressoraWindows: config.impressoraPadrao,
+          host: config.escPosHost,
+          portaTcp: config.escPosPortaTcp,
+          portaCom: config.escPosPortaCom,
+        ),
+        bytes,
+      );
+      return const EscPosImpressaoResultado(
+        sucesso: true,
+        mensagem: 'Orcamento enviado para a impressora termica.',
+      );
+    } catch (e) {
+      return EscPosImpressaoResultado(
+        sucesso: false,
+        mensagem: 'Falha na impressao ESC/POS do orcamento: $e',
+      );
+    }
+  }
 
   Future<EscPosImpressaoResultado> imprimirTeste() async {
     final config = await _configRepository.carregarEmpresaConfig();

@@ -6,6 +6,7 @@ import '../../data/funcionario_repository.dart';
 import '../../data/inventario_repository.dart';
 import '../../data/kit_orcamento_repository.dart';
 import '../../data/lista_compra_repository.dart';
+import '../../data/lista_preco_externa_repository.dart';
 import '../../data/mensagem_interna_repository.dart';
 import '../../data/motorista_repository.dart';
 import '../../data/movimento_estoque_repository.dart';
@@ -36,6 +37,7 @@ class LanApiDeps {
     required this.contaPagarRepository,
     required this.obrigacaoMensalFixaRepository,
     required this.listaCompraRepository,
+    required this.listaPrecoExternaRepository,
     required this.inventarioRepository,
     required this.movimentoEstoqueRepository,
     required this.conferenciaCargaRepository,
@@ -62,6 +64,7 @@ class LanApiDeps {
   final ContaPagarRepository contaPagarRepository;
   final ObrigacaoMensalFixaRepository obrigacaoMensalFixaRepository;
   final ListaCompraRepository listaCompraRepository;
+  final ListaPrecoExternaRepository listaPrecoExternaRepository;
   final InventarioRepository inventarioRepository;
   final MovimentoEstoqueRepository movimentoEstoqueRepository;
   final ConferenciaCargaRepository conferenciaCargaRepository;
@@ -100,6 +103,7 @@ class LanApiDeps {
       contaPagarRepository: ContaPagarRepository(objectBox),
       obrigacaoMensalFixaRepository: ObrigacaoMensalFixaRepository(objectBox),
       listaCompraRepository: ListaCompraRepository(objectBox),
+      listaPrecoExternaRepository: ListaPrecoExternaRepository(),
       inventarioRepository: InventarioRepository(objectBox, produto),
       movimentoEstoqueRepository: MovimentoEstoqueRepository(objectBox),
       conferenciaCargaRepository: ConferenciaCargaRepository(objectBox),

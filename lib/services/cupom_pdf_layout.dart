@@ -12,8 +12,11 @@ import '../model/config_layout_impressao.dart';
 class CupomPdfLayout {
   CupomPdfLayout._();
 
-  /// Largura do papel na bobina (referencia).
+  /// Largura fisica do papel na bobina (media size do PDF / driver).
   static const double larguraPapelBobinaMm = 80;
+
+  /// Area imprimivel tipica em termicas 80 mm (Bematech MP-4200 etc.).
+  static const double larguraImprimivelBobinaMm = 72;
 
   @Deprecated('Use larguraPdfMm(layout) — area imprimivel da MP-4200 e similares.')
   static const double larguraBobinaMm = larguraPapelBobinaMm;
@@ -21,13 +24,22 @@ class CupomPdfLayout {
   /// Folga extra na altura do PDF termico (evita corte na impressora).
   static const double margemSegurancaAlturaBobinaMm = 14;
 
-  /// Largura do PDF = area imprimivel (72 mm na Bematech MP-4200 TH em papel 80 mm).
-  static double larguraPdfMm(ConfigLayoutImpressao layout) =>
-      layout.larguraPaginaPdfMm.clamp(68, 80);
+  /// Margem lateral minima — drivers que alinham a esquerda cortam ~2–3 mm.
+  static const double margemLateralMinimaMm = 4;
+
+  /// Largura da pagina PDF enviada ao driver (= papel 80 mm quando a config
+  /// aponta a area util 72 mm). Conteudo usa [larguraUtilConteudoMm].
+  static double larguraPdfMm(ConfigLayoutImpressao layout) {
+    final cfg = layout.larguraPaginaPdfMm.clamp(68.0, 80.0);
+    // Config legada/area util (≤76): pagina = papel completo para o driver
+    // mapear a bobina sem colar o conteudo na zona nao-imprimivel.
+    if (cfg <= 76) return larguraPapelBobinaMm;
+    return cfg;
+  }
 
   static double larguraUtilConteudoMm(ConfigLayoutImpressao layout) {
     final pdf = larguraPdfMm(layout);
-    final margens = _margemPagina(layout) * 2;
+    final margens = _margemLateral(layout) * 2;
     return (pdf - margens).clamp(48, pdf);
   }
 
@@ -40,6 +52,15 @@ class CupomPdfLayout {
 
   static double _margemPagina(ConfigLayoutImpressao layout) =>
       layout.margemPaginaMm.clamp(1, 8);
+
+  /// Margem esquerda/direita: centraliza a area util no papel 80 mm.
+  static double _margemLateral(ConfigLayoutImpressao layout) {
+    final papel = larguraPdfMm(layout);
+    final utilAlvo = layout.larguraPaginaPdfMm.clamp(68.0, 80.0);
+    final folgaCentralizar = ((papel - utilAlvo) / 2).clamp(0.0, 8.0);
+    return (_margemPagina(layout) + folgaCentralizar)
+        .clamp(margemLateralMinimaMm, 10.0);
+  }
 
   static double _margemCorte(ConfigLayoutImpressao layout) =>
       layout.margemCorteMm.clamp(0, 12);
@@ -794,13 +815,14 @@ class CupomPdfLayout {
     final seguranca = margemSegurancaMm ?? margemSegurancaAlturaBobinaMm;
     mm = mm * fatorAltura + seguranca;
     mm = mm.clamp(45.0, 1200.0);
+    final margemLateral = _margemLateral(layout);
     return PdfPageFormat(
       larguraPdfMm(layout) * PdfPageFormat.mm,
       mm * PdfPageFormat.mm,
       marginTop: margem * PdfPageFormat.mm,
       marginBottom: margem * PdfPageFormat.mm,
-      marginLeft: margem * PdfPageFormat.mm,
-      marginRight: margem * PdfPageFormat.mm,
+      marginLeft: margemLateral * PdfPageFormat.mm,
+      marginRight: margemLateral * PdfPageFormat.mm,
     );
   }
 
@@ -867,13 +889,15 @@ class CupomPdfLayout {
   }) {
     switch (layout.modoImpressaoDireta) {
       case LayoutModoImpressaoDireta.driverIlimitado:
+        final m = _margemPagina(layout);
+        final ml = _margemLateral(layout);
         return PdfPageFormat(
           larguraPdfMm(layout) * PdfPageFormat.mm,
           double.infinity,
-          marginTop: _margemPagina(layout) * PdfPageFormat.mm,
-          marginBottom: _margemPagina(layout) * PdfPageFormat.mm,
-          marginLeft: _margemPagina(layout) * PdfPageFormat.mm,
-          marginRight: _margemPagina(layout) * PdfPageFormat.mm,
+          marginTop: m * PdfPageFormat.mm,
+          marginBottom: m * PdfPageFormat.mm,
+          marginLeft: ml * PdfPageFormat.mm,
+          marginRight: ml * PdfPageFormat.mm,
         );
       case LayoutModoImpressaoDireta.altura150:
       case LayoutModoImpressaoDireta.altura200:

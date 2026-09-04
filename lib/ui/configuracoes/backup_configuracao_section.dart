@@ -113,7 +113,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       final config = await widget.appConfigRepository.carregarEmpresaConfig();
       final manual =
           await widget.appConfigRepository.carregarRegistroBackupManual();
-      final falha =
+      var falha =
           await widget.appConfigRepository.carregarFalhaBackupAutomatico();
       final aoFechar =
           await widget.appConfigRepository.carregarBackupAoFecharAtivo();
@@ -130,30 +130,47 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       if (baseDir.existsSync()) {
         tamanho = LocalBackupValidation.descreverTamanhoBanco(baseDir);
       }
+      // Estado inconsistente: automatico ligado sem pasta → desliga e persiste.
+      var configEfetiva = config;
+      final pastaAuto = config.backupAutomaticoPasta.trim();
+      if (config.backupAutomaticoAtivo && pastaAuto.isEmpty) {
+        configEfetiva = config.copyWith(backupAutomaticoAtivo: false);
+        await widget.appConfigRepository.salvarEmpresaConfig(configEfetiva);
+        await widget.appConfigRepository.registrarFalhaBackupAutomatico(
+          'Backup automatico desativado: pasta de destino nao configurada.',
+        );
+        falha =
+            await widget.appConfigRepository.carregarFalhaBackupAutomatico();
+      }
+
       if (!mounted) return;
       setState(() {
         _manual = manual;
         _falha = falha;
         _backupAoFecharAtivo = aoFechar;
         _backupAutomaticoEscopo = escopoAuto;
-        _backupAutomaticoAtivo = config.backupAutomaticoAtivo;
-        _backupAutomaticoPasta = config.backupAutomaticoPasta;
-        _backupRetencaoMaxCopias = config.backupRetencaoMaxCopias;
-        _backupSegundoDestinoAtivo = config.backupSegundoDestinoAtivo;
-        _backupSegundoDestinoPasta = config.backupSegundoDestinoPasta;
-        _redeModoServidor = config.redeModoServidor;
+        _backupAutomaticoAtivo = configEfetiva.backupAutomaticoAtivo;
+        _backupAutomaticoPasta = configEfetiva.backupAutomaticoPasta;
+        _backupRetencaoMaxCopias = configEfetiva.backupRetencaoMaxCopias;
+        _backupSegundoDestinoAtivo = configEfetiva.backupSegundoDestinoAtivo;
+        _backupSegundoDestinoPasta = configEfetiva.backupSegundoDestinoPasta;
+        _redeModoServidor = configEfetiva.redeModoServidor;
         _tarefaWindowsHorario =
             BackupTarefaWindowsService.normalizarHorario(horarioTarefa);
         _tarefaWindowsInstalada = tarefaInstalada;
         _backupAutomaticoIntervaloMinutos = () {
           const opcoes = [60, 360, 720, 1440];
-          final raw = config.backupAutomaticoIntervaloMinutos.clamp(15, 10080);
+          final raw =
+              configEfetiva.backupAutomaticoIntervaloMinutos.clamp(15, 10080);
           return opcoes.contains(raw) ? raw : 1440;
         }();
-        _ultimoBackupAutomaticoMs = config.ultimoBackupAutomaticoMs;
+        _ultimoBackupAutomaticoMs = configEfetiva.ultimoBackupAutomaticoMs;
         _tamanhoBancoLocal = tamanho;
         _pastaDadosLocal = baseDir.path;
-        _status = BackupStatusHelper.avaliar(config: config, manual: manual);
+        _status = BackupStatusHelper.avaliar(
+          config: configEfetiva,
+          manual: manual,
+        );
         _carregando = false;
       });
       await _carregarHistorico();
@@ -205,9 +222,37 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         _historico = itens;
         _carregandoHistorico = false;
       });
+      await _reconciliarUltimoBackupComHistorico();
     } catch (_) {
       if (mounted) setState(() => _carregandoHistorico = false);
     }
+  }
+
+  /// Se o historico em disco tem backup automatico mais recente que as prefs
+  /// (ex.: timestamp gravado so numa chave antiga), alinha o status do painel.
+  Future<void> _reconciliarUltimoBackupComHistorico() async {
+    BackupHistoricoItem? melhorAuto;
+    for (final item in _historico) {
+      if (!item.valido) continue;
+      if (item.tipo == LocalBackupTipo.manual) continue;
+      melhorAuto = item;
+      break;
+    }
+    if (melhorAuto == null) return;
+    final ms = melhorAuto.criadoEm.millisecondsSinceEpoch;
+    if (ms <= _ultimoBackupAutomaticoMs) return;
+
+    await widget.appConfigRepository.atualizarUltimoBackupAutomaticoMs(ms);
+    if (!mounted) return;
+    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    if (!mounted) return;
+    setState(() {
+      _ultimoBackupAutomaticoMs = config.ultimoBackupAutomaticoMs;
+      _status = BackupStatusHelper.avaliar(
+        config: config,
+        manual: _manual,
+      );
+    });
   }
 
   Future<void> _posProcessarBackup({
@@ -523,7 +568,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         SnackBar(
           content: Text(
             'Tarefa diaria instalada as $_tarefaWindowsHorario. '
-            'Feche o sistema nesse horario para o backup rodar.',
+            'Ela roda independente do timer do app; preferivel o sistema '
+            'fechado nesse horario (banco pode estar em uso se o app estiver aberto).',
           ),
         ),
       );
@@ -873,10 +919,31 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   }
 
   Future<void> _executarBackupAutomaticoAgora() async {
+    // TODO(backlog): Trava global de execucao simultanea (mutex/lock) compartilhada
+    // com AutoBackupService / ao fechar / headless — mapeada para versoes futuras.
+    // Por ora mantem apenas a flag `_backupEmAndamento` em memoria nesta tela.
     if (_backupEmAndamento) return;
     if (_backupAutomaticoPasta.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Escolha a pasta de destino para executar o backup agora.',
+          ),
+        ),
+      );
       await _escolherPastaBackupAutomatico();
-      if (_backupAutomaticoPasta.trim().isEmpty) return;
+      if (_backupAutomaticoPasta.trim().isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Backup cancelado: nenhuma pasta de destino selecionada.',
+            ),
+          ),
+        );
+        return;
+      }
     }
 
     setState(() {
@@ -1447,6 +1514,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     return switch (_status?.saude) {
       BackupSaude.protegido => Colors.green.shade700,
       BackupSaude.atencao => Colors.orange.shade800,
+      BackupSaude.configIncompleta => Colors.orange.shade800,
       BackupSaude.critico => Colors.red.shade700,
       _ => Theme.of(context).colorScheme.outline,
     };
@@ -1454,6 +1522,9 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
 
   String _textoUltimoBackup() {
     final s = _status;
+    if (s?.automaticoSemDestino == true) {
+      return 'Ativo sem destino — selecione a pasta para o automatico funcionar';
+    }
     if (s == null || s.ultimoBackupMs <= 0) {
       return 'Nenhum backup registrado neste PC';
     }
@@ -1462,9 +1533,36 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     );
     final tipo = s.ultimoBackupTipo == 'automatico' ? 'automatico' : 'manual';
     final tam = s.ultimoBackupTamanhoKb > 0
-        ? ' · ${s.ultimoBackupTamanhoKb.toStringAsFixed(1)} KB'
+        ? ' · ${LocalBackupValidation.formatarTamanhoKb(s.ultimoBackupTamanhoKb)}'
         : '';
     return 'Ultimo ($tipo): $quando$tam';
+  }
+
+  /// Rotulo curto da rotina automatica (timer + copia ao encerrar).
+  String? _textoRotinaBackup() {
+    if (_backupAutomaticoAtivo && _backupAoFecharAtivo) {
+      return 'Backup automatico + Copia ao encerrar ativos';
+    }
+    if (_backupAutomaticoAtivo) {
+      return 'Backup automatico ativo';
+    }
+    if (_backupAoFecharAtivo) {
+      return 'Copia ao encerrar ativa';
+    }
+    return null;
+  }
+
+  String _tooltipRotinaBackup() {
+    if (_backupAutomaticoAtivo && _backupAoFecharAtivo) {
+      return 'Rotina automatica: copia periodica enquanto o app estiver aberto '
+          'e uma copia extra ao sair da sessao ou fechar o sistema. '
+          'Ambos usam a pasta de destino configurada.';
+    }
+    if (_backupAutomaticoAtivo) {
+      return 'Copia periodica enquanto o app estiver aberto, conforme a frequencia.';
+    }
+    return 'Copia ao encerrar faz parte da rotina de protecao: executa ao sair '
+        'da sessao ou fechar o app (requer pasta de destino).';
   }
 
   @override
@@ -1504,22 +1602,41 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Ativar backup automatico'),
+                  subtitle: Text(
+                    _backupAutomaticoPasta.trim().isEmpty
+                        ? 'Requer pasta de destino selecionada.'
+                        : 'Copias periodicas na pasta configurada.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                   value: _backupAutomaticoAtivo,
                   onChanged: ocupado ? null : _alternarBackupAutomatico,
                 ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: ocupado ? null : _escolherPastaBackupAutomatico,
-                    icon: const Icon(Icons.folder_outlined, size: 20),
-                    label: const Text('Pasta de destino'),
+                const SizedBox(height: 4),
+                OutlinedButton.icon(
+                  onPressed: ocupado ? null : _escolherPastaBackupAutomatico,
+                  icon: const Icon(Icons.folder_open_outlined, size: 20),
+                  label: Text(
+                    _backupAutomaticoPasta.trim().isEmpty
+                        ? 'Selecionar Pasta...'
+                        : 'Alterar pasta de destino',
                   ),
                 ),
-                if (_backupAutomaticoPasta.trim().isNotEmpty)
-                  SelectableText(
-                    _backupAutomaticoPasta,
-                    style: theme.textTheme.bodySmall,
+                const SizedBox(height: 6),
+                SelectableText(
+                  _backupAutomaticoPasta.trim().isEmpty
+                      ? 'Nenhuma pasta selecionada'
+                      : _backupAutomaticoPasta,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _backupAutomaticoPasta.trim().isEmpty
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
+                    fontWeight: _backupAutomaticoPasta.trim().isEmpty
+                        ? FontWeight.w600
+                        : FontWeight.w400,
                   ),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<LocalBackupEscopo>(
                   key: ValueKey(_backupAutomaticoEscopo),
@@ -1581,7 +1698,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Backup ao fechar o sistema'),
                   subtitle: Text(
-                    'Executa ao sair da sessao ou fechar o app (requer pasta de destino).',
+                    'Faz parte da rotina automatica: copia ao sair da sessao '
+                    'ou fechar o app (requer pasta de destino).',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -1607,12 +1725,16 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                   ),
                 ],
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: ocupado || _backupAutomaticoPasta.trim().isEmpty
+                FilledButton.tonalIcon(
+                  onPressed: ocupado
                       ? null
                       : () => unawaited(_executarBackupAutomaticoAgora()),
                   icon: const Icon(Icons.play_arrow_outlined),
-                  label: const Text('Executar backup agora'),
+                  label: Text(
+                    _backupAutomaticoPasta.trim().isEmpty
+                        ? 'Executar backup agora (escolher pasta)'
+                        : 'Executar backup agora',
+                  ),
                 ),
               ],
             ),
@@ -1662,36 +1784,6 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                 _buildResumoUltimoBackup(context),
                 const SizedBox(height: 14),
                 Text(
-                  'Proteger',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Copia completa recomendada para o dia a dia da loja.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                FilledButton.icon(
-                  onPressed: ocupado
-                      ? null
-                      : () => unawaited(
-                            _criarBackupDados(
-                              escopo: LocalBackupEscopo.completo,
-                            ),
-                          ),
-                  icon: const Icon(Icons.backup_outlined),
-                  label: Text(
-                    _backupEmAndamento
-                        ? 'Criando backup…'
-                        : 'Backup completo agora',
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
                   'Recuperar',
                   style: theme.textTheme.labelLarge?.copyWith(
                     fontWeight: FontWeight.w700,
@@ -1705,13 +1797,13 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
+                FilledButton.icon(
                   onPressed: ocupado
                       ? null
                       : () => unawaited(_restaurarBackupDados()),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: theme.colorScheme.error,
-                    side: BorderSide(color: theme.colorScheme.error),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.error,
+                    foregroundColor: theme.colorScheme.onError,
                   ),
                   icon: const Icon(Icons.restore_outlined),
                   label: Text(
@@ -1726,6 +1818,36 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                       ocupado ? null : () => unawaited(_restaurarDeArquivoZip()),
                   icon: const Icon(Icons.unarchive_outlined),
                   label: const Text('Restaurar de arquivo ZIP'),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Proteger',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Copia completa recomendada para o dia a dia da loja.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.tonalIcon(
+                  onPressed: ocupado
+                      ? null
+                      : () => unawaited(
+                            _criarBackupDados(
+                              escopo: LocalBackupEscopo.completo,
+                            ),
+                          ),
+                  icon: const Icon(Icons.backup_outlined),
+                  label: Text(
+                    _backupEmAndamento
+                        ? 'Criando backup…'
+                        : 'Backup completo agora',
+                  ),
                 ),
                 const SizedBox(height: 8),
                 ExpansionTile(
@@ -1952,13 +2074,16 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         : pastaAuto;
 
     String proximoTxt = 'Automatico desligado';
-    if (_backupAutomaticoAtivo) {
+    final pastaAutoOk = pastaAuto.isNotEmpty;
+    if (_backupAutomaticoAtivo && pastaAutoOk) {
       if (s?.proximoBackupAutomaticoMs != null) {
         proximoTxt =
             'Proximo: ${_dataHora.format(DateTime.fromMillisecondsSinceEpoch(s!.proximoBackupAutomaticoMs!))}';
       } else {
         proximoTxt = 'Proximo: ao abrir o app';
       }
+    } else if (_backupAutomaticoAtivo && !pastaAutoOk) {
+      proximoTxt = 'Indisponivel — sem pasta de destino';
     }
 
     final bancoTxt = _pastaDadosLocal.trim().isEmpty
@@ -1997,7 +2122,9 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        BackupStatusHelper.rotuloSaude(saude),
+                        saude == BackupSaude.configIncompleta
+                            ? 'Ativo sem destino'
+                            : BackupStatusHelper.rotuloSaude(saude),
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: cor,
@@ -2008,13 +2135,45 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                         _textoUltimoBackup(),
                         style: theme.textTheme.bodySmall,
                       ),
-                      if (s?.horasDesdeUltimo != null && s!.ultimoBackupMs > 0)
+                      if (s?.horasDesdeUltimo != null &&
+                          s!.ultimoBackupMs > 0 &&
+                          saude != BackupSaude.configIncompleta)
                         Text(
                           'Ha ${s.horasDesdeUltimo} hora(s)',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
+                      if (_textoRotinaBackup() != null) ...[
+                        const SizedBox(height: 6),
+                        Tooltip(
+                          message: _tooltipRotinaBackup(),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.shield_outlined,
+                                size: 14,
+                                color: theme.colorScheme.primary,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  _textoRotinaBackup()!,
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: theme.colorScheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Icon(
+                                Icons.info_outline,
+                                size: 14,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -2038,7 +2197,29 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
               rotulo: 'Banco local',
               valor: bancoTxt,
             ),
-            if (s?.exibirAlerta == true) ...[
+            if (saude == BackupSaude.configIncompleta) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Selecione a pasta de destino ou use "Executar backup agora" '
+                'para escolher o diretorio na hora.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: cor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: (_backupEmAndamento || _restauracaoEmAndamento)
+                    ? null
+                    : () => unawaited(_restaurarBackupDados()),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: theme.colorScheme.error,
+                  side: BorderSide(color: theme.colorScheme.error),
+                ),
+                icon: const Icon(Icons.restore_outlined),
+                label: const Text('Restaurar backup'),
+              ),
+            ] else if (s?.exibirAlerta == true) ...[
               const SizedBox(height: 10),
               Text(
                 'Recomendado: faca backup agora ou ative o automatico '
@@ -2046,6 +2227,36 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                 style: theme.textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: cor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: (_backupEmAndamento || _restauracaoEmAndamento)
+                    ? null
+                    : () => unawaited(_restaurarBackupDados()),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: theme.colorScheme.error,
+                  side: BorderSide(color: theme.colorScheme.error),
+                ),
+                icon: const Icon(Icons.restore_outlined),
+                label: const Text('Restaurar backup'),
+              ),
+            ] else ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: (_backupEmAndamento || _restauracaoEmAndamento)
+                      ? null
+                      : () => unawaited(_restaurarBackupDados()),
+                  icon: Icon(
+                    Icons.restore_outlined,
+                    color: theme.colorScheme.error,
+                  ),
+                  label: Text(
+                    'Restaurar backup',
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
                 ),
               ),
             ],
@@ -2106,11 +2317,30 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
               ),
             if (Platform.isWindows) ...[
               const Divider(height: 20),
-              Text(
-                'Tarefa agendada Windows',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Tarefa agendada Windows',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Tooltip(
+                    message:
+                        'A Tarefa Agendada do Windows (se instalada) roda de forma '
+                        'independente 1x por dia no horario fixo do sistema, sem '
+                        'interferir no timer interno da aplicacao (ex.: 24h). '
+                        'Sao mecanismos separados: o app checa o intervalo enquanto '
+                        'esta aberto; a tarefa do SO dispara o backup headless no horario.',
+                    child: Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 4),
               Text(
@@ -2118,6 +2348,17 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                     ? 'Status: instalada (diaria as $_tarefaWindowsHorario)'
                     : 'Status: nao instalada',
                 style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Roda 1x/dia no horario do Windows, de forma independente do '
+                'timer interno do app (frequencia automatica). Nao altera nem '
+                'substitui o intervalo configurado acima. Requer o .exe instalado; '
+                'se o app estiver aberto, o banco pode estar em uso e a tarefa '
+                'pode falhar — preferivel o sistema fechado nesse horario.',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
@@ -2155,12 +2396,6 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                       label: const Text('Remover tarefa'),
                     ),
                 ],
-              ),
-              Text(
-                'Requer o .exe instalado. Feche o sistema no horario — nao roda com o app aberto.',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
               ),
             ],
           ],

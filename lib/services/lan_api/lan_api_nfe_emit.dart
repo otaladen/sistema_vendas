@@ -573,6 +573,13 @@ Future<Map<String, dynamic>> lanApiCancelarVendaFiscal(
     return {'ok': false, 'error': 'Venda ja esta cancelada.', 'status': 400};
   }
 
+  // Valida ERP antes da SEFAZ: evita NFC-e cancelada e venda ainda ativa.
+  final bloqueioErp =
+      d.vendaRepository.mensagemBloqueioCancelamentoVenda(vendaId);
+  if (bloqueioErp != null) {
+    return {'ok': false, 'error': bloqueioErp, 'mensagem': bloqueioErp, 'status': 400};
+  }
+
   final fiscal = VendaFiscalService(
     vendaRepository: d.vendaRepository,
     clienteRepository: d.clienteRepository,

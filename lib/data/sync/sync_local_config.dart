@@ -76,8 +76,15 @@ class SyncLocalConfig {
       logoPath: prefs.getString(_kLogo) ?? base.logoPath,
       backupAutomaticoPasta:
           prefs.getString(_kBackupPasta) ?? base.backupAutomaticoPasta,
-      ultimoBackupAutomaticoMs:
-          prefs.getInt(_kBackupUltimoMs) ?? base.ultimoBackupAutomaticoMs,
+      // Preferir o maior: o timestamp e gravado em duas chaves (legado + local)
+      // e atualizar so uma delas deixava o painel em "Sem backup recente".
+      ultimoBackupAutomaticoMs: () {
+        final localMs = prefs.getInt(_kBackupUltimoMs) ?? 0;
+        final baseMs = base.ultimoBackupAutomaticoMs < 0
+            ? 0
+            : base.ultimoBackupAutomaticoMs;
+        return localMs > baseMs ? localMs : baseMs;
+      }(),
       backupSegundoDestinoPasta: prefs.getString(_kBackupSegundoDestinoPasta) ??
           base.backupSegundoDestinoPasta,
       abrirGavetaAutomatica:
@@ -120,6 +127,12 @@ class SyncLocalConfig {
     );
   }
 
+  /// Atualiza so o timestamp local do ultimo backup automatico.
+  static Future<void> atualizarUltimoBackupMs(int epochMs) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kBackupUltimoMs, epochMs < 0 ? 0 : epochMs);
+  }
+
   static Future<void> salvarCamposLocais(EmpresaConfig config) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kToken, config.redeSyncToken.trim());
@@ -134,11 +147,13 @@ class SyncLocalConfig {
     await prefs.setString(_kPastaPdf, config.pastaPadraoPdf.trim());
     await prefs.setString(_kLogo, config.logoPath.trim());
     await prefs.setString(_kBackupPasta, config.backupAutomaticoPasta.trim());
+    final ultimoIncoming = config.ultimoBackupAutomaticoMs < 0
+        ? 0
+        : config.ultimoBackupAutomaticoMs;
+    final ultimoExistente = prefs.getInt(_kBackupUltimoMs) ?? 0;
     await prefs.setInt(
       _kBackupUltimoMs,
-      config.ultimoBackupAutomaticoMs < 0
-          ? 0
-          : config.ultimoBackupAutomaticoMs,
+      ultimoIncoming > ultimoExistente ? ultimoIncoming : ultimoExistente,
     );
     await prefs.setString(
       _kBackupSegundoDestinoPasta,

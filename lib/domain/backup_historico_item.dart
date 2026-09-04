@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../data/local_backup_service.dart';
+import '../data/local_backup_validation.dart';
 import '../domain/local_backup_escopo.dart';
 
 /// Entrada da lista de backups encontrados em disco.
@@ -33,11 +34,6 @@ class BackupHistoricoItem {
 
   String get rotuloEscopo => escopo.rotulo;
 
-  String get tamanhoFormatado {
-    if (tamanhoBancoKb <= 0) return '—';
-    if (tamanhoBancoKb >= 1024) {
-      return '${(tamanhoBancoKb / 1024).toStringAsFixed(1)} MB';
-    }
-    return '${tamanhoBancoKb.toStringAsFixed(0)} KB';
-  }
+  String get tamanhoFormatado =>
+      LocalBackupValidation.formatarTamanhoKb(tamanhoBancoKb);
 }

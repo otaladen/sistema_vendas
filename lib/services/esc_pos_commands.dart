@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:convert' show utf8;
 import 'dart:typed_data';
 
 /// Comandos ESC/POS basicos (Epson / Bematech / Elgin).
@@ -42,14 +42,12 @@ abstract final class EscPosCommands {
     return Uint8List.fromList([0x1B, 0x70, m, t1, t2]);
   }
 
-  /// Texto em Latin-1 (ISO-8859-1), com fallback para ASCII.
+  /// Texto para termica: ASCII + acentos PT-BR em CP850 (Epson TM-T20).
+  ///
+  /// Nao usa Latin-1 cru: com `ESC t 2` (CP850) isso gera "Sao"→"Soo" etc.
   static Uint8List text(String s) {
     final normalized = _sanitizar(s);
-    try {
-      return Uint8List.fromList(latin1.encode(normalized));
-    } catch (_) {
-      return Uint8List.fromList(utf8.encode(normalized));
-    }
+    return Uint8List.fromList(_encodeCp850(normalized));
   }
 
   static Uint8List line(String s) =>
@@ -99,6 +97,78 @@ abstract final class EscPosCommands {
         .replaceAll('\u00A0', ' ')
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n');
+  }
+
+  /// Mapa minimo PT-BR → byte CP850. Demais chars ASCII ou '?'.
+  static const Map<int, int> _cp850Extras = {
+    0x00C7: 0x80, // Ç
+    0x00FC: 0x81, // ü
+    0x00E9: 0x82, // é
+    0x00E2: 0x83, // â
+    0x00E4: 0x84, // ä
+    0x00E0: 0x85, // à
+    0x00E7: 0x87, // ç
+    0x00EA: 0x88, // ê
+    0x00EB: 0x89, // ë
+    0x00E8: 0x8A, // è
+    0x00EF: 0x8B, // ï
+    0x00EE: 0x8C, // î
+    0x00EC: 0x8D, // ì
+    0x00C9: 0x90, // É
+    0x00F4: 0x93, // ô
+    0x00F6: 0x94, // ö
+    0x00F2: 0x95, // ò
+    0x00FB: 0x96, // û
+    0x00F9: 0x97, // ù
+    0x00D6: 0x99, // Ö
+    0x00DC: 0x9A, // Ü
+    0x00E1: 0xA0, // á
+    0x00ED: 0xA1, // í
+    0x00F3: 0xA2, // ó
+    0x00FA: 0xA3, // ú
+    0x00F1: 0xA4, // ñ
+    0x00D1: 0xA5, // Ñ
+    0x00C1: 0xB5, // Á
+    0x00C2: 0xB6, // Â
+    0x00C0: 0xB7, // À
+    0x00E3: 0xC6, // ã
+    0x00C3: 0xC7, // Ã
+    0x00CA: 0xD2, // Ê
+    0x00CB: 0xD3, // Ë
+    0x00C8: 0xD4, // È
+    0x00CD: 0xD6, // Í
+    0x00CE: 0xD7, // Î
+    0x00CF: 0xD8, // Ï
+    0x00D3: 0xE0, // Ó
+    0x00D4: 0xE2, // Ô
+    0x00D2: 0xE3, // Ò
+    0x00F5: 0xE4, // õ
+    0x00D5: 0xE5, // Õ
+    0x00DA: 0xE9, // Ú
+    0x00DB: 0xEA, // Û
+    0x00D9: 0xEB, // Ù
+  };
+
+  static List<int> _encodeCp850(String s) {
+    final out = <int>[];
+    for (final r in s.runes) {
+      if (r >= 0x20 && r <= 0x7E) {
+        out.add(r);
+        continue;
+      }
+      if (r == 0x09) {
+        out.add(0x20);
+        continue;
+      }
+      final mapped = _cp850Extras[r];
+      if (mapped != null) {
+        out.add(mapped);
+        continue;
+      }
+      // Fallback: remove acento generico / substitui.
+      out.add(0x3F); // ?
+    }
+    return out;
   }
 }
 

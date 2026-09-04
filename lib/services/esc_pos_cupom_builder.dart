@@ -14,6 +14,7 @@ import '../model/vendedor.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
 import 'cupom_pdf_layout.dart';
 import 'esc_pos_commands.dart';
+import 'fiscal_config_store.dart';
 
 /// Dados tipados para montar o cupom termico.
 class CupomBalcaoDados {
@@ -39,11 +40,14 @@ class CupomBalcaoDados {
 }
 
 /// Monta bytes ESC/POS do cupom de venda / NFC-e.
+///
+/// Dinheiro/fiado (sem NFC-e real): layout estilo DANFE NFC-e com chave
+/// decorativa + QR — o mesmo visual do PDF `estiloCupomNfce`.
 abstract final class EscPosCupomBuilder {
   EscPosCupomBuilder._();
 
   static final _moeda = NumberFormat('#,##0.00', 'pt_BR');
-  static final _data = DateFormat('dd/MM/yyyy HH:mm:ss', 'pt_BR');
+  static final _data = DateFormat('dd/MM/yyyy HH:mm:ss');
 
   static Uint8List montar(
     CupomBalcaoDados dados, {
@@ -60,17 +64,49 @@ abstract final class EscPosCupomBuilder {
     out.add(EscPosCommands.init);
     out.add(EscPosCommands.codePage850);
 
+    final chaveReal =
+        CupomPdfLayout.chaveAcessoSomenteDigitos(venda.nfceChaveAcesso);
+    final chaveValida = chaveReal.length == 44;
+    final temNfceReal =
+        chaveValida || venda.nfceNumero.trim().isNotEmpty;
+    final homolog = FiscalConfigStore.efetivo.homologacao;
+    final emissao = (venda.nfceEmitidaEm ?? venda.data).toLocal();
+
+    // Cupom dinheiro/fiado: numera como NFC-e auxiliar (controle interno).
+    final numeroDoc = temNfceReal
+        ? (venda.nfceNumero.trim().isEmpty ? '-' : venda.nfceNumero.trim())
+        : '${VendaDocumentoRotuloHelper.numeroControleInterno(venda)}';
+    final serieDoc = temNfceReal
+        ? (venda.nfceSerie.trim().isEmpty
+            ? '001'
+            : venda.nfceSerie.trim().padLeft(3, '0'))
+        : '001';
+
+    final chaveImpressao = chaveValida
+        ? chaveReal
+        : CupomPdfLayout.chaveAcessoSomenteDigitos(
+            CupomPdfLayout.gerarChaveAcessoDecorativaNfce(
+              cnpj: FiscalConfig.cnpjEmitente,
+              uf: FiscalConfig.ufEmitente,
+              numeroNota: numeroDoc,
+              serie: serieDoc,
+              emissao: emissao,
+            ),
+          );
+
     // --- Cabecalho ---
     out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
-    out.add(EscPosCommands.doubleHeightOn);
-    out.add(EscPosCommands.line(_trunc(config.nomeLoja, cols)));
-    out.add(EscPosCommands.normalSize);
+    for (final l in _wrap(config.nomeLoja.trim(), cols)) {
+      out.add(EscPosCommands.line(l));
+    }
     out.add(EscPosCommands.boldOff);
     final razao = FiscalConfig.razaoSocialEmitente.trim();
     if (razao.isNotEmpty &&
         razao.toLowerCase() != config.nomeLoja.trim().toLowerCase()) {
-      out.add(EscPosCommands.line(_wrap(razao, cols).first));
+      for (final l in _wrap(razao, cols)) {
+        out.add(EscPosCommands.line(l));
+      }
     }
     out.add(EscPosCommands.line(
       'CNPJ ${_formatCnpj(FiscalConfig.cnpjEmitente)}',
@@ -88,50 +124,61 @@ abstract final class EscPosCupomBuilder {
     }
     out.add(EscPosCommands.separator(cols));
 
-    final chaveValida =
-        CupomPdfLayout.chaveAcessoSomenteDigitos(venda.nfceChaveAcesso).length ==
-            44;
-    final temNfce =
-        chaveValida || venda.nfceNumero.trim().isNotEmpty;
-
+    // Titulo estilo DANFE (cupom dinheiro e NFC-e real).
     out.add(EscPosCommands.boldOn);
-    if (temNfce) {
-      out.add(EscPosCommands.line('CUPOM FISCAL ELETRONICO - NFC-e'));
-    } else {
-      out.add(EscPosCommands.line('CUPOM NAO FISCAL'));
-    }
+    out.add(EscPosCommands.line('DANFE NFC-e - DOCUMENTO AUXILIAR'));
+    out.add(EscPosCommands.line('DA NOTA FISCAL ELETRONICA'));
+    out.add(EscPosCommands.line('PARA CONSUMIDOR FINAL'));
     out.add(EscPosCommands.boldOff);
     if (dados.segundaVia) {
       out.add(EscPosCommands.line('*** SEGUNDA VIA ***'));
     }
+    if (temNfceReal && homolog) {
+      out.add(EscPosCommands.boldOn);
+      out.add(EscPosCommands.line('AMBIENTE DE HOMOLOGACAO'));
+      out.add(EscPosCommands.line('SEM VALOR FISCAL'));
+      out.add(EscPosCommands.boldOff);
+    }
     out.add(EscPosCommands.alignLeft);
 
-    final doc = temNfce
-        ? 'NFC-e ${venda.nfceNumero.trim().isEmpty ? '-' : venda.nfceNumero.trim()}'
-            '${venda.nfceSerie.trim().isEmpty ? '' : ' Serie ${venda.nfceSerie.trim()}'}'
-        : 'Doc ${VendaDocumentoRotuloHelper.numeroControleInterno(venda)}';
-    out.add(EscPosCommands.line(doc));
+    out.add(EscPosCommands.line('NFC-e $numeroDoc Serie $serieDoc'));
+    out.add(EscPosCommands.line('Emissao: ${_data.format(emissao)}'));
+    if (temNfceReal) {
+      final prot = venda.nfceProtocolo.trim();
+      if (prot.isNotEmpty && !prot.startsWith('emissao:')) {
+        out.add(EscPosCommands.line('Protocolo: ${_trunc(prot, cols - 11)}'));
+      }
+    }
+    out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line(
-      'Emissao: ${_data.format((venda.nfceEmitidaEm ?? venda.data).toLocal())}',
+      dados.segundaVia ? 'SEGUNDA VIA' : 'VIA CONSUMIDOR',
+    ));
+    out.add(EscPosCommands.boldOff);
+    out.add(EscPosCommands.line(
+      VendaDocumentoRotuloHelper.rotuloControleInterno(venda),
     ));
 
     final vendNome = CupomNaoFiscalVendaPdf.rotuloVendedorUmLinha(dados.vendedor);
-    out.add(EscPosCommands.line('Vendedor: ${_trunc(vendNome, cols - 10)}'));
+    if (vendNome.trim().isNotEmpty &&
+        vendNome.trim().toLowerCase() != 'sem vendedor') {
+      out.add(EscPosCommands.line('Vendedor: ${_trunc(vendNome, cols - 10)}'));
+    }
 
     final cli = dados.cliente;
-    if (cli != null) {
-      final nome = cli.nomeFantasia.trim().isNotEmpty
-          ? cli.nomeFantasia.trim()
-          : cli.nomeRazao.trim();
-      if (nome.isNotEmpty) {
-        out.add(EscPosCommands.line('Cliente: ${_trunc(nome, cols - 9)}'));
-      }
-      final docCli = cli.documento.trim();
-      if (docCli.isNotEmpty) {
-        out.add(EscPosCommands.line('CPF/CNPJ: $docCli'));
-      }
+    if (temNfceReal && homolog) {
+      out.add(EscPosCommands.line(
+        _trunc('Cliente: NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO', cols),
+      ));
     } else {
-      out.add(EscPosCommands.line('Cliente: Consumidor'));
+      out.add(EscPosCommands.line(
+        _trunc(_textoConsumidor(cli, venda), cols),
+      ));
+      final docCli = cli?.documento.trim() ?? '';
+      if (docCli.isNotEmpty && !(temNfceReal && homolog)) {
+        out.add(EscPosCommands.line(
+          'CPF/CNPJ: ${CupomPdfLayout.formatarDocumentoConsumidor(docCli)}',
+        ));
+      }
     }
 
     out.add(EscPosCommands.separator(cols));
@@ -207,29 +254,62 @@ abstract final class EscPosCupomBuilder {
       ));
     }
 
+    // Cupom dinheiro (sem NFC-e SEFAZ): aviso de contingencia visual LDV.
+    if (!temNfceReal) {
+      out.add(EscPosCommands.separator(cols));
+      out.add(EscPosCommands.alignCenter);
+      out.add(EscPosCommands.boldOn);
+      for (final l in _wrap(
+        'NOTA EMITIDA EM CONTIGENCIA-AUTORIZACAO PENDENTE',
+        cols,
+      )) {
+        out.add(EscPosCommands.line(l));
+      }
+      out.add(EscPosCommands.boldOff);
+    }
+
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.alignCenter);
 
-    if (chaveValida) {
-      final chave = CupomPdfLayout.formatarChaveAcessoGrupos(venda.nfceChaveAcesso);
-      out.add(EscPosCommands.line('CHAVE DE ACESSO'));
-      for (final l in _wrap(chave, cols)) {
+    final urlConsulta = CupomPdfLayout.urlConsultaNfcePorUf();
+    out.add(EscPosCommands.line('Consulte pela Chave de Acesso em'));
+    for (final l in _wrap(urlConsulta, cols)) {
+      out.add(EscPosCommands.line(l));
+    }
+    out.add(EscPosCommands.line(''));
+    out.add(EscPosCommands.boldOn);
+    out.add(EscPosCommands.line('CHAVE DE ACESSO'));
+    out.add(EscPosCommands.boldOff);
+    if (chaveImpressao.length == 44) {
+      for (final l in _linhasChaveAcesso(chaveImpressao, cols)) {
         out.add(EscPosCommands.line(l));
-      }
-      final qr = _payloadQr(venda);
-      if (qr.isNotEmpty) {
-        out.add(EscPosCommands.feed(1));
-        out.add(EscPosCommands.qrCode(qr, moduleSize: cols >= 42 ? 5 : 4));
-        out.add(EscPosCommands.feed(1));
       }
     }
 
-    final rodape = config.rodapeNota.trim().isEmpty
-        ? 'Obrigado pela preferencia!'
-        : config.rodapeNota.trim();
-    for (final l in _wrap(rodape, cols)) {
-      out.add(EscPosCommands.line(l));
+    final qr = _payloadQr(venda, chaveImpressao);
+    if (qr.isNotEmpty) {
+      out.add(EscPosCommands.feed(1));
+      out.add(EscPosCommands.line('Consulta via leitor de QR Code'));
+      out.add(EscPosCommands.qrCode(qr, moduleSize: cols >= 42 ? 5 : 4));
+      out.add(EscPosCommands.feed(1));
     }
+
+    // Rodape fiscal: so em NFC-e real de homologacao.
+    if (temNfceReal && homolog) {
+      out.add(EscPosCommands.boldOn);
+      out.add(EscPosCommands.line('SEM VALOR FISCAL'));
+      out.add(EscPosCommands.boldOff);
+    } else if (temNfceReal) {
+      final rodape = config.rodapeNota.trim();
+      if (rodape.isNotEmpty && !_pareceRodapeNaoFiscal(rodape)) {
+        for (final l in _wrap(rodape, cols)) {
+          out.add(EscPosCommands.line(l));
+        }
+      } else {
+        out.add(EscPosCommands.line('Obrigado pela preferencia!'));
+      }
+    }
+    // Cupom dinheiro: sem "Documento nao fiscal" (layout DANFE auxiliar).
     out.add(EscPosCommands.line(''));
 
     out.add(EscPosCommands.feed(3));
@@ -243,13 +323,45 @@ abstract final class EscPosCupomBuilder {
     return out.toBytes();
   }
 
-  static String _payloadQr(Venda venda) {
+  static String _textoConsumidor(Cliente? cliente, Venda venda) {
+    final doc = cliente?.documento.trim() ?? '';
+    final nome = cliente?.nomeRazao.trim() ?? '';
+    if (doc.isEmpty && nome.isEmpty) {
+      return 'CONSUMIDOR NAO IDENTIFICADO';
+    }
+    if (nome.isNotEmpty) return 'CONSUMIDOR - $nome';
+    return 'CONSUMIDOR';
+  }
+
+  static bool _pareceRodapeNaoFiscal(String s) {
+    final t = s
+        .toLowerCase()
+        .replaceAll('ã', 'a')
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a');
+    return t.contains('nao fiscal');
+  }
+
+  static List<String> _linhasChaveAcesso(String digitos44, int cols) {
+    final grupos = <String>[];
+    for (var i = 0; i < digitos44.length; i += 4) {
+      grupos.add(digitos44.substring(i, i + 4));
+    }
+    final maxGrupos = ((cols + 1) ~/ 5).clamp(4, 11);
+    final linhas = <String>[];
+    for (var i = 0; i < grupos.length; i += maxGrupos) {
+      final end = (i + maxGrupos).clamp(0, grupos.length);
+      linhas.add(grupos.sublist(i, end).join(' '));
+    }
+    return linhas;
+  }
+
+  static String _payloadQr(Venda venda, String chaveDigitos) {
     final url = venda.nfceUrlDanfe.trim();
     if (url.isNotEmpty) return url;
-    final chave =
-        CupomPdfLayout.chaveAcessoSomenteDigitos(venda.nfceChaveAcesso);
-    if (chave.length == 44) {
-      return 'https://www.nfce.fazenda.gov.br/portal/consulta.aspx?p=$chave';
+    if (chaveDigitos.length == 44) {
+      final base = CupomPdfLayout.urlConsultaNfcePorUf();
+      return '$base?p=$chaveDigitos';
     }
     return '';
   }

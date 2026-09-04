@@ -10,6 +10,7 @@ import 'estoque_routes.dart';
 import 'inventario_routes.dart';
 import 'financeiro_routes.dart';
 import 'fiscal_routes.dart';
+import 'lista_preco_externa_routes.dart';
 import 'recados_routes.dart';
 import 'relatorios_routes.dart';
 import 'vales_routes.dart';
@@ -27,6 +28,7 @@ void registerAllLanApiRoutes(Router router, LanApiDeps d) {
   registerFiscalRoutes(router, d);
   registerRelatoriosRoutes(router, d);
   registerRecadosRoutes(router, d);
+  registerListaPrecoExternaRoutes(router, d);
   registerValesRoutes(router, d);
   registerChatRoutes(router, d);
 }

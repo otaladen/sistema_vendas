@@ -43,6 +43,16 @@ abstract final class SyncRedeAjuda {
         'Confirme que a API :8788 esta ativa (status verde na tela Rede).',
       ];
     }
+    if (m.contains('objectbox') ||
+        m.contains('object put failed') ||
+        m.contains('id sequence') ||
+        m.contains('internal id sequence')) {
+      return const [
+        'Banco ObjectBox inconsistente no PC servidor (cliente/sync).',
+        'Feche o app nos terminais, reinicie o PC1 e teste a conexao.',
+        'Se persistir: restaure o ultimo backup e reabra a API :8788.',
+      ];
+    }
     return const [
       'Use Testar conexao e corrija token/endereco.',
       'Veja "Como configurar a rede?" no final desta tela.',

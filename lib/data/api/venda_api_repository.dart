@@ -1751,6 +1751,7 @@ class VendaApiRepository extends ChangeNotifier {
               'tipoEntregaItem': i.tipoEntregaItem,
               'promocaoId': i.promocaoId,
               'promocaoNomeSnapshot': i.promocaoNomeSnapshot,
+              'precoUnitarioManual': i.precoUnitarioManual,
             },
           )
           .toList(),
@@ -1836,6 +1837,7 @@ class VendaApiRepository extends ChangeNotifier {
               'tipoEntregaItem': i.tipoEntregaItem,
               'promocaoId': i.promocaoId,
               'promocaoNomeSnapshot': i.promocaoNomeSnapshot,
+              'precoUnitarioManual': i.precoUnitarioManual,
             },
           )
           .toList(),
@@ -2182,6 +2184,7 @@ class VendaApiRepository extends ChangeNotifier {
         'tipoEntregaItem': input.tipoEntregaItem,
         'promocaoId': input.promocaoId,
         'promocaoNomeSnapshot': input.promocaoNomeSnapshot,
+        'precoUnitarioManual': input.precoUnitarioManual,
       },
       permitirVendaSemEstoque: permitirVendaSemEstoque,
       terminalId: await _terminalIdCaixa(),

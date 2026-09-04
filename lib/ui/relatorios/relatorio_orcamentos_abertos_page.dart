@@ -23,6 +23,8 @@ class RelatorioOrcamentosAbertosPage extends StatefulWidget {
     this.exibirExportacoesRelatorio = true,
     this.podeEditarNoPdv = false,
     this.onEditarNoPdv,
+    this.onImprimirTermica,
+    this.onGerarPdf,
     this.podeApagarOrcamentos = false,
     this.usuarioExecutor,
   });
@@ -34,6 +36,13 @@ class RelatorioOrcamentosAbertosPage extends StatefulWidget {
   final bool exibirExportacoesRelatorio;
   final bool podeEditarNoPdv;
   final Future<void> Function(BuildContext context, Venda venda)? onEditarNoPdv;
+
+  /// Impressao direta ESC/POS na termica (sem dialogo PDF).
+  final Future<void> Function(BuildContext context, Venda venda)?
+      onImprimirTermica;
+
+  /// Gera PDF do orcamento para salvar/enviar ao cliente.
+  final Future<void> Function(BuildContext context, Venda venda)? onGerarPdf;
   final bool podeApagarOrcamentos;
   final UsuarioSistema? usuarioExecutor;
 
@@ -50,6 +59,9 @@ class _RelatorioOrcamentosAbertosPageState
   DateTime? _dataFimFiltro;
   final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
   bool _carregando = true;
+  int? _ocupadoOrcamentoId;
+  /// `imprimir` | `pdf`
+  String? _ocupadoAcao;
 
   @override
   void initState() {
@@ -255,6 +267,57 @@ class _RelatorioOrcamentosAbertosPageState
       _dataInicioFiltro != null ||
       _dataFimFiltro != null ||
       _buscaController.text.trim().isNotEmpty;
+
+  Future<void> _executarAcaoLinha(
+    Venda venda,
+    String acao,
+    Future<void> Function(BuildContext context, Venda venda) handler,
+  ) async {
+    if (_ocupadoOrcamentoId != null) return;
+    setState(() {
+      _ocupadoOrcamentoId = venda.id;
+      _ocupadoAcao = acao;
+    });
+    try {
+      await handler(context, venda);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _ocupadoOrcamentoId = null;
+          _ocupadoAcao = null;
+        });
+      }
+    }
+  }
+
+  Widget _iconeAcaoLinha({
+    required BuildContext context,
+    required Venda venda,
+    required String acao,
+    required String tooltip,
+    required IconData icone,
+    required Future<void> Function(BuildContext context, Venda venda) handler,
+  }) {
+    final ocupadoAqui =
+        _ocupadoOrcamentoId == venda.id && _ocupadoAcao == acao;
+    final cor = Theme.of(context).colorScheme.primary;
+    return IconButton(
+      tooltip: tooltip,
+      icon: ocupadoAqui
+          ? SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cor,
+              ),
+            )
+          : Icon(icone, color: cor),
+      onPressed: _ocupadoOrcamentoId != null
+          ? null
+          : () => _executarAcaoLinha(venda, acao, handler),
+    );
+  }
 
   Future<void> _confirmarApagarOrcamento(Venda venda) async {
     if (!widget.podeApagarOrcamentos || widget.usuarioExecutor == null) {
@@ -694,6 +757,24 @@ class _RelatorioOrcamentosAbertosPageState
                                       context,
                                     ).colorScheme.errorContainer,
                                   ),
+                                ),
+                              if (widget.onImprimirTermica != null)
+                                _iconeAcaoLinha(
+                                  context: context,
+                                  venda: v,
+                                  acao: 'imprimir',
+                                  tooltip: 'Imprimir',
+                                  icone: Icons.print_outlined,
+                                  handler: widget.onImprimirTermica!,
+                                ),
+                              if (widget.onGerarPdf != null)
+                                _iconeAcaoLinha(
+                                  context: context,
+                                  venda: v,
+                                  acao: 'pdf',
+                                  tooltip: 'PDF',
+                                  icone: Icons.picture_as_pdf_outlined,
+                                  handler: widget.onGerarPdf!,
                                 ),
                               if (widget.podeEditarNoPdv &&
                                   widget.onEditarNoPdv != null)

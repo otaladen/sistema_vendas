@@ -60,7 +60,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(1, 805574422642691043),
     name: 'ItemVenda',
-    lastPropertyId: const obx_int.IdUid(20, 8472910563847201938),
+    lastPropertyId: const obx_int.IdUid(21, 4765084299784932302),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -187,6 +187,12 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(20, 8472910563847201938),
         name: 'quantidadeBuscarNaLoja',
         type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(21, 4765084299784932302),
+        name: 'precoUnitarioManual',
+        type: 1,
         flags: 0,
       ),
     ],
@@ -4316,7 +4322,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final buscarNaLojaStatusOffset = fbb.writeString(
           object.buscarNaLojaStatus,
         );
-        fbb.startTable(21);
+        fbb.startTable(22);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.quantidade);
         fbb.addFloat64(2, object.precoUnitario);
@@ -4337,6 +4343,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(17, lojaOrigemMercadoriaOffset);
         fbb.addOffset(18, buscarNaLojaStatusOffset);
         fbb.addInt64(19, object.quantidadeBuscarNaLoja);
+        fbb.addBool(20, object.precoUnitarioManual);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -4406,6 +4413,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final loteConsumosJsonParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 32, '');
+        final precoUnitarioManualParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          44,
+          false,
+        );
         final botaForaAplicadoParam = const fb.BoolReader().vTableGet(
           buffer,
           rootOffset,
@@ -4440,6 +4453,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           promocaoId: promocaoIdParam,
           promocaoNomeSnapshot: promocaoNomeSnapshotParam,
           loteConsumosJson: loteConsumosJsonParam,
+          precoUnitarioManual: precoUnitarioManualParam,
           botaForaAplicado: botaForaAplicadoParam,
           percentualBotaForaAplicado: percentualBotaForaAplicadoParam,
           lojaOrigemMercadoria: lojaOrigemMercadoriaParam,
@@ -9726,6 +9740,11 @@ class ItemVenda_ {
   /// See [ItemVenda.quantidadeBuscarNaLoja].
   static final quantidadeBuscarNaLoja = obx.QueryIntegerProperty<ItemVenda>(
     _entities[0].properties[19],
+  );
+
+  /// See [ItemVenda.precoUnitarioManual].
+  static final precoUnitarioManual = obx.QueryBooleanProperty<ItemVenda>(
+    _entities[0].properties[20],
   );
 }
 

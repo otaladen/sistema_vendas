@@ -29,7 +29,6 @@ import '../domain/produto_substitutos_util.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/usuario_sistema.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
-import '../data/sync/lan_sync_scheduler.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/fiscal/ncm_cest_sugestao.dart';
@@ -475,7 +474,9 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
-  Future<void> _puxarCadastroDaRede() async {
+  /// Atualiza a lista local / hidrata o catalogo da API no terminal.
+  /// Nao usa mais o pull completo do sync legado.
+  Future<void> _atualizarListaProdutos() async {
     if (widget.produtoRepository is ProdutoApiRepository) {
       try {
         await (widget.produtoRepository as ProdutoApiRepository).hidratar();
@@ -486,28 +487,10 @@ class _ProdutosPageState extends State<ProdutosPage>
         );
         return;
       }
-      if (!mounted) return;
-      widget.produtoRepository.invalidarCacheBusca();
-      setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Produtos atualizados do servidor')),
-      );
-      return;
     }
-
-    final erro = await LanSyncScheduler.solicitarSyncCompleto();
     if (!mounted) return;
     widget.produtoRepository.invalidarCacheBusca();
     setState(() {});
-    if (erro != null && erro.trim().isNotEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Sync: $erro')));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Produtos e precos atualizados da rede')),
-      );
-    }
   }
 
   @override
@@ -5821,11 +5804,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                 ),
               ),
             ),
-          IconButton(
-            tooltip: 'Atualizar produtos da rede (pull completo)',
-            icon: const Icon(Icons.cloud_download_outlined),
-            onPressed: _carregandoCatalogoApi ? null : _puxarCadastroDaRede,
-          ),
           if (!_terminalLeveApi) ...[
             IconButton(
               tooltip: 'Importar backup Chacal (.s3db / .sql / .txt)',
@@ -5973,7 +5951,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                           thickness: 10,
                                           radius: const Radius.circular(8),
                                           child: RefreshIndicator(
-                                            onRefresh: _puxarCadastroDaRede,
+                                            onRefresh: _atualizarListaProdutos,
                                             child: SingleChildScrollView(
                                               primary: false,
                                               controller: _scrollController,
