@@ -12,7 +12,11 @@ abstract final class FocusNfeReconsultaHelper {
     if (!FocusNfeService.pareceFalhaComunicacao(original)) return original;
     try {
       final consulta = await reconsultar();
-      if (consulta.autorizada || consulta.processando) return consulta;
+      if (consulta.autorizada ||
+          consulta.processando ||
+          consulta.cancelada) {
+        return consulta;
+      }
     } catch (_) {}
     return original;
   }

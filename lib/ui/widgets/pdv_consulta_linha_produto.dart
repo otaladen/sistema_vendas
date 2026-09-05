@@ -11,7 +11,7 @@ import 'pdv_consulta_lista_cabecalho.dart';
 import 'pdv_consulta_semaforo_estoque.dart';
 import 'promocao_badge.dart';
 
-/// Precos formatados das tres tabelas (prazo / vista / especial).
+/// Precos formatados das tres tabelas (preco 1 / preco 2 / preco 3).
 class PdvConsultaPrecosLinha {
   const PdvConsultaPrecosLinha({
     required this.preco1Formatado,

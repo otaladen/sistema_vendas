@@ -4005,9 +4005,9 @@ class _CaixaPageState extends State<CaixaPage> {
 
   String _rotuloPrecoConferencia(String precoTipo) => switch (precoTipo) {
         PromocaoCadastro.precoTipoPromo => 'Promocao',
-        'preco2' => 'A Vista',
-        'preco3' => 'Especial',
-        _ => 'A Prazo',
+        'preco2' => 'Preco 2',
+        'preco3' => 'Preco 3',
+        _ => 'Preco 1',
       };
 
   double _precoExibicaoConsultaConferencia(Produto produto, String precoTipo) {

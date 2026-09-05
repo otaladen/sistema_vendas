@@ -238,6 +238,8 @@ class CancelarVendaUi {
       return CancelarVendaUiResultado.canceladoPeloUsuario;
     }
 
+    final tinhaNfceAtiva = vendaAtual.nfceAutorizadaAtiva;
+
     if (exigeFiscal && viaApi) {
       if (!context.mounted) {
         return CancelarVendaUiResultado.canceladoPeloUsuario;
@@ -267,22 +269,22 @@ class CancelarVendaUi {
           motivo: motivoExtra,
           canceladaPor: autorizado.$2!.login,
         );
-        if (context.mounted) Navigator.of(context).pop();
         if (!context.mounted) return CancelarVendaUiResultado.sucesso;
         final msg = (m['mensagem'] ?? '').toString().trim();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              msg.isNotEmpty
-                  ? msg
-                  : '${rotuloVendaParaUsuario(vendaAtual)} cancelada '
-                      '(SEFAZ + ERP) por ${autorizado.$2!.login}.',
+              tinhaNfceAtiva && msg.isEmpty
+                  ? 'NFC-e cancelada com sucesso!'
+                  : msg.isNotEmpty
+                      ? msg
+                      : '${rotuloVendaParaUsuario(vendaAtual)} cancelada '
+                          '(SEFAZ + ERP) por ${autorizado.$2!.login}.',
             ),
           ),
         );
         return CancelarVendaUiResultado.sucesso;
       } catch (e) {
-        if (context.mounted) Navigator.of(context).pop();
         if (context.mounted) {
           LanApiFeedback.snackErro(
             context,
@@ -291,6 +293,10 @@ class CancelarVendaUi {
           );
         }
         return CancelarVendaUiResultado.erro;
+      } finally {
+        if (context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
       }
     }
 
@@ -312,12 +318,26 @@ class CancelarVendaUi {
         ),
       );
 
-      final fiscalRes = await fiscalSvc!.cancelarDocumentosFiscaisVenda(
-        venda: vendaAtual,
-        justificativa: justificativaFiscal,
-      );
-
-      if (context.mounted) Navigator.of(context).pop();
+      VendaFiscalOperacaoResultado fiscalRes;
+      try {
+        fiscalRes = await fiscalSvc!.cancelarDocumentosFiscaisVenda(
+          venda: vendaAtual,
+          justificativa: justificativaFiscal,
+        );
+      } catch (e) {
+        if (context.mounted) {
+          LanApiFeedback.snackErro(
+            context,
+            e,
+            prefixo: 'Cancelamento fiscal',
+          );
+        }
+        return CancelarVendaUiResultado.erro;
+      } finally {
+        if (context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
+      }
 
       if (!fiscalRes.sucesso) {
         if (context.mounted) {
@@ -358,12 +378,11 @@ class CancelarVendaUi {
       }
       if (!context.mounted) return CancelarVendaUiResultado.sucesso;
       final sufixoMotivo = motivo.isEmpty ? '' : ' Motivo: $motivo';
+      final mensagemSucesso = tinhaNfceAtiva
+          ? 'NFC-e cancelada com sucesso!'
+          : '${rotuloVendaParaUsuario(vendaAtual)} cancelada por ${autorizado.$2!.login}.$sufixoMotivo';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${rotuloVendaParaUsuario(vendaAtual)} cancelada por ${autorizado.$2!.login}.$sufixoMotivo',
-          ),
-        ),
+        SnackBar(content: Text(mensagemSucesso)),
       );
       return CancelarVendaUiResultado.sucesso;
     } catch (e) {

@@ -27,18 +27,18 @@ String _cabecalhoColunas({
   if (incluirEstoque) {
     if (incluirCustos) {
       return '${'CODIGO'.padRight(12)} ${'PRODUTO'.padRight(34)} '
-          '${'EST'.padLeft(7)} ${'A_PRAZO'.padLeft(10)} '
-          '${'A_VISTA'.padLeft(10)} ${'CUSTO'.padLeft(10)}';
+          '${'EST'.padLeft(7)} ${'PRECO_1'.padLeft(10)} '
+          '${'PRECO_2'.padLeft(10)} ${'CUSTO'.padLeft(10)}';
     }
     return '${'CODIGO'.padRight(12)} ${'PRODUTO'.padRight(34)} '
-        '${'EST'.padLeft(7)} ${'A_PRAZO'.padLeft(10)} ${'A_VISTA'.padLeft(10)}';
+        '${'EST'.padLeft(7)} ${'PRECO_1'.padLeft(10)} ${'PRECO_2'.padLeft(10)}';
   }
   if (incluirCustos) {
     return '${'CODIGO'.padRight(12)} ${'PRODUTO'.padRight(40)} '
-        '${'A_PRAZO'.padLeft(10)} ${'A_VISTA'.padLeft(10)} ${'CUSTO'.padLeft(10)}';
+        '${'PRECO_1'.padLeft(10)} ${'PRECO_2'.padLeft(10)} ${'CUSTO'.padLeft(10)}';
   }
   return '${'CODIGO'.padRight(12)} ${'PRODUTO'.padRight(42)} '
-      '${'A_PRAZO'.padLeft(10)} ${'A_VISTA'.padLeft(10)}';
+      '${'PRECO_1'.padLeft(10)} ${'PRECO_2'.padLeft(10)}';
 }
 
 String _linha(

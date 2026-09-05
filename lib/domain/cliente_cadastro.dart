@@ -12,9 +12,9 @@ class ClienteCadastro {
   static const categoriasComerciais = ['A', 'B', 'C'];
 
   static const tabelasPreco = [
-    ('preco1', 'A prazo (preco 1)'),
-    ('preco2', 'A vista (preco 2)'),
-    ('preco3', 'Especial (preco 3)'),
+    ('preco1', 'Preco 1'),
+    ('preco2', 'Preco 2'),
+    ('preco3', 'Preco 3'),
   ];
 
   static const indicadoresIe = [
@@ -49,7 +49,7 @@ class ClienteCadastro {
     for (final item in tabelasPreco) {
       if (item.$1 == codigo) return item.$2;
     }
-    return 'A prazo (preco 1)';
+    return 'Preco 1';
   }
 
   static String rotuloTipoEndereco(String? codigo) {

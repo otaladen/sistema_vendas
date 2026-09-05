@@ -733,19 +733,19 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
         const SizedBox(height: 8),
         CheckboxListTile(
           dense: true,
-          title: const Text('Preco 1 — a prazo'),
+          title: const Text('Preco 1'),
           value: _tabelas.contains(ReajusteTabelaPreco.preco1),
           onChanged: (v) => _toggleTabela(ReajusteTabelaPreco.preco1, v),
         ),
         CheckboxListTile(
           dense: true,
-          title: const Text('Preco 2 — a vista'),
+          title: const Text('Preco 2'),
           value: _tabelas.contains(ReajusteTabelaPreco.preco2),
           onChanged: (v) => _toggleTabela(ReajusteTabelaPreco.preco2, v),
         ),
         CheckboxListTile(
           dense: true,
-          title: const Text('Preco 3 — especial'),
+          title: const Text('Preco 3'),
           value: _tabelas.contains(ReajusteTabelaPreco.preco3),
           onChanged: (v) => _toggleTabela(ReajusteTabelaPreco.preco3, v),
         ),
@@ -1012,9 +1012,9 @@ class _ReajustePrecoLotePageState extends State<ReajustePrecoLotePage> {
 
   String _rotuloTabelas() {
     final partes = <String>[];
-    if (_tabelas.contains(ReajusteTabelaPreco.preco1)) partes.add('P1 a prazo');
-    if (_tabelas.contains(ReajusteTabelaPreco.preco2)) partes.add('P2 a vista');
-    if (_tabelas.contains(ReajusteTabelaPreco.preco3)) partes.add('P3 especial');
+    if (_tabelas.contains(ReajusteTabelaPreco.preco1)) partes.add('Preco 1');
+    if (_tabelas.contains(ReajusteTabelaPreco.preco2)) partes.add('Preco 2');
+    if (_tabelas.contains(ReajusteTabelaPreco.preco3)) partes.add('Preco 3');
     return partes.join(' · ');
   }
 }

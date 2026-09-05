@@ -1,4 +1,4 @@
-/// Tabelas de preco do PDV (preco1 prazo, preco2 vista, preco3 especial).
+/// Tabelas de preco do PDV (preco 1, preco 2, preco 3).
 abstract final class PdvTabelaPrecoUtil {
   PdvTabelaPrecoUtil._();
 
@@ -24,14 +24,25 @@ abstract final class PdvTabelaPrecoUtil {
     }
   }
 
+  static String rotulo(String precoTipo) {
+    switch (normalizar(precoTipo)) {
+      case 'preco2':
+        return 'Preco 2';
+      case 'preco3':
+        return 'Preco 3';
+      default:
+        return 'Preco 1';
+    }
+  }
+
   static String rotuloCurto(String precoTipo) {
     switch (normalizar(precoTipo)) {
       case 'preco2':
-        return 'Vista';
+        return 'P2';
       case 'preco3':
-        return 'Especial';
+        return 'P3';
       default:
-        return 'Prazo';
+        return 'P1';
     }
   }
 
@@ -40,29 +51,4 @@ abstract final class PdvTabelaPrecoUtil {
 
   static bool carrinhoMisto(Iterable<String> precoTipos) =>
       tabelasDistintas(precoTipos).length > 1;
-
-  /// Uniao ordenada dos meios permitidos para cada tabela presente no carrinho.
-  static List<String> meiosPagamentoUniao(
-    Iterable<String> tabelasNoCarrinho,
-    Map<String, List<String>> meiosPorTabela,
-    List<String> ordemPreferida,
-  ) {
-    final permitidos = <String>{};
-    final tabelas = tabelasNoCarrinho.map(normalizar).toSet();
-    if (tabelas.isEmpty) {
-      permitidos.addAll(meiosPorTabela['preco1'] ?? const []);
-    } else {
-      for (final t in tabelas) {
-        permitidos.addAll(meiosPorTabela[t] ?? meiosPorTabela['preco1']!);
-      }
-    }
-    final resultado = <String>[];
-    for (final id in ordemPreferida) {
-      if (permitidos.contains(id)) resultado.add(id);
-    }
-    for (final id in permitidos) {
-      if (!resultado.contains(id)) resultado.add(id);
-    }
-    return resultado;
-  }
 }

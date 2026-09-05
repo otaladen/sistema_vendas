@@ -86,7 +86,7 @@ class EstoqueTabelaCabecalho extends StatelessWidget {
                 estilo,
                 corAtiva: scheme.primary,
                 coluna: EstoqueColunaOrdenacao.venda,
-                tooltip: 'Preco de venda a vista',
+                tooltip: 'Preco 2',
               ),
               if (verCusto)
                 _coluna('Custo', EstoqueTabelaColunas.larguraPreco, estilo,

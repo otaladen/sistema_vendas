@@ -901,6 +901,7 @@ class FocusNfeService {
       referencia: referencia,
       justificativa: justificativa,
       rotulo: 'NFC-e',
+      timeout: const Duration(seconds: 15),
     );
   }
 
@@ -909,6 +910,7 @@ class FocusNfeService {
     required String referencia,
     required String justificativa,
     required String rotulo,
+    Duration timeout = const Duration(seconds: 90),
   }) async {
     validarConfiguracao();
     final just = justificativa.trim();
@@ -927,11 +929,15 @@ class FocusNfeService {
       final request = http.Request('DELETE', uri)
         ..headers.addAll(_headers())
         ..body = jsonEncode({'justificativa': just});
-      final streamed = await _http.send(request).timeout(
-        const Duration(seconds: 90),
-      );
+      final streamed = await _http.send(request).timeout(timeout);
       final response = await http.Response.fromStream(streamed);
       return _interpretarRespostaJsonHttp(response, referencia: ref);
+    } on TimeoutException {
+      final seg = timeout.inSeconds;
+      return FocusNfeEmissaoResultado.erro(
+        'Tempo esgotado ao cancelar $rotulo na Focus (${seg}s). '
+        'Verifique a conexao e tente novamente.',
+      );
     } catch (e) {
       return FocusNfeEmissaoResultado.erro(
         'Falha ao cancelar $rotulo na Focus: $e',

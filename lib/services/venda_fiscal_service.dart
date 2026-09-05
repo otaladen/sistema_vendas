@@ -152,11 +152,16 @@ class VendaFiscalService {
           reconsultar: () => _focus.consultarNfce(ref),
         );
         if (!resultado.cancelada && !resultado.autorizada) {
-          return VendaFiscalOperacaoResultado.erro(
-            resultado.mensagem.isNotEmpty
-                ? resultado.mensagem
-                : 'SEFAZ nao aceitou o cancelamento da NFC-e.',
-          );
+          final consulta = await _focus.consultarNfce(ref);
+          if (consulta.cancelada) {
+            resultado = consulta;
+          } else {
+            return VendaFiscalOperacaoResultado.erro(
+              resultado.mensagem.isNotEmpty
+                  ? resultado.mensagem
+                  : 'SEFAZ nao aceitou o cancelamento da NFC-e.',
+            );
+          }
         }
       }
       if (!resultado.cancelada) {

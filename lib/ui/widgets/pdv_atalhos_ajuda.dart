@@ -194,7 +194,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   const PdvAtalhosAjudaPesquisa({super.key});
 
   static const _navegacao = <_PdvAtalhoItem>[
-    (tecla: 'Tab', descricao: 'vendedor → preço → entrega → cliente', destaque: false),
+    (tecla: 'Tab', descricao: 'vendedor → entrega → cliente', destaque: false),
     (tecla: 'F6', descricao: 'foco no carrinho', destaque: false),
     (tecla: 'F8', descricao: 'foco na busca', destaque: false),
     (tecla: '↓', descricao: 'busca entra no carrinho', destaque: false),
@@ -202,7 +202,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   ];
 
   static const _precoCliente = <_PdvAtalhoItem>[
-    (tecla: 'F1–F3', descricao: 'tabela (linha no carrinho ou novos)', destaque: false),
+    (tecla: 'F1–F3', descricao: 'tabela da linha no carrinho', destaque: false),
     (tecla: 'Shift+F2', descricao: 'foco no cliente', destaque: false),
     (tecla: 'Ctrl+N', descricao: 'novo cliente', destaque: false),
     (tecla: 'Shift+F4', descricao: 'lista de clientes', destaque: false),

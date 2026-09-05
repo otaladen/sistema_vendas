@@ -22,7 +22,7 @@ class PromocaoCadastro {
 
   static const tiposRegra = [
     ('preco_fixo', 'Preco fixo (R\$)'),
-    ('desconto_percentual', '% sobre preco 1 (a prazo)'),
+    ('desconto_percentual', '% sobre preco 1'),
   ];
 
   static String rotuloTipoCampanha(String? codigo) {
@@ -81,7 +81,7 @@ class PromocaoCadastro {
     return ((precoVenda - precoCusto) / precoVenda) * 100;
   }
 
-  /// Mesma base do PDV: preco 1 (a prazo) do produto.
+  /// Mesma base do PDV: preco 1 do produto.
   static double preco1DoProduto(Produto produto) {
     return produto.preco1 > 0 ? produto.preco1 : produto.precoVenda;
   }
@@ -196,7 +196,7 @@ class PromocaoCadastro {
       return '$base · leve $leveQuantidade pague $pagueQuantidade';
     }
     if (normalizarTipoRegra(tipoRegra) == 'desconto_percentual') {
-      return '${valorRegra.toStringAsFixed(1)}% sobre preco 1 (a prazo)';
+      return '${valorRegra.toStringAsFixed(1)}% sobre preco 1';
     }
     return 'Preco fixo R\$ ${valorRegra.toStringAsFixed(2)}';
   }

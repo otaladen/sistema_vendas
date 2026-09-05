@@ -940,7 +940,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
           ),
           const SizedBox(height: 6),
           Text('Regra: $resumo'),
-          Text('Preco 1 (a prazo): ${_fmt(p1)}'),
+          Text('Preco 1: ${_fmt(p1)}'),
           Text('Preco promocional (1 un.): ${_fmt(precoBasePromo)}'),
           if (_ehLevePague && qtdSim >= _leveQtd && _leveQtd >= 2) ...[
             Text(
@@ -1226,7 +1226,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
               _secao(
                 titulo: '4. Preco promocional',
                 subtitulo:
-                    'O desconto % sempre usa o preco 1 (a prazo) do cadastro do produto, '
+                    'O desconto % sempre usa o preco 1 do cadastro do produto, '
                     'igual ao PDV.',
                 children: [
                   DropdownButtonFormField<String>(

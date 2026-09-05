@@ -86,7 +86,7 @@ abstract final class PdvConsultaColunas {
 
   static const double larguraUnidade = 32;
   static const double larguraEstoque = 56;
-  /// Cada coluna de preco (A Prazo / A Vista / Especial).
+  /// Cada coluna de preco (Preco 1 / Preco 2 / Preco 3).
   static const double larguraPrecoColuna = 76;
   static const double larguraAcao = 40;
 

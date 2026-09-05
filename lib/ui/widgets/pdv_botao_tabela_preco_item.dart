@@ -33,18 +33,19 @@ class PdvBotaoTabelaPrecoItem extends StatelessWidget {
     final cor = corPara(context, precoTipo);
     return IconButton(
       onPressed: onPressed,
-      tooltip: '$rotulo — toque para alternar (F1–F3 na linha)',
+      tooltip:
+          '${PdvTabelaPrecoUtil.rotulo(precoTipo)} — toque para alternar (F1–F3 na linha)',
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.all(compacto ? 2 : 4),
       constraints: BoxConstraints(
-        minWidth: compacto ? 28 : 34,
+        minWidth: compacto ? 32 : 38,
         minHeight: compacto ? 30 : 36,
       ),
       icon: Text(
-        rotulo.substring(0, 1),
+        rotulo,
         style: TextStyle(
           fontWeight: FontWeight.w800,
-          fontSize: compacto ? 12 : 13,
+          fontSize: compacto ? 11 : 12,
           color: cor,
         ),
       ),

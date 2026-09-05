@@ -117,7 +117,7 @@ class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
   List<List<String>> _linhasCsv() {
     final moeda = NumberFormat('#,##0.00', 'pt_BR');
     return [
-      ['Codigo', 'Produto', 'Estoque', 'A prazo', 'A vista', 'Custo'],
+      ['Codigo', 'Produto', 'Estoque', 'Preco 1', 'Preco 2', 'Custo'],
       ..._preview.map(
         (p) => [
           p.codigoInterno,
@@ -138,7 +138,7 @@ class _RelatorioTabelaPrecosPageState extends State<RelatorioTabelaPrecosPage> {
       subtitulo:
           '${_preview.length} produto(s)'
           '${_somenteAtivos ? ' · Somente ativos' : ''}',
-      cabecalho: ['Codigo', 'Produto', 'Est', 'A prazo', 'A vista'],
+      cabecalho: ['Codigo', 'Produto', 'Est', 'Preco 1', 'Preco 2'],
       linhas: _preview
           .map(
             (p) => [

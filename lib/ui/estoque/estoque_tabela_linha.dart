@@ -201,7 +201,7 @@ class EstoqueTabelaLinha extends StatelessWidget {
                   largura: EstoqueTabelaColunas.larguraMedia,
                   tooltip: 'Media diaria de vendas (60 dias)',
                 ),
-                _celulaPreco(vendaFormatada, tooltip: 'Preco de venda a vista'),
+                _celulaPreco(vendaFormatada, tooltip: 'Preco 2'),
                 if (verCusto)
                   _celulaPreco(custoFormatado, tooltip: 'Custo medio ou custo cadastrado'),
                 if (verCusto)

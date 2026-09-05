@@ -1508,15 +1508,15 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                           items: const [
                             DropdownMenuItem(
                               value: 'preco1',
-                              child: Text('A prazo'),
+                              child: Text('Preco 1'),
                             ),
                             DropdownMenuItem(
                               value: 'preco2',
-                              child: Text('A vista'),
+                              child: Text('Preco 2'),
                             ),
                             DropdownMenuItem(
                               value: 'preco3',
-                              child: Text('Especial'),
+                              child: Text('Preco 3'),
                             ),
                           ],
                           onChanged: (nv) {

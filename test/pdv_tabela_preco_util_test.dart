@@ -19,25 +19,12 @@ void main() {
     );
   });
 
-  test('meiosPagamentoUniao junta opcoes das tabelas', () {
-    final mapa = {
-      'preco1': ['fiado', 'cartao_credito'],
-      'preco2': ['pix', 'dinheiro'],
-      'preco3': ['dinheiro'],
-    };
-    final ordem = [
-      'dinheiro',
-      'pix',
-      'cartao_credito',
-      'fiado',
-    ];
-    expect(
-      PdvTabelaPrecoUtil.meiosPagamentoUniao(
-        ['preco1', 'preco2'],
-        mapa,
-        ordem,
-      ),
-      ['dinheiro', 'pix', 'cartao_credito', 'fiado'],
-    );
+  test('rotulos usam Preco 1 / Preco 2 / Preco 3', () {
+    expect(PdvTabelaPrecoUtil.rotulo('preco1'), 'Preco 1');
+    expect(PdvTabelaPrecoUtil.rotulo('preco2'), 'Preco 2');
+    expect(PdvTabelaPrecoUtil.rotulo('preco3'), 'Preco 3');
+    expect(PdvTabelaPrecoUtil.rotuloCurto('preco1'), 'P1');
+    expect(PdvTabelaPrecoUtil.rotuloCurto('preco2'), 'P2');
+    expect(PdvTabelaPrecoUtil.rotuloCurto('preco3'), 'P3');
   });
 }

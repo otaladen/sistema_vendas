@@ -2729,7 +2729,6 @@ class _ProdutosPageState extends State<ProdutosPage>
     Widget colunaPreco({
       required int precoIndice,
       required String titulo,
-      required String subtitulo,
       required TextEditingController controller,
       required TextEditingController limiteDescontoController,
       required double margem,
@@ -2763,12 +2762,6 @@ class _ProdutosPageState extends State<ProdutosPage>
               titulo,
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w800,
-              ),
-            ),
-            Text(
-              subtitulo,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: cs.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: _erpGap8),
@@ -2947,7 +2940,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                 colunaPreco(
                   precoIndice: 1,
                   titulo: 'Preco 1',
-                  subtitulo: 'A prazo',
                   controller: _preco1Controller,
                   limiteDescontoController: _limiteDescontoPreco1Controller,
                   margem: margem1,
@@ -2957,7 +2949,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                 colunaPreco(
                   precoIndice: 2,
                   titulo: 'Preco 2',
-                  subtitulo: 'A vista',
                   controller: _preco2Controller,
                   limiteDescontoController: _limiteDescontoPreco2Controller,
                   margem: margem2,
@@ -2966,7 +2957,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                 colunaPreco(
                   precoIndice: 3,
                   titulo: 'Preco 3',
-                  subtitulo: 'Especial',
                   controller: _preco3Controller,
                   limiteDescontoController: _limiteDescontoPreco3Controller,
                   margem: margem3,
@@ -5532,7 +5522,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                       'Chacal/CSV enriquecido: NCM, GTIN, Marca, Familia, Grupo, Subgrupo, Preco2, Preco3, Inativo.\n'
                       'Fabricante legado entra em Marca quando a coluna Marca estiver vazia.\n'
                       'Categoria e subcategoria sao mapeadas de Familia/Grupo/Subgrupo quando presentes.\n'
-                      'PrecoVenda do CSV = apenas A Prazo (preco1); Preco2/Preco3 importados se existirem.\n'
+                      'PrecoVenda do CSV = apenas Preco 1; Preco2/Preco3 importados se existirem.\n'
                       'Quantidade negativa ou decimal: arredonda e nao deixa estoque < 0.\n'
                       'PrecoVenda vazio ou "000": tenta PrecoCusto; depois valores em Obs/descricao '
                       '(ex.: 60,00 no texto); se ainda zero, grava venda R\$ 0,01.',

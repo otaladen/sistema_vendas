@@ -98,7 +98,7 @@ class PromocaoInfoVigente {
   String? get textoPrecoComplementar {
     if (tipoCampanha != PromocaoCadastro.tipoLevePague) return null;
     if (precoBasePreco1 > precoUnitarioRegra + 0.01) {
-      return 'Preco 1 (a prazo): ${_fmtMoeda(precoBasePreco1)} · '
+      return 'Preco 1: ${_fmtMoeda(precoBasePreco1)} · '
           'tabela promocional: ${_fmtMoeda(precoUnitarioRegra)}/un.';
     }
     return null;

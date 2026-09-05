@@ -1261,8 +1261,8 @@ class _EstoquePageState extends State<EstoquePage>
       final linhas = <String>[];
       linhas.add(
         incluirCustos
-            ? 'SKU;Nome;Unidade;Categoria;Estoque;Minimo;Custo;Custo medio;Preco venda;Preco a vista'
-            : 'SKU;Nome;Unidade;Categoria;Estoque;Minimo;Preco venda;Preco a vista',
+            ? 'SKU;Nome;Unidade;Categoria;Estoque;Minimo;Custo;Custo medio;Preco 1;Preco 2'
+            : 'SKU;Nome;Unidade;Categoria;Estoque;Minimo;Preco 1;Preco 2',
       );
       for (final produto in produtos) {
         if (incluirCustos) {

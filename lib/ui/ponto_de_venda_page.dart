@@ -61,7 +61,6 @@ import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
 import 'vales/vale_credito_busca_dialog.dart';
-import '../domain/cliente_cadastro.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/kit_orcamento.dart';
@@ -202,7 +201,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Checkout à direita (F7 / Shift+F7).
   final _focusClientePdV = FocusNode(debugLabel: 'pdvCliente');
   final _focusVendedorPdV = FocusNode(debugLabel: 'pdvVendedor');
-  final _focusPrecoListaPdV = FocusNode(debugLabel: 'pdvPrecoLista');
   final _focusEntregaPdV = FocusNode(debugLabel: 'pdvEntregaPadrao');
   final _focusPagamentoPdV = FocusNode(debugLabel: 'pdvPagamento');
 
@@ -299,8 +297,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Epoch do painel carrinho/preview: qty, preco, selecao, etc. sem rebuildar AppBar.
   final ValueNotifier<int> _carrinhoUiEpoch = ValueNotifier(0);
 
-  /// Tabela de preco para novos itens (F1–F3 sem linha selecionada).
-  String _precoListaAtivo = 'preco1';
+  /// Tabela de preco padrao para novos itens (sempre Preco 1).
+  static const String _precoListaPadraoPdv = 'preco1';
+  String _precoListaAtivo = _precoListaPadraoPdv;
   String _formaPagamentoSelecionada = 'dinheiro';
   int _parcelasSelecionadas = 1;
 
@@ -377,30 +376,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _aplicarEnderecoSelecionadoDoCliente(cliente, _indiceEnderecoSelecionado);
   }
 
-  static const _opcoesPrecoListaPdv = <(String, String, String)>[
-    ('preco1', 'A Prazo', 'F1'),
-    ('preco2', 'À Vista', 'F2'),
-    ('preco3', 'Especial', 'F3'),
-  ];
-
   static const _opcoesEntregaPadraoPdv = <(String, String, String)>[
     (EntregaVendaHelper.tipoRetirada, 'Leva agora', 'Ctrl+F1'),
     (EntregaVendaHelper.tipoRetiradaFutura, 'Retirada futura', 'Ctrl+F2'),
     (EntregaVendaHelper.tipoEntregaLoja, 'Carreto', 'Ctrl+F3'),
   ];
-
-  Color? _corPrecoLista(BuildContext context, String precoTipo) {
-    final scheme = Theme.of(context).colorScheme;
-    switch (precoTipo) {
-      case 'preco2':
-        return scheme.tertiary;
-      case 'preco3':
-        return scheme.secondary;
-      case 'preco1':
-      default:
-        return scheme.primary;
-    }
-  }
 
   void _notificarUiCarrinho() {
     _carrinhoUiEpoch.value++;
@@ -1267,7 +1247,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _focusClientePdV.removeListener(_onFocoClientePdvChanged);
     _focusClientePdV.dispose();
     _focusVendedorPdV.dispose();
-    _focusPrecoListaPdV.dispose();
     _focusEntregaPdV.dispose();
     _focusPagamentoPdV.dispose();
     _focusEditarEntregaPdV.dispose();
@@ -1690,9 +1669,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       return;
     }
 
-    setState(() {
-      _precoListaAtivo = PdvTabelaPrecoUtil.normalizar(result.precoListaAtivo);
-    });
     _registrarProdutoRecente(result.produto);
 
     if (result.adicaoDireta) {
@@ -2606,20 +2582,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   static const double _larguraSeletorVendedorAppBarPdv = 148;
   static const double _larguraSeletorClienteAppBarPdv = 156;
-  static const double _larguraSeletorPrecoAppBarPdv = 108;
   static const double _larguraSeletorEntregaAppBarPdv = 124;
-
-  String _rotuloCurtoPrecoListaCabecalhoPdV(String tipo) {
-    switch (tipo) {
-      case 'preco2':
-        return 'Dinheiro';
-      case 'preco3':
-        return 'Especial';
-      case 'preco1':
-      default:
-        return 'A prazo';
-    }
-  }
 
   Vendedor? _vendedorSelecionadoPdv() {
     final id = _vendedorSelecionadoId;
@@ -2872,73 +2835,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     );
   }
 
-  Widget _buildSeletorPrecoListaAppBarPdv() {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final itens = _opcoesPrecoListaPdv
-        .map(
-          (opcao) => DropdownMenuItem<String>(
-            value: opcao.$1,
-            child: Text(
-              _rotuloCurtoPrecoListaCabecalhoPdV(opcao.$1),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        )
-        .toList();
-
-    return FocusTraversalOrder(
-      order: const NumericFocusOrder(2),
-      child: Tooltip(
-        message:
-            'Tabela para os proximos produtos'
-            ' (${_rotuloCurtoPrecoListaCabecalhoPdV(_precoListaAtivo)}). '
-            'Nao altera itens ja no carrinho — use T ou F1–F3 com linha selecionada.',
-        waitDuration: const Duration(milliseconds: 400),
-        child: SizedBox(
-          width: _larguraSeletorPrecoAppBarPdv,
-          height: 30,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.surface.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.45),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  key: ValueKey('pdv_prc_$_precoListaAtivo'),
-                  isDense: true,
-                  isExpanded: true,
-                  focusNode: _focusPrecoListaPdV,
-                  value: _precoListaAtivo,
-                  icon: Icon(
-                    Icons.arrow_drop_down,
-                    size: 18,
-                    color: scheme.onSurface,
-                  ),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: _corPrecoLista(context, _precoListaAtivo),
-                  ),
-                  borderRadius: BorderRadius.circular(6),
-                  items: itens,
-                  onChanged: (value) {
-                    if (value == null) return;
-                    _definirTabelaPrecoPadraoNovosItens(value);
-                  },
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSeletorEntregaPadraoAppBarPdv() {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -2959,7 +2855,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         .toList();
 
     return FocusTraversalOrder(
-      order: const NumericFocusOrder(3),
+      order: const NumericFocusOrder(2),
       child: Tooltip(
         message:
             'Entrega (carrinho e novos itens): '
@@ -3593,6 +3489,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         _valorFreteController.clear();
         _enderecoEntregaController.clear();
         _observacaoEntregaController.clear();
+        _precoListaAtivo = _precoListaPadraoPdv;
         _atualizarPrecosCarrinhoPreservandoTabelas();
       });
       return;
@@ -3605,9 +3502,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       } catch (_) {}
     }
     if (cliente == null) return;
-    final tabela = ClienteCadastro.normalizarTabelaPreco(
-      cliente.tabelaPrecoPadrao,
-    );
     setState(() {
       _clienteSelecionadoId = value;
       if (cliente!.vendedorResponsavelId > 0) {
@@ -3617,9 +3511,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         cliente,
         cliente.indiceEnderecoPadraoEntrega(),
       );
-      _precoListaAtivo = PdvTabelaPrecoUtil.normalizar(tabela);
       _atualizarPrecosCarrinhoPreservandoTabelas();
-      _aplicarSugestaoFormaPagamentoParaCarrinhoAtual();
     });
     if (!cliente.ativo && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3729,7 +3621,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         : clienteAtual.nomeRazao;
 
     return FocusTraversalOrder(
-      order: const NumericFocusOrder(4),
+      order: const NumericFocusOrder(3),
       child: Tooltip(
         message: tooltip,
         waitDuration: const Duration(milliseconds: 400),
@@ -4353,40 +4245,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     );
   }
 
-  Set<String> _idsMeiosPagamentoCarrinhoAtual() =>
-      PdvTabelaPrecoUtil.meiosPagamentoUniao(
-        _carrinho.isEmpty
-            ? [_precoListaAtivo]
-            : _carrinho.map((l) => l.precoTipo),
-        _meiosPagamentoPorTabelaPdv,
-        _opcoesFormaPagamentoPdV.map((o) => o.id).toList(),
-      ).toSet();
-
-  void _aplicarSugestaoFormaPagamentoParaCarrinhoAtual({
-    bool preservarSelecaoAtual = false,
-  }) {
-    final tabelas = PdvTabelaPrecoUtil.tabelasDistintas(
-      _carrinho.map((l) => l.precoTipo),
-    );
-    if (tabelas.length <= 1) {
-      final tabela = tabelas.isEmpty ? _precoListaAtivo : tabelas.first;
-      _aplicarSugestaoFormaPagamentoPorTabela(
-        tabela,
-        preservarSelecaoAtual: preservarSelecaoAtual,
-      );
-      return;
-    }
-    final ids = _idsMeiosPagamentoCarrinhoAtual();
-    if (preservarSelecaoAtual && ids.contains(_formaPagamentoSelecionada)) {
-      return;
-    }
-    if (ids.contains(_formaPagamentoSelecionada)) return;
-    _formaPagamentoSelecionada = ids.first;
-    if (_formaPagamentoSelecionada != 'cartao_credito') {
-      _parcelasSelecionadas = 1;
-    }
-  }
-
   String _rotuloFormaPagamentoCheckoutPdV() {
     if (PdvTabelaPrecoUtil.carrinhoMisto(_carrinho.map((l) => l.precoTipo))) {
       return 'tabelas mistas';
@@ -4398,67 +4256,24 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return _rotuloPreco(tabela);
   }
 
-  void _aplicarSugestaoFormaPagamentoPorTabela(
-    String tabela, {
-    bool preservarSelecaoAtual = false,
-  }) {
-    final opcoes = _opcoesFormaPagamentoPdVParaTabela(tabela);
-    if (opcoes.isEmpty) return;
-    final ids = opcoes.map((o) => o.id).toSet();
-
-    if (!preservarSelecaoAtual && tabela == 'preco1') {
-      final credito = ids.contains('cartao_credito')
-          ? 'cartao_credito'
-          : opcoes.first.id;
-      _formaPagamentoSelecionada = credito;
-      if (credito != 'cartao_credito') {
-        _parcelasSelecionadas = 1;
-      }
-      return;
-    }
-
-    if (ids.contains(_formaPagamentoSelecionada)) return;
-    _formaPagamentoSelecionada = opcoes.first.id;
-    if (_formaPagamentoSelecionada != 'cartao_credito') {
-      _parcelasSelecionadas = 1;
-    }
-  }
-
-  void _definirTabelaPrecoPadraoNovosItens(String novaTabela) {
-    final tabela = _normalizarTabelaPrecoPdv(novaTabela);
-    if (tabela == _precoListaAtivo) return;
-    setState(() {
-      _precoListaAtivo = tabela;
-      _aplicarSugestaoFormaPagamentoParaCarrinhoAtual();
-    });
-  }
-
-  /// F1–F3: atualiza padrao para novos itens e, com linha selecionada, essa linha.
+  /// F1–F3 com linha selecionada no carrinho: altera a tabela da linha.
   void _aplicarTabelaPrecoAtalhoPdv(String novaTabela) {
-    final tabela = _normalizarTabelaPrecoPdv(novaTabela);
     final idx = _indiceLinhaCarrinho;
-    final linhaSelecionada = idx != null && idx >= 0 && idx < _carrinho.length;
-    if (!linhaSelecionada) {
-      _definirTabelaPrecoPadraoNovosItens(novaTabela);
-      return;
-    }
+    if (idx == null || idx < 0 || idx >= _carrinho.length) return;
+    final tabela = _normalizarTabelaPrecoPdv(novaTabela);
     final linha = _carrinho[idx];
     if (_normalizarTabelaPrecoPdv(linha.precoTipo) == tabela &&
-        _precoListaAtivo == tabela &&
         !linha.precoUnitarioManual) {
       return;
     }
     setState(() {
-      _precoListaAtivo = tabela;
       _aplicarTabelaPrecoNaLinha(linha, tabela);
       _promoCarrinho?.aplicarRegrasCarrinho(
         _carrinho,
         dataReferencia: DateTime.now(),
         segmentoCliente: _segmentoClienteAtivo,
       );
-      _aplicarSugestaoFormaPagamentoParaCarrinhoAtual();
     });
-    // setState ja cobre AppBar (tabela) + carrinho; epoch mantem listeners alinhados.
     _notificarUiCarrinho();
   }
 
@@ -4552,17 +4367,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   String _rotuloPreco(String precoTipo) {
-    switch (precoTipo) {
-      case PromocaoCadastro.precoTipoPromo:
-        return 'Promocao';
-      case 'preco2':
-        return 'À Vista';
-      case 'preco3':
-        return 'Especial';
-      case 'preco1':
-      default:
-        return 'A Prazo';
+    if (precoTipo == PromocaoCadastro.precoTipoPromo) {
+      return 'Promocao';
     }
+    return PdvTabelaPrecoUtil.rotulo(precoTipo);
   }
 
   Produto _produtoAtualizadoParaPdv(Produto produto) =>
@@ -4643,58 +4451,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     ),
   ];
 
-  static const Map<String, List<String>> _meiosPagamentoPorTabelaPdv = {
-    'preco1': ['cartao_credito', 'fiado'],
-    'preco2': ['pix', 'dinheiro', 'cartao_debito'],
-    'preco3': ['dinheiro', 'pix', 'cartao_debito'],
-  };
-
-  List<({String id, String rotulo, IconData icone})>
-  _opcoesFormaPagamentoPdVParaTabela(String tabela) {
-    final ids =
-        _meiosPagamentoPorTabelaPdv[tabela] ??
-        _meiosPagamentoPorTabelaPdv['preco1']!;
-    final opcoes = <({String id, String rotulo, IconData icone})>[];
-    for (final id in ids) {
-      if (id == 'fiado' && !_podeVenderFiado) continue;
-      // Vale so pelo painel misto: la da para pedir o codigo e saber qual e.
-      if (id == 'vale') continue;
-      for (final op in _opcoesFormaPagamentoPdV) {
-        if (op.id == id) {
-          opcoes.add(op);
-          break;
-        }
-      }
-    }
-    return opcoes;
-  }
-
+  /// Todas as formas do PDV, independente da tabela de preco do item/venda.
+  /// Vale so pelo painel misto: la da para pedir o codigo e saber qual e.
   List<({String id, String rotulo, IconData icone})>
   _opcoesFormaPagamentoPdVAtivas() {
-    final ids = PdvTabelaPrecoUtil.meiosPagamentoUniao(
-      _carrinho.isEmpty
-          ? [_precoListaAtivo]
-          : _carrinho.map((l) => l.precoTipo),
-      _meiosPagamentoPorTabelaPdv,
-      _opcoesFormaPagamentoPdV.map((o) => o.id).toList(),
-    );
-    final opcoes = <({String id, String rotulo, IconData icone})>[];
-    for (final id in ids) {
-      if (id == 'fiado' && !_podeVenderFiado) continue;
-      // Vale so pelo painel misto: la da para pedir o codigo e saber qual e.
-      if (id == 'vale') continue;
-      for (final op in _opcoesFormaPagamentoPdV) {
-        if (op.id == id) {
-          opcoes.add(op);
-          break;
-        }
-      }
-    }
-    return opcoes;
+    return [
+      for (final op in _opcoesFormaPagamentoPdV)
+        if (op.id != 'vale' && (op.id != 'fiado' || _podeVenderFiado)) op,
+    ];
   }
 
-  /// No pagamento misto, todas as formas cadastradas no PDV ficam disponiveis
-  /// (nao restringe pela tabela de preco do carrinho).
   List<({String id, String rotulo, IconData icone})>
   _opcoesFormaPagamentoMistoPdV() {
     return [
@@ -5586,9 +5352,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (!await _garantirVendedorPdvObrigatorio()) return;
     if (!await _garantirClientePdvParaEntrega()) return;
     _aplicarEnderecoCarretoDoClienteSeVazio();
-    _aplicarSugestaoFormaPagamentoParaCarrinhoAtual(
-      preservarSelecaoAtual: _orcamentoEmEdicaoId != null,
-    );
     if (_pdvCheckoutDireto &&
         PdvBalcaoRapidoHelper.podeCheckoutDireto(
           carrinhoTemCarreto: _carrinhoTemItemCarreto,
@@ -6721,6 +6484,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _tipoDescontoPdV = 'percentual';
       _resetarAutorizacaoDescontoAcimaTetoPdV();
       _pesquisaController.clear();
+      _precoListaAtivo = _precoListaPadraoPdv;
     });
     _sincronizarTextoBuscaClientePdv();
     if (bloquearVendedorAposEnvio) {
@@ -7570,6 +7334,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _carrinho
         ..clear()
         ..addAll(drafts);
+      _precoListaAtivo = _precoListaPadraoPdv;
       _indiceLinhaCarrinho = _carrinho.isEmpty ? null : 0;
       _clienteSelecionadoId = clienteIdValido;
       _indiceEnderecoSelecionado = indiceEndereco;
@@ -8318,8 +8083,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                           const SizedBox(width: 6),
                           _buildSeletorVendedorAppBarPdv(),
                           const SizedBox(width: 4),
-                          _buildSeletorPrecoListaAppBarPdv(),
-                          const SizedBox(width: 4),
                           _buildSeletorEntregaPadraoAppBarPdv(),
                           const SizedBox(width: 4),
                           _buildSeletorClienteAppBarPdv(),
@@ -8436,7 +8199,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                               },
                             ),
                           FocusTraversalOrder(
-                            order: const NumericFocusOrder(5),
+                            order: const NumericFocusOrder(4),
                             child: _PdvHeaderPesquisa(
                               modoBarraCarrinho: true,
                               modoCelular: _pdvUiCelular,
@@ -8515,15 +8278,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     );
   }
 
-  /// Seletores (vendedor, tabela, entrega, cliente) em faixa rolavel no celular.
+  /// Seletores (vendedor, entrega, cliente) em faixa rolavel no celular.
   Widget _buildFaixaSeletoresMobilePdv() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
           _buildSeletorVendedorAppBarPdv(),
-          const SizedBox(width: 6),
-          _buildSeletorPrecoListaAppBarPdv(),
           const SizedBox(width: 6),
           _buildSeletorEntregaPadraoAppBarPdv(),
           const SizedBox(width: 6),
@@ -9919,9 +9680,9 @@ class _AdicionarAoOrcamentoDialogState
               initialValue: _precoTipo,
               decoration: const InputDecoration(labelText: 'Tipo de preco'),
               items: const [
-                DropdownMenuItem(value: 'preco1', child: Text('A Prazo')),
-                DropdownMenuItem(value: 'preco2', child: Text('À Vista')),
-                DropdownMenuItem(value: 'preco3', child: Text('Especial')),
+                DropdownMenuItem(value: 'preco1', child: Text('Preco 1')),
+                DropdownMenuItem(value: 'preco2', child: Text('Preco 2')),
+                DropdownMenuItem(value: 'preco3', child: Text('Preco 3')),
               ],
               onChanged: (value) {
                 if (value != null) {
@@ -10016,7 +9777,7 @@ class _AdicionarAoOrcamentoDialogState
   }
 }
 
-/// F1–F3: tabela da linha selecionada ou padrao para novos itens.
+/// F1–F3 com linha selecionada no carrinho: altera a tabela da linha.
 class SelecionarPrecoListaIntent extends Intent {
   const SelecionarPrecoListaIntent(this.precoTipo);
   final String precoTipo;
