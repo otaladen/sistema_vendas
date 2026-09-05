@@ -38,6 +38,15 @@ abstract final class VendaDocumentoRotuloHelper {
     return 0;
   }
 
+  /// Próximo Controle a partir dos números já exibidos (nunca reinicia do 1).
+  static int proximoNumeroControleApos(Iterable<int> numerosExistentes) {
+    var maior = 0;
+    for (final n in numerosExistentes) {
+      if (n > maior) maior = n;
+    }
+    return maior + 1;
+  }
+
   static String rotuloControlePorNumero(int numero) => 'Controle $numero';
 
   static String rotuloControleInterno(Venda venda) {

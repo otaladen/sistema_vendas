@@ -189,11 +189,15 @@ class VendaApiRepository extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> hidratarVendasFinalizadas({int limit = 120}) async {
+  Future<void> hidratarVendasFinalizadas({
+    int limit = 120,
+    DateTime? desde,
+  }) async {
     _exigirServidorOnline();
     final items = await _client.listarVendas(
       status: 'finalizada',
       limit: limit,
+      desde: desde,
     );
     for (final v in items) {
       _porId[v.id] = v;
@@ -2558,10 +2562,22 @@ class VendaApiRepository extends ChangeNotifier {
     }
     var lista = porId.values.toList();
     if (desde != null) {
-      lista = lista.where((v) => !v.data.isBefore(desde)).toList();
+      final corte = desde.toUtc();
+      lista = lista
+          .where(
+            (v) => !VendaFinalizacaoCaixaHelper.momentoFinalizacao(v)
+                .isBefore(corte),
+          )
+          .toList();
     }
     if (ate != null) {
-      lista = lista.where((v) => !v.data.isAfter(ate)).toList();
+      final corte = ate.toUtc();
+      lista = lista
+          .where(
+            (v) => !VendaFinalizacaoCaixaHelper.momentoFinalizacao(v)
+                .isAfter(corte),
+          )
+          .toList();
     }
     final modo = ordenacao is UltimasVendasFinalizadasOrdenacao
         ? ordenacao
@@ -2969,6 +2985,8 @@ class VendaApiRepository extends ChangeNotifier {
     );
   }
   void corrigirFinalizadaEmCopiadaDaDataOrcamento() {}
+
+  void repararNumeracaoControleInterno() {}
   dynamic obterNfe55AutorizadaPorVenda(int vendaId) {
     final v = _porId[vendaId];
     if (v == null || !v.nfe55Autorizada) return null;

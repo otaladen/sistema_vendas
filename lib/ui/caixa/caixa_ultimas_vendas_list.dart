@@ -17,6 +17,7 @@ class CaixaUltimasVendasList extends StatelessWidget {
     required this.onVendaTap,
     this.ordenacao = UltimasVendasFinalizadasOrdenacao.padrao,
     this.quantidadeItens,
+    this.mensagemListaVazia,
   });
 
   final List<Venda> vendas;
@@ -28,14 +29,23 @@ class CaixaUltimasVendasList extends StatelessWidget {
   /// Terminal leve: evita ToMany detached (sempre 0). Servidor pode omitir.
   final int Function(Venda venda)? quantidadeItens;
 
+  /// Quando o caixa esta fechado ou sem vendas no turno atual.
+  final String? mensagemListaVazia;
+
   @override
   Widget build(BuildContext context) {
     final dtCurto = DateFormat('dd/MM HH:mm');
     if (vendas.isEmpty) {
       return Center(
-        child: Text(
-          'Nenhuma venda finalizada ainda.',
-          style: Theme.of(context).textTheme.bodyMedium,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            mensagemListaVazia ?? 'Nenhuma venda finalizada ainda.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
         ),
       );
     }

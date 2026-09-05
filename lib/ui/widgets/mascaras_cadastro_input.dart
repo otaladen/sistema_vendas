@@ -60,6 +60,36 @@ bool documentoCpfCnpjValidoOuVazio(String doc, {required String tipoPessoa}) {
   return cpfValidoOuVazio(doc);
 }
 
+class CnpjInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = somenteDigitos(newValue.text);
+    final truncated = digits.length > 14 ? digits.substring(0, 14) : digits;
+    final masked = _maskCnpj(truncated);
+    return TextEditingValue(
+      text: masked,
+      selection: TextSelection.collapsed(offset: masked.length),
+    );
+  }
+
+  static String _maskCnpj(String value) {
+    if (value.length <= 2) return value;
+    if (value.length <= 5) {
+      return '${value.substring(0, 2)}.${value.substring(2)}';
+    }
+    if (value.length <= 8) {
+      return '${value.substring(0, 2)}.${value.substring(2, 5)}.${value.substring(5)}';
+    }
+    if (value.length <= 12) {
+      return '${value.substring(0, 2)}.${value.substring(2, 5)}.${value.substring(5, 8)}/${value.substring(8)}';
+    }
+    return '${value.substring(0, 2)}.${value.substring(2, 5)}.${value.substring(5, 8)}/${value.substring(8, 12)}-${value.substring(12)}';
+  }
+}
+
 class CpfInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(

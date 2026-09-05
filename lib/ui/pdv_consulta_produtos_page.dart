@@ -49,6 +49,7 @@ class PdvConsultaProdutoResult {
     this.adicaoDireta = false,
     this.abrirDialogoAdicionar = true,
     this.quantidadeEmUnidadeCompra = false,
+    this.editarQuantidadeNoCarrinho = false,
     this.kitInserirId,
     this.quantidadeKitsInserir,
   });
@@ -59,6 +60,8 @@ class PdvConsultaProdutoResult {
   final bool adicaoDireta;
   final bool abrirDialogoAdicionar;
   final bool quantidadeEmUnidadeCompra;
+  /// Adiciona com qtd 1 e abre edicao inline no carrinho do PDV.
+  final bool editarQuantidadeNoCarrinho;
   final int? kitInserirId;
   final int? quantidadeKitsInserir;
 
@@ -1323,17 +1326,14 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       return;
     }
     if (adicionarDireto) {
-      final qtd =
-          _controlesQuantidadeKey.currentState?.quantidadeConfirmada() ??
-          _quantidadeAdicionar;
-      if (qtd <= 0) return;
       Navigator.of(context).pop(
         PdvConsultaProdutoResult(
           produto: produto,
           precoListaAtivo: _precoListaAtivo,
-          quantidadeDireta: qtd,
+          adicaoDireta: true,
           abrirDialogoAdicionar: false,
           quantidadeEmUnidadeCompra: emUnidadeCompra,
+          editarQuantidadeNoCarrinho: true,
         ),
       );
       return;
@@ -1724,9 +1724,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                               ? scheme.surfaceContainerLow
                               : scheme.surface),
                     child: InkWell(
-                      onTap: () => _selecionarIndice(index),
-                      onDoubleTap: () =>
-                          _confirmarProduto(item, adicionarDireto: true),
+                      onTap: () => _confirmarProduto(item, adicionarDireto: true),
+                      onDoubleTap: () => _confirmarProduto(item, adicionarDireto: true),
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           border: Border(
@@ -1746,17 +1745,9 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                           selecionado: selecionado,
                           quantidadeNoOrcamento: qtdOrcamento,
                           tooltipAdicionar:
-                              'Adicionar 1 (${widget.rotuloPreco(_precoListaAtivo)})',
-                          onAdicionar: () {
-                            Navigator.of(context).pop(
-                              PdvConsultaProdutoResult(
-                                produto: item,
-                                precoListaAtivo: _precoListaAtivo,
-                                adicaoDireta: true,
-                                abrirDialogoAdicionar: false,
-                              ),
-                            );
-                          },
+                              'Adicionar (${widget.rotuloPreco(_precoListaAtivo)})',
+                          onAdicionar: () =>
+                              _confirmarProduto(item, adicionarDireto: true),
                         ),
                       ),
                     ),

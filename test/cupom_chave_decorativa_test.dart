@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/config/fiscal_config.dart';
+import 'package:sistema_vendas/model/cliente.dart';
 import 'package:sistema_vendas/services/cupom_pdf_layout.dart';
 
 void main() {
@@ -36,5 +37,42 @@ void main() {
       emissao: DateTime(2026, 6, 6, 9, 26, 34),
     );
     expect(a, b);
+  });
+
+  test('linhas consumidor sem cliente', () {
+    expect(
+      CupomPdfLayout.linhasIdentificacaoConsumidor(null),
+      ['CONSUMIDOR NAO IDENTIFICADO'],
+    );
+  });
+
+  test('linhas consumidor CPF e nome', () {
+    final cliente = Cliente(
+      nomeRazao: 'JOAO DA SILVA',
+      documento: '12345678909',
+      tipoPessoa: 'fisica',
+    );
+    expect(
+      CupomPdfLayout.linhasIdentificacaoConsumidor(cliente),
+      [
+        'CPF: 123.456.789-09',
+        'NOME: JOAO DA SILVA',
+      ],
+    );
+  });
+
+  test('linhas consumidor CNPJ e razao social', () {
+    final cliente = Cliente(
+      nomeRazao: 'EMPRESA LTDA',
+      documento: '12345678000190',
+      tipoPessoa: 'juridica',
+    );
+    expect(
+      CupomPdfLayout.linhasIdentificacaoConsumidor(cliente),
+      [
+        'CNPJ: 12.345.678/0001-90',
+        'RAZAO SOCIAL: EMPRESA LTDA',
+      ],
+    );
   });
 }

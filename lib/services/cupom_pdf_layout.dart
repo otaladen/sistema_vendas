@@ -968,6 +968,30 @@ class CupomPdfLayout {
     return documento.trim();
   }
 
+  /// Linhas de identificacao do consumidor no rodape do comprovante de controle.
+  static List<String> linhasIdentificacaoConsumidor(Cliente? cliente) {
+    final doc = cliente?.documento.trim() ?? '';
+    final nome = cliente?.nomeRazao.trim() ?? '';
+    final digitos = doc.replaceAll(RegExp(r'\D'), '');
+    if (digitos.isEmpty && nome.isEmpty) {
+      return const ['CONSUMIDOR NAO IDENTIFICADO'];
+    }
+    final juridica = digitos.length == 14 ||
+        (cliente?.tipoPessoa.trim().toLowerCase() == 'juridica' &&
+            digitos.isNotEmpty);
+    final linhas = <String>[];
+    if (digitos.isNotEmpty) {
+      final fmt = formatarDocumentoConsumidor(doc);
+      linhas.add(juridica ? 'CNPJ: $fmt' : 'CPF: $fmt');
+    }
+    if (nome.isNotEmpty) {
+      linhas.add(juridica ? 'RAZAO SOCIAL: $nome' : 'NOME: $nome');
+    }
+    return linhas.isEmpty
+        ? const ['CONSUMIDOR NAO IDENTIFICADO']
+        : linhas;
+  }
+
   static String chaveAcessoSomenteDigitos(String chave) =>
       chave.replaceAll(RegExp(r'\D'), '');
 

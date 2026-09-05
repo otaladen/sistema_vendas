@@ -76,6 +76,7 @@ import 'clientes_page.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_consulta_produtos_page.dart';
 import 'pdv/agenda_carreto_pdv_dialog.dart';
+import 'widgets/mascaras_cadastro_input.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
@@ -293,6 +294,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   /// Linha selecionada no carrinho (navegacao com setas).
   int? _indiceLinhaCarrinho;
+  int? _indiceLinhaEdicaoQuantidade;
+  final _qtdCarrinhoInlineController = TextEditingController(text: '1');
+  final _focusQuantidadeCarrinhoInline =
+      FocusNode(debugLabel: 'pdvCarrinhoQtdInline');
 
   /// Epoch do painel carrinho/preview: qty, preco, selecao, etc. sem rebuildar AppBar.
   final ValueNotifier<int> _carrinhoUiEpoch = ValueNotifier(0);
@@ -836,7 +841,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _carregarConfiguracaoVendaSemEstoque();
     _pesquisaController.addListener(_onPesquisaPdvTextoChanged);
     _focusClientePdV.addListener(_onFocoClientePdvChanged);
+    _focusQuantidadeCarrinhoInline.onKeyEvent = _onKeyQuantidadeCarrinhoInline;
     _aplicarFocoInicialPdv();
+  }
+
+  KeyEventResult _onKeyQuantidadeCarrinhoInline(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   bool? _abaPdvAtivaAnterior;
@@ -1244,6 +1259,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwarePdv);
     _checkoutF7BurstId = 0;
     _carrinhoFocus.dispose();
+    _focusQuantidadeCarrinhoInline.dispose();
+    _qtdCarrinhoInlineController.dispose();
     _focusClientePdV.removeListener(_onFocoClientePdvChanged);
     _focusClientePdV.dispose();
     _focusVendedorPdV.dispose();
@@ -1585,6 +1602,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         precoTipo: _precoListaAtivo,
         tipoEntregaItem: _tipoEntregaSelecionada,
         quantidadeEmUnidadeCompra: produto.pdvPodeVenderEmUnidadeCompra,
+        aguardarQuantidadeNoCarrinho: true,
       );
       return;
     }
@@ -1601,9 +1619,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         clienteId: _clienteSelecionadoId,
       );
       if (resolvido.deveAutoSelecionar && resolvido.produtoAuto != null) {
+        if (comando.quantidadeDireta != null || comando.adicaoDireta) {
+          _pesquisaController.clear();
+          await _aplicarProdutoBuscaInteligente(resolvido.produtoAuto!, comando);
+          return;
+        }
         _pesquisaController.clear();
-        await _aplicarProdutoBuscaInteligente(resolvido.produtoAuto!, comando);
-        _voltarFocoParaPesquisa();
+        await _adicionarComQuantidade(
+          resolvido.produtoAuto!,
+          1,
+          precoTipo: _precoListaAtivo,
+          tipoEntregaItem: _tipoEntregaSelecionada,
+          quantidadeEmUnidadeCompra:
+              resolvido.produtoAuto!.pdvPodeVenderEmUnidadeCompra,
+          aguardarQuantidadeNoCarrinho: true,
+        );
         return;
       }
     }
@@ -1656,16 +1686,20 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         );
 
     if (!mounted) return;
-    _pesquisaController.clear();
-    _voltarFocoParaPesquisa();
 
-    if (result == null) return;
+    if (result == null) {
+      _voltarFocoParaPesquisa();
+      return;
+    }
+
+    _pesquisaController.clear();
 
     if (result.inserirKit) {
       await _inserirKitPorId(
         result.kitInserirId!,
         result.quantidadeKitsInserir!,
       );
+      _voltarFocoParaPesquisa();
       return;
     }
 
@@ -1677,6 +1711,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         1,
         precoTipo: result.precoListaAtivo,
         quantidadeEmUnidadeCompra: result.quantidadeEmUnidadeCompra,
+        aguardarQuantidadeNoCarrinho: result.editarQuantidadeNoCarrinho,
       );
       return;
     }
@@ -1979,6 +2014,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     String? tipoEntregaItem,
     bool quantidadeEmUnidadeCompra = false,
     bool mostrarSugestoesAgregadas = true,
+    bool aguardarQuantidadeNoCarrinho = false,
   }) async {
     if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
       return false;
@@ -2146,9 +2182,89 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (mostrarSugestoesAgregadas) {
       _atualizarSugestoesAposAdicionar(produto);
     }
-    _voltarFocoParaPesquisa();
+    if (aguardarQuantidadeNoCarrinho && _indiceLinhaCarrinho != null) {
+      _iniciarEdicaoQuantidadeCarrinho(_indiceLinhaCarrinho!);
+    } else {
+      _voltarFocoParaPesquisa();
+    }
     return true;
   }
+
+  void _iniciarEdicaoQuantidadeCarrinho(int index) {
+    if (index < 0 || index >= _carrinho.length) {
+      _voltarFocoParaPesquisa();
+      return;
+    }
+    final item = _carrinho[index];
+    _qtdCarrinhoInlineController.text = item.quantidadeExibicaoTexto;
+    setState(() {
+      _indiceLinhaEdicaoQuantidade = index;
+      _indiceLinhaCarrinho = index;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusQuantidadeCarrinhoInline.requestFocus();
+      final texto = _qtdCarrinhoInlineController.text;
+      _qtdCarrinhoInlineController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: texto.length,
+      );
+    });
+  }
+
+  void _encerrarEdicaoQuantidadeCarrinho({required bool voltarPesquisa}) {
+    if (_indiceLinhaEdicaoQuantidade == null) return;
+    setState(() => _indiceLinhaEdicaoQuantidade = null);
+    if (voltarPesquisa) _voltarFocoParaPesquisa();
+  }
+
+  void _confirmarQuantidadeCarrinhoInline() {
+    final index = _indiceLinhaEdicaoQuantidade;
+    if (index == null || index < 0 || index >= _carrinho.length) {
+      _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
+      return;
+    }
+    final item = _carrinho[index];
+    final fracionada = !item.quantidadeEmUnidadeCompra;
+    final digitada = QuantidadeVendaUtil.parseEntradaPdv(
+          _qtdCarrinhoInlineController.text,
+          fracionada: fracionada,
+        ) ??
+        1.0;
+    if (digitada <= 0) {
+      _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
+      return;
+    }
+    final novaArmazenada = item.quantidadeEmUnidadeCompra &&
+            item.produto.pdvPodeVenderEmUnidadeCompra
+        ? digitada.round()
+        : QuantidadeVendaUtil.paraArmazenamento(
+            digitada,
+            fracionada: QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
+              emUnidadeCompra: false,
+              cadastroFracionado: item.produto.permiteQuantidadeFracionada,
+              quantidadeVenda: digitada,
+            ),
+          );
+    if (novaArmazenada <= 0) {
+      _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
+      return;
+    }
+    final delta = novaArmazenada - item.quantidade;
+    if (delta == 0) {
+      _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
+      return;
+    }
+    final qtdAntes = item.quantidade;
+    _alterarQuantidadeCarrinho(index, delta);
+    final falhou = index < _carrinho.length &&
+        _carrinho[index].quantidade == qtdAntes;
+    if (falhou) return;
+    _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
+  }
+
+  bool _quantidadeFracionadaCarrinho(_OrcamentoItemDraft item) =>
+      !item.quantidadeEmUnidadeCompra;
 
   Future<void> _inserirKitPorId(int kitId, int quantidadeKits) async {
     if (kitId <= 0 || quantidadeKits <= 0) return;
@@ -2491,6 +2607,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   /// Setas no carrinho: ↑↓ outra linha (↑ na primeira volta a busca); +/- qtd no teclado numerico.
   KeyEventResult _onKeyCarrinho(FocusNode node, KeyEvent event) {
+    if (_indiceLinhaEdicaoQuantidade != null) {
+      return KeyEventResult.ignored;
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (_carrinho.isEmpty) return KeyEventResult.ignored;
 
@@ -3355,59 +3474,105 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   Future<void> _abrirCadastroRapidoClientePdv() async {
     final nomeController = TextEditingController();
-    final telefoneController = TextEditingController();
+    final documentoController = TextEditingController();
+    final cpfFormatter = CpfInputFormatter();
+    final cnpjFormatter = CnpjInputFormatter();
     final nomeFocus = FocusNode();
+    var tipoPessoa = 'fisica';
+
+    TextInputFormatter documentoFormatterAtual() =>
+        tipoPessoa == 'juridica' ? cnpjFormatter : cpfFormatter;
+
+    void aplicarMascaraDocumento() {
+      final fmt = documentoFormatterAtual();
+      final d = somenteDigitos(documentoController.text);
+      documentoController.value = fmt.formatEditUpdate(
+        TextEditingValue.empty,
+        TextEditingValue(text: d),
+      );
+    }
 
     final salvar = await showDialog<bool>(
       context: context,
       builder: (ctx) {
-        return CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.escape): () {
-              Navigator.pop(ctx, false);
-            },
-            const SingleActivator(LogicalKeyboardKey.enter): () {
-              Navigator.pop(ctx, true);
-            },
-          },
-          child: AlertDialog(
-            title: const Text('Cadastro rapido de cliente'),
-            content: SizedBox(
-              width: 360,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nomeController,
-                    focusNode: nomeFocus,
-                    autofocus: true,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(labelText: 'Nome *'),
-                    onSubmitted: (_) => Navigator.pop(ctx, true),
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final juridica = tipoPessoa == 'juridica';
+            return CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.escape): () {
+                  Navigator.pop(ctx, false);
+                },
+                const SingleActivator(LogicalKeyboardKey.enter): () {
+                  Navigator.pop(ctx, true);
+                },
+              },
+              child: AlertDialog(
+                title: const Text('Cadastro rapido de cliente'),
+                content: SizedBox(
+                  width: 400,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: 'fisica',
+                            label: Text('Pessoa Fisica'),
+                          ),
+                          ButtonSegment(
+                            value: 'juridica',
+                            label: Text('Pessoa Juridica'),
+                          ),
+                        ],
+                        selected: {tipoPessoa},
+                        onSelectionChanged: (sel) {
+                          setDialogState(() {
+                            tipoPessoa = sel.first;
+                            aplicarMascaraDocumento();
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: documentoController,
+                        autofocus: true,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [documentoFormatterAtual()],
+                        decoration: InputDecoration(
+                          labelText: juridica ? 'CNPJ *' : 'CPF *',
+                        ),
+                        onSubmitted: (_) => Navigator.pop(ctx, true),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: nomeController,
+                        focusNode: nomeFocus,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: InputDecoration(
+                          labelText: juridica
+                              ? 'Razao Social *'
+                              : 'Nome completo *',
+                        ),
+                        onSubmitted: (_) => Navigator.pop(ctx, true),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: telefoneController,
-                    keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(
-                      labelText: 'Telefone / WhatsApp',
-                    ),
-                    onSubmitted: (_) => Navigator.pop(ctx, true),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancelar'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Salvar (Enter)'),
                   ),
                 ],
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Salvar (Enter)'),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -3415,27 +3580,58 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (!mounted || salvar != true) {
       nomeFocus.dispose();
       nomeController.dispose();
-      telefoneController.dispose();
+      documentoController.dispose();
       return;
     }
 
     final nome = nomeController.text.trim();
-    final telefone = telefoneController.text.replaceAll(RegExp(r'\D'), '');
+    final documento = somenteDigitos(documentoController.text);
     nomeFocus.dispose();
     nomeController.dispose();
-    telefoneController.dispose();
+    documentoController.dispose();
 
     if (nome.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Informe o nome do cliente.')),
+        SnackBar(
+          content: Text(
+            tipoPessoa == 'juridica'
+                ? 'Informe a razao social do cliente.'
+                : 'Informe o nome do cliente.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (documento.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tipoPessoa == 'juridica'
+                ? 'Informe o CNPJ do cliente.'
+                : 'Informe o CPF do cliente.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!documentoCpfCnpjValidoOuVazio(
+      documento,
+      tipoPessoa: tipoPessoa,
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tipoPessoa == 'juridica' ? 'CNPJ invalido.' : 'CPF invalido.',
+          ),
+        ),
       );
       return;
     }
     final agora = DateTime.now().toUtc();
     final cliente = Cliente(
+      tipoPessoa: tipoPessoa,
       nomeRazao: nome,
-      telefone: telefone,
-      whatsapp: telefone,
+      documento: documento,
       segmento: 'consumidor',
       origemCadastro: 'balcao',
       ativo: true,
@@ -4142,12 +4338,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       },
       mostrarDicaAtalhosCarrinho: _mostrarAjudaAtalhos && _carrinho.isNotEmpty,
       resumoEntregaItens: _resumoEntregaItensCarrinho,
-      carrinhoBody: _PdvCarrinhoProdutos(
+        carrinhoBody: _PdvCarrinhoProdutos(
         carrinhoFocus: _carrinhoFocus,
         onKeyCarrinho: _onKeyCarrinho,
         itens: _carrinho,
         indiceLinhaSelecionada: _indiceLinhaCarrinho,
+        indiceLinhaEdicaoQuantidade: _indiceLinhaEdicaoQuantidade,
+        quantidadeInlineController: _qtdCarrinhoInlineController,
+        quantidadeInlineFocus: _focusQuantidadeCarrinhoInline,
+        onConfirmarQuantidadeInline: _confirmarQuantidadeCarrinhoInline,
+        quantidadeFracionadaDe: _quantidadeFracionadaCarrinho,
         onSelecionarLinha: (index) {
+          if (_indiceLinhaEdicaoQuantidade != null) return;
           _definirIndiceLinhaCarrinho(index, isolado: true);
           _carrinhoFocus.requestFocus();
         },
@@ -8380,7 +8582,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                           ? hintCelular
                           : (mostrarBotaoCamera
                                 ? 'Pesquisar ou bipar com a camera · Enter/F4 consulta'
-                                : 'Pesquisar produto · Enter/F4 consulta · unico resultado entra direto'))
+                                : 'Pesquisar produto · Enter/F4 consulta · Enter confirma qtd no carrinho'))
                     : null,
                 labelText: modoBarraCarrinho
                     ? null
@@ -8486,6 +8688,11 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
     required this.onKeyCarrinho,
     required this.itens,
     required this.indiceLinhaSelecionada,
+    required this.indiceLinhaEdicaoQuantidade,
+    required this.quantidadeInlineController,
+    required this.quantidadeInlineFocus,
+    required this.onConfirmarQuantidadeInline,
+    required this.quantidadeFracionadaDe,
     required this.onSelecionarLinha,
     required this.rotuloPreco,
     required this.formatarMoeda,
@@ -8506,6 +8713,11 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
   final KeyEventResult Function(FocusNode, KeyEvent) onKeyCarrinho;
   final List<_OrcamentoItemDraft> itens;
   final int? indiceLinhaSelecionada;
+  final int? indiceLinhaEdicaoQuantidade;
+  final TextEditingController quantidadeInlineController;
+  final FocusNode quantidadeInlineFocus;
+  final VoidCallback onConfirmarQuantidadeInline;
+  final bool Function(_OrcamentoItemDraft item) quantidadeFracionadaDe;
   final void Function(int index) onSelecionarLinha;
   final String Function(String) rotuloPreco;
   final String Function(double) formatarMoeda;
@@ -8537,8 +8749,12 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
   @override
   void didUpdateWidget(covariant _PdvCarrinhoProdutos oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.indiceLinhaSelecionada != oldWidget.indiceLinhaSelecionada) {
-      _rolarParaIndice(widget.indiceLinhaSelecionada);
+    if (widget.indiceLinhaSelecionada != oldWidget.indiceLinhaSelecionada ||
+        widget.indiceLinhaEdicaoQuantidade !=
+            oldWidget.indiceLinhaEdicaoQuantidade) {
+      _rolarParaIndice(
+        widget.indiceLinhaEdicaoQuantidade ?? widget.indiceLinhaSelecionada,
+      );
     }
   }
 
@@ -8620,6 +8836,8 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
         itemBuilder: (context, index) {
           final item = widget.itens[index];
           final selecionado = widget.indiceLinhaSelecionada == index;
+          final editandoQuantidade =
+              widget.indiceLinhaEdicaoQuantidade == index;
           final passo = widget.passoQuantidadeCarrinho(item);
           return Semantics(
             container: true,
@@ -8642,6 +8860,14 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
               precoTipo: item.precoTipo,
               selecionado: selecionado,
               alvosTouchAmplos: widget.alvosTouchAmplos,
+              editandoQuantidade: editandoQuantidade,
+              quantidadeFracionada: widget.quantidadeFracionadaDe(item),
+              quantidadeController: editandoQuantidade
+                  ? widget.quantidadeInlineController
+                  : null,
+              quantidadeFocus:
+                  editandoQuantidade ? widget.quantidadeInlineFocus : null,
+              onConfirmarQuantidade: widget.onConfirmarQuantidadeInline,
               onTap: () => widget.onSelecionarLinha(index),
               onAlternarTipoEntrega: () => widget.onAlternarTipoEntrega(index),
               onAlternarTabelaPreco: () => widget.onAlternarTabelaPreco(index),

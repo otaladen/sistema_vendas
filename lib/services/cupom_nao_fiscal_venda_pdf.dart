@@ -198,38 +198,8 @@ class CupomNaoFiscalVendaPdf {
     return 'Misto';
   }
 
-  static String _enderecoConsumidorDanfe(Cliente? cliente, Venda venda) {
-    if (venda.enderecoEntrega.trim().isNotEmpty) {
-      return venda.enderecoEntrega.trim();
-    }
-    if (cliente == null) return '';
-    final padrao = cliente.enderecoPadraoEntrega();
-    if (padrao != null && padrao.temDados) return padrao.resumo();
-    if (cliente.endereco.trim().isNotEmpty) return cliente.endereco.trim();
-    return '';
-  }
-
-  static String _textoConsumidorLegado(Cliente? cliente, Venda venda) {
-    final doc = cliente?.documento.trim() ?? '';
-    final nome = cliente?.nomeRazao.trim() ?? '';
-    if (doc.isEmpty && nome.isEmpty) {
-      return 'CONSUMIDOR NAO IDENTIFICADO';
-    }
-    final partes = <String>['CONSUMIDOR'];
-    if (doc.isNotEmpty) {
-      partes.add(
-        doc.replaceAll(RegExp(r'\D'), '').length == 11
-            ? 'CPF ${CupomPdfLayout.formatarDocumentoConsumidor(doc)}'
-            : 'CNPJ ${CupomPdfLayout.formatarDocumentoConsumidor(doc)}',
-      );
-    }
-    if (nome.isNotEmpty) {
-      partes.add(nome);
-    }
-    final endereco = _enderecoConsumidorDanfe(cliente, venda);
-    if (endereco.isNotEmpty) partes.add(endereco);
-    return partes.join(' - ');
-  }
+  static List<String> _linhasConsumidorLegado(Cliente? cliente) =>
+      CupomPdfLayout.linhasIdentificacaoConsumidor(cliente);
 
   static String _numeroNfceExibicao(Venda venda) {
     if (venda.nfceNumero.trim().isNotEmpty) return venda.nfceNumero.trim();
@@ -437,10 +407,16 @@ class CupomNaoFiscalVendaPdf {
         layout: layout,
         chaveAcesso: chaveRodape,
       ),
-      CupomPdfLayout.textoConsumidorLegadoLdv(
-        layout: layout,
-        textoPrincipal: _textoConsumidorLegado(cliente, venda),
-      ),
+      () {
+        final linhasConsumidor = _linhasConsumidorLegado(cliente);
+        return CupomPdfLayout.textoConsumidorLegadoLdv(
+          layout: layout,
+          textoPrincipal: linhasConsumidor.first,
+          linhasExtras: linhasConsumidor.length > 1
+              ? linhasConsumidor.sublist(1)
+              : const [],
+        );
+      }(),
       CupomPdfLayout.qrCodeNfceDanfe(
         layout: layout,
         payload: _payloadQrNfce(venda, chaveRodape),

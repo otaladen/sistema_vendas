@@ -169,16 +169,6 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.line(
         _trunc('Cliente: NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO', cols),
       ));
-    } else {
-      out.add(EscPosCommands.line(
-        _trunc(_textoConsumidor(cli, venda), cols),
-      ));
-      final docCli = cli?.documento.trim() ?? '';
-      if (docCli.isNotEmpty && !(temNfceReal && homolog)) {
-        out.add(EscPosCommands.line(
-          'CPF/CNPJ: ${CupomPdfLayout.formatarDocumentoConsumidor(docCli)}',
-        ));
-      }
     }
 
     out.add(EscPosCommands.separator(cols));
@@ -294,6 +284,17 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.feed(1));
     }
 
+    if (!(temNfceReal && homolog)) {
+      out.add(EscPosCommands.separator(cols));
+      out.add(EscPosCommands.boldOn);
+      for (final linha in CupomPdfLayout.linhasIdentificacaoConsumidor(cli)) {
+        for (final l in _wrap(linha, cols)) {
+          out.add(EscPosCommands.line(l));
+        }
+      }
+      out.add(EscPosCommands.boldOff);
+    }
+
     // Rodape fiscal: so em NFC-e real de homologacao.
     if (temNfceReal && homolog) {
       out.add(EscPosCommands.boldOn);
@@ -321,16 +322,6 @@ abstract final class EscPosCupomBuilder {
     }
 
     return out.toBytes();
-  }
-
-  static String _textoConsumidor(Cliente? cliente, Venda venda) {
-    final doc = cliente?.documento.trim() ?? '';
-    final nome = cliente?.nomeRazao.trim() ?? '';
-    if (doc.isEmpty && nome.isEmpty) {
-      return 'CONSUMIDOR NAO IDENTIFICADO';
-    }
-    if (nome.isNotEmpty) return 'CONSUMIDOR - $nome';
-    return 'CONSUMIDOR';
   }
 
   static bool _pareceRodapeNaoFiscal(String s) {

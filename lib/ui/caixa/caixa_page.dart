@@ -473,8 +473,15 @@ class _CaixaPageState extends State<CaixaPage> {
   Future<void> _hidratarUltimasVendasTerminal() async {
     final repo = widget.vendaRepository;
     if (repo is! VendaApiRepository) return;
+    if (!_caixaAberto || _aberturaCaixaEm == null) {
+      _atualizarListaUltimasVendasFinalizadasCaixa();
+      return;
+    }
     try {
-      await repo.hidratarVendasFinalizadas(limit: 40);
+      await repo.hidratarVendasFinalizadas(
+        limit: 40,
+        desde: _aberturaCaixaEm,
+      );
     } catch (e) {
       debugPrint('Caixa: hidratar vendas finalizadas: $e');
     }
@@ -555,7 +562,7 @@ class _CaixaPageState extends State<CaixaPage> {
     BuildContext context, {
     required IconData icon,
     required String tooltip,
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
     bool destacar = false,
   }) {
     final scheme = Theme.of(context).colorScheme;
@@ -628,7 +635,8 @@ class _CaixaPageState extends State<CaixaPage> {
                   context,
                   icon: Icons.search,
                   tooltip: 'Importar orcamento (F1)',
-                  onPressed: _abrirPesquisaOrcamento,
+                  onPressed:
+                      _caixaAberto ? _abrirPesquisaOrcamento : null,
                 ),
                 _acaoIconeCaixa(
                   context,
@@ -1014,26 +1022,13 @@ class _CaixaPageState extends State<CaixaPage> {
     await _carregarSessaoCaixa();
     if (!mounted) return;
     if (!_caixaAberto) {
-      final abrir = await _perguntarAbrirCaixaParaContinuar();
-      if (abrir != true) {
-        if (mounted) {
-          CaixaFeedback.erro(
-            context,
-            'Caixa fechado. Abra o caixa para importar orcamentos.',
-          );
-        }
-        return;
+      if (mounted) {
+        CaixaFeedback.erro(
+          context,
+          'Caixa fechado. Abra o caixa para importar orcamentos.',
+        );
       }
-      await _abrirCaixa();
-      if (!_caixaAberto || !mounted) {
-        if (mounted) {
-          CaixaFeedback.erro(
-            context,
-            'Nao foi possivel abrir o caixa. Verifique a sessao na rede.',
-          );
-        }
-        return;
-      }
+      return;
     }
     Venda? venda =
         widget.vendaRepository.buscarOrcamentoPendentePorNumero(numero);
@@ -1259,7 +1254,9 @@ class _CaixaPageState extends State<CaixaPage> {
 
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.f1) {
-      unawaited(_abrirPesquisaOrcamento());
+      if (_caixaAberto) {
+        unawaited(_abrirPesquisaOrcamento());
+      }
       return true;
     }
     if (key == LogicalKeyboardKey.f2) {
@@ -1331,26 +1328,13 @@ class _CaixaPageState extends State<CaixaPage> {
     await _carregarSessaoCaixa();
     if (!mounted) return null;
     if (!_caixaAberto) {
-      final abrir = await _perguntarAbrirCaixaParaContinuar();
-      if (abrir != true) {
-        if (mounted) {
-          CaixaFeedback.erro(
-            context,
-            'Caixa fechado. Abra o caixa para importar orcamentos.',
-          );
-        }
-        return null;
+      if (mounted) {
+        CaixaFeedback.erro(
+          context,
+          'Caixa fechado. Abra o caixa para importar orcamentos.',
+        );
       }
-      await _abrirCaixa();
-      if (!_caixaAberto || !mounted) {
-        if (mounted) {
-          CaixaFeedback.erro(
-            context,
-            'Nao foi possivel abrir o caixa. Verifique a sessao na rede.',
-          );
-        }
-        return null;
-      }
+      return null;
     }
     // Terminal: rehidrata orcamentos via API. Celular: pull do hub.
     if (widget.vendaRepository is VendaApiRepository) {
@@ -1538,6 +1522,7 @@ class _CaixaPageState extends State<CaixaPage> {
         snap.umCaixaAbertoPorLoja;
     // sessao-ativa ja calcula operacaoLiberada; listar cai no meu/aderir.
     final liberar = snap.operacaoLiberada || meu || aderirUmCaixa;
+    final estavaAberto = _caixaAberto;
     setState(() {
       _sessoesRede = snap.terminais;
       _umCaixaPorLojaRemoto = snap.umCaixaAbertoPorLoja;
@@ -1561,6 +1546,9 @@ class _CaixaPageState extends State<CaixaPage> {
         _totalSangrias = 0;
       }
     });
+    if (estavaAberto && (!_caixaAberto || !liberar || aberta == null)) {
+      unawaited(_limparUltimoTrocoRegistrado());
+    }
     // KPI do Inicio: status da loja (qualquer sessao), nao so operacao local.
     final lojaAberta = snap.abertosCount > 0 ||
         (snap.aberta?.aberto == true) ||
@@ -1637,7 +1625,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _carregarUltimoTrocoRegistrado() async {
-    if (_terminalId.isEmpty) return;
+    if (_terminalId.isEmpty || !_caixaAberto) return;
     final prefs = await SharedPreferences.getInstance();
     final vendaId = prefs.getInt(_prefsUltimoTrocoVendaId(_terminalId));
     if (vendaId == null) return;
@@ -1649,6 +1637,26 @@ class _CaixaPageState extends State<CaixaPage> {
       _ultimoTrocoValor =
           prefs.getDouble(_prefsUltimoTrocoValor(_terminalId)) ?? 0;
     });
+  }
+
+  Future<void> _limparUltimoTrocoRegistrado() async {
+    if (mounted) {
+      setState(() {
+        _ultimoTrocoVendaId = null;
+        _ultimoTrocoNumeroOrcamento = 0;
+        _ultimoTrocoValor = 0;
+      });
+    } else {
+      _ultimoTrocoVendaId = null;
+      _ultimoTrocoNumeroOrcamento = 0;
+      _ultimoTrocoValor = 0;
+    }
+    final tid = _terminalId;
+    if (tid.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefsUltimoTrocoVendaId(tid));
+    await prefs.remove(_prefsUltimoTrocoNumero(tid));
+    await prefs.remove(_prefsUltimoTrocoValor(tid));
   }
 
   Future<void> _registrarUltimoTrocoFinalizado({
@@ -2511,6 +2519,14 @@ class _CaixaPageState extends State<CaixaPage> {
       },
     );
     if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.vendaRepository is VendaApiRepository) {
+        unawaited(_hidratarUltimasVendasTerminal());
+      } else {
+        setState(() {});
+      }
+    });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -3336,6 +3352,7 @@ class _CaixaPageState extends State<CaixaPage> {
       );
     }
     if (!mounted) return;
+    await _limparUltimoTrocoRegistrado();
     setState(() {
       _caixaAberto = false;
       _caixaAderidoRemoto = false;
@@ -5928,15 +5945,29 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   List<Venda> _ultimasVendasFinalizadasParaCaixa() {
+    if (!_caixaAberto || _aberturaCaixaEm == null) {
+      return const [];
+    }
     return widget.vendaRepository.listarUltimasVendasFinalizadas(
       limit: _ultimasVendasFinalizadasLimite,
       ordenacao: _ordenacaoUltimasVendas,
+      desde: _aberturaCaixaEm,
     );
+  }
+
+  String? _mensagemListaVaziaUltimasVendasCaixa() {
+    if (!_caixaAberto) {
+      return 'Abra o caixa para iniciar as operacoes de venda.';
+    }
+    return null;
   }
 
   void _atualizarListaUltimasVendasFinalizadasCaixa() {
     if (!mounted) return;
-    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {});
+    });
   }
 
   Future<void> _abrirAcoesVendaFinalizada(Venda vIn) async {
@@ -6712,7 +6743,7 @@ class _CaixaPageState extends State<CaixaPage> {
               rotulo: rotuloImportar,
               dica: 'Pesquisar orcamento para importar (F1)',
               icone: Icons.search,
-              onPressed: _abrirPesquisaOrcamento,
+              onPressed: _caixaAberto ? _abrirPesquisaOrcamento : null,
               destaque: false,
             );
         Widget segundaVia() => botao(
@@ -7398,6 +7429,7 @@ class _CaixaPageState extends State<CaixaPage> {
               CallbackAction<_ImportarOrcamentoIntent>(
             onInvoke: (intent) {
               if (!_atalhoCaixaAtivo()) return null;
+              if (!_caixaAberto) return null;
               _abrirPesquisaOrcamento();
               return null;
             },
@@ -7539,29 +7571,6 @@ class _CaixaPageState extends State<CaixaPage> {
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Future<bool?> _perguntarAbrirCaixaParaContinuar() {
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Caixa fechado'),
-        content: const Text(
-          'Nao ha caixa aberto na loja. Deseja abrir agora para importar '
-          'orcamentos e finalizar vendas?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Abrir caixa'),
-          ),
-        ],
       ),
     );
   }
@@ -7716,7 +7725,9 @@ class _CaixaPageState extends State<CaixaPage> {
       return Text('Caixa · $etapa · Orc. $num');
     }
     final titulo = _caixaAberto ? 'Caixa' : 'Caixa · Fechado';
-    if (_ultimoTrocoValor > 0.001 && _ultimoTrocoVendaId != null) {
+    if (_caixaAberto &&
+        _ultimoTrocoValor > 0.001 &&
+        _ultimoTrocoVendaId != null) {
       final num = _ultimoTrocoNumeroOrcamento > 0
           ? _ultimoTrocoNumeroOrcamento
           : _ultimoTrocoVendaId;
@@ -8045,6 +8056,7 @@ class _CaixaPageState extends State<CaixaPage> {
       formatarMoeda: _formatarMoeda,
       onVendaTap: _abrirAcoesVendaFinalizada,
       ordenacao: _ordenacaoUltimasVendas,
+      mensagemListaVazia: _mensagemListaVaziaUltimasVendasCaixa(),
       quantidadeItens: (v) {
         try {
           final repo = widget.vendaRepository;

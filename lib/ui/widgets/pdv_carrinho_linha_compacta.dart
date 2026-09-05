@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'pdv_botao_tabela_preco_item.dart';
+import 'pdv_carrinho_campo_quantidade.dart';
 import 'pdv_mobile_ui.dart';
 import 'pdv_tipo_entrega_item.dart';
 import 'promocao_badge.dart';
@@ -33,6 +34,11 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     this.estoqueInsuficiente = false,
     this.precoManual = false,
     this.alvosTouchAmplos = false,
+    this.editandoQuantidade = false,
+    this.quantidadeFracionada = false,
+    this.quantidadeController,
+    this.quantidadeFocus,
+    this.onConfirmarQuantidade,
   });
 
   final String nomeProduto;
@@ -59,6 +65,11 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final VoidCallback onAlterarPreco;
   final VoidCallback onRemover;
   final bool alvosTouchAmplos;
+  final bool editandoQuantidade;
+  final bool quantidadeFracionada;
+  final TextEditingController? quantidadeController;
+  final FocusNode? quantidadeFocus;
+  final VoidCallback? onConfirmarQuantidade;
 
   static const double alturaLinha = 52;
   static const double alturaLinhaTouch = 56;
@@ -247,29 +258,25 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
             _AcaoIcone(
               tooltip: 'Diminuir',
               icon: Icons.remove,
-              onPressed: onDiminuir,
+              onPressed: editandoQuantidade ? null : onDiminuir,
               tamanhoMinimo: minAcao,
             ),
-            Tooltip(
-              message: 'Informar quantidade',
-              child: InkWell(
-                onTap: onEditarQuantidade,
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                  child: Text(
-                    quantidadeExibicao,
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
+            PdvCarrinhoCampoQuantidade(
+              quantidadeExibicao: quantidadeExibicao,
+              editando: editandoQuantidade,
+              fracionada: quantidadeFracionada,
+              onTapEditar: onEditarQuantidade,
+              onConfirmar: onConfirmarQuantidade ?? onEditarQuantidade,
+              controller: quantidadeController,
+              focusNode: quantidadeFocus,
+              textStyle: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
               ),
             ),
             _AcaoIcone(
               tooltip: 'Aumentar',
               icon: Icons.add,
-              onPressed: onAumentar,
+              onPressed: editandoQuantidade ? null : onAumentar,
               tamanhoMinimo: minAcao,
             ),
             PopupMenuButton<String>(
@@ -390,29 +397,25 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
         _AcaoIcone(
           tooltip: 'Diminuir',
           icon: Icons.remove,
-          onPressed: onDiminuir,
+          onPressed: editandoQuantidade ? null : onDiminuir,
           tamanhoMinimo: minAcao,
         ),
-        Tooltip(
-          message: 'Informar quantidade (ex.: 5,75)',
-          child: InkWell(
-            onTap: onEditarQuantidade,
-            borderRadius: BorderRadius.circular(4),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: Text(
-                quantidadeExibicao,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
+        PdvCarrinhoCampoQuantidade(
+          quantidadeExibicao: quantidadeExibicao,
+          editando: editandoQuantidade,
+          fracionada: quantidadeFracionada,
+          onTapEditar: onEditarQuantidade,
+          onConfirmar: onConfirmarQuantidade ?? onEditarQuantidade,
+          controller: quantidadeController,
+          focusNode: quantidadeFocus,
+          textStyle: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w700,
           ),
         ),
         _AcaoIcone(
           tooltip: 'Aumentar',
           icon: Icons.add,
-          onPressed: onAumentar,
+          onPressed: editandoQuantidade ? null : onAumentar,
           tamanhoMinimo: minAcao,
         ),
         _AcaoIcone(

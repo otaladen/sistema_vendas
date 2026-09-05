@@ -315,7 +315,7 @@ class PdvAtalhosAjudaConsulta extends StatelessWidget {
   static const _itens = <_PdvAtalhoItem>[
     (tecla: 'F1–F3', descricao: 'tabela para adicionar', destaque: false),
     (tecla: '+ / −', descricao: 'quantidade no painel', destaque: false),
-    (tecla: 'Enter', descricao: 'adiciona selecionado', destaque: true),
+    (tecla: 'Enter', descricao: 'seleciona · qtd no carrinho pisca', destaque: true),
     (tecla: 'F7', descricao: 'painel / drawer', destaque: false),
     (tecla: 'F9', descricao: 'detalhes', destaque: false),
     (tecla: 'F8', descricao: 'busca', destaque: false),

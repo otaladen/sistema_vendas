@@ -34,6 +34,7 @@ import '../domain/retirada_parcial_evento.dart';
 import '../domain/saldo_retirada_item.dart';
 import '../domain/promocao_preco_service.dart';
 import '../domain/ultimas_vendas_finalizadas_ordenacao.dart';
+import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/venda_finalizacao_caixa_helper.dart';
 import '../domain/caixa_meio_pagamento_fechamento.dart';
 import '../domain/troca_diferenca_caixa.dart';
@@ -498,6 +499,7 @@ class VendaRepository {
   late final ConferenciaCargaRepository _conferenciaCarga =
       ConferenciaCargaRepository(_db);
   late final ValeCreditoRepository _vales = ValeCreditoRepository(_db);
+  bool _numeracaoControleReparada = false;
 
   ObjectBox get objectBox => _db;
 
@@ -564,18 +566,38 @@ class VendaRepository {
   }
 
   /// Ultimas vendas finalizadas ativas (consulta limitada no ObjectBox).
+  ///
+  /// [desde]/[ate] restringem ao turno de caixa (momento de finalizacao).
   List<Venda> listarUltimasVendasFinalizadas({
     int limit = 20,
     UltimasVendasFinalizadasOrdenacao ordenacao =
         UltimasVendasFinalizadasOrdenacao.padrao,
+    DateTime? desde,
+    DateTime? ate,
   }) {
     if (limit <= 0) return const [];
+    final filtraPeriodo = desde != null || ate != null;
+    final limiteConsulta = filtraPeriodo
+        ? (limit * 6).clamp(limit, 240)
+        : limit;
+    final List<Venda> bruto;
     switch (ordenacao) {
       case UltimasVendasFinalizadasOrdenacao.porControle:
-        return _listarUltimasFinalizadasPorControle(limit);
+        bruto = _listarUltimasFinalizadasPorControle(limiteConsulta);
       case UltimasVendasFinalizadasOrdenacao.porFinalizacao:
-        return _listarUltimasFinalizadasPorFinalizacaoCaixa(limit);
+        bruto = _listarUltimasFinalizadasPorFinalizacaoCaixa(limiteConsulta);
     }
+    if (!filtraPeriodo) return bruto.take(limit).toList();
+    return bruto
+        .where(
+          (v) => _vendaFinalizadaNoPeriodoCaixa(
+            v,
+            inicio: desde,
+            fim: ate,
+          ),
+        )
+        .take(limit)
+        .toList();
   }
 
   List<Venda> _listarUltimasFinalizadasPorControle(int limit) {
@@ -642,6 +664,17 @@ class VendaRepository {
         return b.id.compareTo(a.id);
       });
     return lista.take(limit).toList();
+  }
+
+  /// Preenche Controle em vendas antigas e corrige duplicatas da separação.
+  void repararNumeracaoControleInterno() {
+    final ids = _db.store.runInTransaction(TxMode.write, () {
+      return _backfillERepararNumeroControleNaTransacao();
+    });
+    _numeracaoControleReparada = true;
+    if (ids.isNotEmpty) {
+      _notificarRedeAposEscrita(vendaIds: ids);
+    }
   }
 
   /// Corrige registros em que [Venda.finalizadaEm] foi copiado da data do orcamento.
@@ -5437,36 +5470,81 @@ class VendaRepository {
   }
 
   /// Sequência exclusiva de Controle Interno. Só chamada ao finalizar venda.
+  /// Continua do maior número já exibido (campo novo, orçamento legado ou id).
   int _proximoNumeroControle() {
-    final qControle = _db.vendaBox
-        .query()
-        .order(Venda_.numeroControle, flags: Order.descending)
+    if (!_numeracaoControleReparada) {
+      _backfillERepararNumeroControleNaTransacao();
+      _numeracaoControleReparada = true;
+    }
+    return VendaDocumentoRotuloHelper.proximoNumeroControleApos(
+      _numerosControleJaExibidos(),
+    );
+  }
+
+  List<int> _numerosControleJaExibidos() {
+    final q = _db.vendaBox
+        .query(Venda_.status.equals('finalizada'))
         .build();
     try {
-      qControle.limit = 1;
-      final maxControle = qControle.findFirst()?.numeroControle ?? 0;
-
-      // Vendas antigas usavam numeroOrcamento como Controle.
-      final qLegado = _db.vendaBox
-          .query(
-            Venda_.status
-                .equals('finalizada')
-                .and(Venda_.numeroControle.equals(0))
-                .and(Venda_.numeroOrcamento.greaterThan(0)),
-          )
-          .order(Venda_.numeroOrcamento, flags: Order.descending)
-          .build();
-      try {
-        qLegado.limit = 1;
-        final maxLegado = qLegado.findFirst()?.numeroOrcamento ?? 0;
-        final maior = maxControle > maxLegado ? maxControle : maxLegado;
-        return maior + 1;
-      } finally {
-        qLegado.close();
-      }
+      return q
+          .find()
+          .map(VendaDocumentoRotuloHelper.numeroControleInterno)
+          .where((n) => n > 0)
+          .toList();
     } finally {
-      qControle.close();
+      q.close();
     }
+  }
+
+  /// Copia o número que a UI já mostrava e resolve Controle repetido.
+  /// Mantém o mais antigo; os mais novos ganham o próximo livre.
+  List<int> _backfillERepararNumeroControleNaTransacao() {
+    final q = _db.vendaBox
+        .query(Venda_.status.equals('finalizada'))
+        .build();
+    final vendas = <Venda>[];
+    try {
+      vendas.addAll(q.find());
+    } finally {
+      q.close();
+    }
+
+    final alterados = <int>{};
+    for (final v in vendas) {
+      if (v.numeroControle > 0) continue;
+      final n = VendaDocumentoRotuloHelper.numeroControleInterno(v);
+      if (n <= 0) continue;
+      v.numeroControle = n;
+      _db.vendaBox.put(v);
+      alterados.add(v.id);
+    }
+
+    final porNumero = <int, List<Venda>>{};
+    for (final v in vendas) {
+      if (v.numeroControle <= 0) continue;
+      porNumero.putIfAbsent(v.numeroControle, () => []).add(v);
+    }
+
+    var proximoLivre = VendaDocumentoRotuloHelper.proximoNumeroControleApos(
+      vendas.map((v) => v.numeroControle),
+    );
+
+    for (final grupo in porNumero.values) {
+      if (grupo.length < 2) continue;
+      grupo.sort((a, b) {
+        final cmp = VendaFinalizacaoCaixaHelper.momentoFinalizacao(a)
+            .compareTo(VendaFinalizacaoCaixaHelper.momentoFinalizacao(b));
+        if (cmp != 0) return cmp;
+        return a.id.compareTo(b.id);
+      });
+      for (var i = 1; i < grupo.length; i++) {
+        final v = grupo[i];
+        v.numeroControle = proximoLivre++;
+        _db.vendaBox.put(v);
+        alterados.add(v.id);
+      }
+    }
+    return alterados.toList();
   }
 
   static int _numeroControleParaOrdenacao(Venda v) {

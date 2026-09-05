@@ -98,4 +98,27 @@ void main() {
       'Controle 148',
     );
   });
+
+  test('proximo controle continua do maior ja exibido e nao reinicia do 1', () {
+    final antiga = Venda()
+      ..id = 2
+      ..status = 'finalizada'
+      ..numeroOrcamento = 2
+      ..numeroControle = 0;
+    final novaSemBackfill = Venda()
+      ..id = 10
+      ..status = 'finalizada'
+      ..numeroOrcamento = 5
+      ..numeroControle = 1;
+
+    final existentes = [
+      VendaDocumentoRotuloHelper.numeroControleInterno(antiga),
+      VendaDocumentoRotuloHelper.numeroControleInterno(novaSemBackfill),
+    ];
+    expect(existentes, [2, 1]);
+    expect(
+      VendaDocumentoRotuloHelper.proximoNumeroControleApos(existentes),
+      3,
+    );
+  });
 }
