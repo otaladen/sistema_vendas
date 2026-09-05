@@ -585,14 +585,14 @@ class VendaRepository {
               .equals('finalizada')
               .and(Venda_.cancelada.equals(false)),
         )
-        .order(Venda_.numeroOrcamento, flags: Order.descending)
+        .order(Venda_.numeroControle, flags: Order.descending)
         .build();
     try {
       query.limit = (limit * 3).clamp(limit, 120);
       final lista = query.find();
       lista.sort((a, b) {
-        final na = a.numeroOrcamento > 0 ? a.numeroOrcamento : a.id;
-        final nb = b.numeroOrcamento > 0 ? b.numeroOrcamento : b.id;
+        final na = _numeroControleParaOrdenacao(a);
+        final nb = _numeroControleParaOrdenacao(b);
         final cmp = nb.compareTo(na);
         if (cmp != 0) return cmp;
         return b.id.compareTo(a.id);
@@ -720,9 +720,23 @@ class VendaRepository {
     }
   }
 
-  /// Segunda via: busca por numero do orcamento ou id interno da venda.
+  /// Segunda via: busca por Controle Interno, numero legado ou id.
   Venda? buscarVendaFinalizadaPorNumeroOuId(int numeroOuId) {
     if (numeroOuId <= 0) return null;
+    final porControle = _db.vendaBox
+        .query(
+          Venda_.status
+              .equals('finalizada')
+              .and(Venda_.cancelada.equals(false))
+              .and(Venda_.numeroControle.equals(numeroOuId)),
+        )
+        .build();
+    try {
+      final porNumeroControle = porControle.findFirst();
+      if (porNumeroControle != null) return porNumeroControle;
+    } finally {
+      porControle.close();
+    }
     final porNumero = _db.vendaBox
         .query(
           Venda_.status
@@ -1046,6 +1060,7 @@ class VendaRepository {
     final asInt = int.tryParse(tb.replaceAll(RegExp(r'[^0-9]'), ''));
     if (asInt != null) {
       orPartes.add(Venda_.id.equals(asInt));
+      orPartes.add(Venda_.numeroControle.equals(asInt));
       orPartes.add(Venda_.numeroOrcamento.equals(asInt));
     }
 
@@ -1968,6 +1983,7 @@ class VendaRepository {
         status: 'finalizada',
         entregaPendente: false,
         numeroOrcamento: 0,
+        numeroControle: _proximoNumeroControle(),
         formaPagamento: 'dinheiro',
         quantidadeParcelas: 1,
       );
@@ -2904,6 +2920,9 @@ class VendaRepository {
         }
       }
 
+      if (venda.numeroControle <= 0) {
+        venda.numeroControle = _proximoNumeroControle();
+      }
       venda.status = 'finalizada';
       venda.finalizadaEm = DateTime.now().toUtc();
       venda.cancelada = false;
@@ -5402,6 +5421,7 @@ class VendaRepository {
     _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
+  /// Sequência exclusiva de orçamentos. Nunca lê nem incrementa Controle.
   int _proximoNumeroOrcamento() {
     final query = _db.vendaBox
         .query()
@@ -5414,6 +5434,47 @@ class VendaRepository {
     } finally {
       query.close();
     }
+  }
+
+  /// Sequência exclusiva de Controle Interno. Só chamada ao finalizar venda.
+  int _proximoNumeroControle() {
+    final qControle = _db.vendaBox
+        .query()
+        .order(Venda_.numeroControle, flags: Order.descending)
+        .build();
+    try {
+      qControle.limit = 1;
+      final maxControle = qControle.findFirst()?.numeroControle ?? 0;
+
+      // Vendas antigas usavam numeroOrcamento como Controle.
+      final qLegado = _db.vendaBox
+          .query(
+            Venda_.status
+                .equals('finalizada')
+                .and(Venda_.numeroControle.equals(0))
+                .and(Venda_.numeroOrcamento.greaterThan(0)),
+          )
+          .order(Venda_.numeroOrcamento, flags: Order.descending)
+          .build();
+      try {
+        qLegado.limit = 1;
+        final maxLegado = qLegado.findFirst()?.numeroOrcamento ?? 0;
+        final maior = maxControle > maxLegado ? maxControle : maxLegado;
+        return maior + 1;
+      } finally {
+        qLegado.close();
+      }
+    } finally {
+      qControle.close();
+    }
+  }
+
+  static int _numeroControleParaOrdenacao(Venda v) {
+    if (v.numeroControle > 0) return v.numeroControle;
+    if (v.status == 'finalizada') {
+      return v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
+    }
+    return 0;
   }
 
   double _calcularBrutoOrcamento(int vendaId, double valorFrete) {

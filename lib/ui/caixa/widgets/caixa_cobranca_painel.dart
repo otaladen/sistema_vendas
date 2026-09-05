@@ -252,8 +252,8 @@ class CaixaCobrancaPainel extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final numLabel = numeroOrcamento > 0
-        ? VendaDocumentoRotuloHelper.rotuloControlePorNumero(numeroOrcamento)
-        : 'Controle pendente';
+        ? VendaDocumentoRotuloHelper.rotuloOrcamentoPorNumero(numeroOrcamento)
+        : 'Orçamento';
 
     return Card(
       margin: EdgeInsets.zero,

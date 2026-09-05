@@ -247,7 +247,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
   router.get('/api/vendas', (Request r) {
     final limit = lanApiQueryInt(r, 'limit', fallback: 120).clamp(1, 5000);
     final offset = lanApiQueryInt(r, 'offset', fallback: 0).clamp(0, 1000000);
-    final status = (r.url.queryParameters['status'] ?? 'todas').trim();
+    final status = (r.url.queryParameters['status'] ?? 'finalizada').trim();
     final desde = lanApiQueryDate(r, 'desde') ?? lanApiQueryDate(r, 'inicio');
     final ate = lanApiQueryDate(r, 'ate') ?? lanApiQueryDate(r, 'fim');
     final clienteId = lanApiQueryInt(r, 'clienteId');

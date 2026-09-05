@@ -537,7 +537,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(70, 7421175120462555210),
+    lastPropertyId: const obx_int.IdUid(71, 2129533980183763586),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -964,6 +964,13 @@ final _entities = <obx_int.ModelEntity>[
         name: 'valorTrocoCaixa',
         type: 8,
         flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(71, 2129533980183763586),
+        name: 'numeroControle',
+        type: 6,
+        flags: 8,
+        indexId: const obx_int.IdUid(89, 4261387862428198274),
       ),
     ],
     relations: <obx_int.ModelRelation>[],
@@ -4369,7 +4376,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
     lastEntityId: const obx_int.IdUid(41, 1697472292442925530),
-    lastIndexId: const obx_int.IdUid(88, 687633053083918975),
+    lastIndexId: const obx_int.IdUid(89, 4261387862428198274),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -5054,7 +5061,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           object.lojaOrigemMercadoria,
         );
         final nfceUltimoErroOffset = fbb.writeString(object.nfceUltimoErro);
-        fbb.startTable(71);
+        fbb.startTable(72);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -5127,6 +5134,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(67, nfceUltimoErroOffset);
         fbb.addFloat64(68, object.valorRecebidoCaixa);
         fbb.addFloat64(69, object.valorTrocoCaixa);
+        fbb.addInt64(70, object.numeroControle);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -5197,6 +5205,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
           buffer,
           rootOffset,
           18,
+          0,
+        );
+        final numeroControleParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          144,
           0,
         );
         final formaPagamentoParam = const fb.StringReader(
@@ -5446,6 +5460,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           lucroTotal: lucroTotalParam,
           status: statusParam,
           numeroOrcamento: numeroOrcamentoParam,
+          numeroControle: numeroControleParam,
           formaPagamento: formaPagamentoParam,
           quantidadeParcelas: quantidadeParcelasParam,
           pagamentosJson: pagamentosJsonParam,
@@ -10546,6 +10561,11 @@ class Venda_ {
   /// See [Venda.valorTrocoCaixa].
   static final valorTrocoCaixa = obx.QueryDoubleProperty<Venda>(
     _entities[2].properties[68],
+  );
+
+  /// See [Venda.numeroControle].
+  static final numeroControle = obx.QueryIntegerProperty<Venda>(
+    _entities[2].properties[69],
   );
 
   /// see [Venda.itens]

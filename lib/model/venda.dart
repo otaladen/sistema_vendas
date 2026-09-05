@@ -15,6 +15,7 @@ class Venda {
     this.lucroTotal = 0,
     this.status = 'orcamento',
     this.numeroOrcamento = 0,
+    this.numeroControle = 0,
     this.formaPagamento = 'dinheiro',
     this.quantidadeParcelas = 1,
     this.pagamentosJson = '',
@@ -93,6 +94,11 @@ class Venda {
 
   @Index()
   int numeroOrcamento;
+
+  /// Número de Controle Interno da venda. Zero enquanto for orçamento.
+  /// Gerado apenas ao finalizar o pagamento no caixa.
+  @Index()
+  int numeroControle;
 
   String formaPagamento;
   int quantidadeParcelas;

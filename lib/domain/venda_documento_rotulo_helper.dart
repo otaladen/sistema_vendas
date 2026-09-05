@@ -13,17 +13,41 @@ class VendaDocumentoNfe55Resumo {
   final bool autorizada;
 }
 
-/// Rotulos unificados: nota fiscal + controle interno + estoque.
+/// Rotulos unificados: orçamento, controle interno, nota fiscal e estoque.
 abstract final class VendaDocumentoRotuloHelper {
   VendaDocumentoRotuloHelper._();
 
-  static int numeroControleInterno(Venda venda) =>
+  static bool ehOrcamentoAberto(Venda venda) =>
+      venda.status == 'orcamento' && !venda.cancelada;
+
+  static int numeroOrcamentoExibido(Venda venda) =>
       venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id;
+
+  static String rotuloOrcamentoPorNumero(int numero) => 'Orc. $numero';
+
+  static String rotuloOrcamento(Venda venda) =>
+      rotuloOrcamentoPorNumero(numeroOrcamentoExibido(venda));
+
+  /// Controle Interno só existe depois da finalização no caixa.
+  /// Orçamento aberto não tem número de controle.
+  static int numeroControleInterno(Venda venda) {
+    if (venda.numeroControle > 0) return venda.numeroControle;
+    if (venda.status == 'finalizada') {
+      return venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id;
+    }
+    return 0;
+  }
 
   static String rotuloControlePorNumero(int numero) => 'Controle $numero';
 
-  static String rotuloControleInterno(Venda venda) =>
-      rotuloControlePorNumero(numeroControleInterno(venda));
+  static String rotuloControleInterno(Venda venda) {
+    if (venda.status == 'orcamento') {
+      return rotuloOrcamento(venda);
+    }
+    final n = numeroControleInterno(venda);
+    if (n <= 0) return rotuloOrcamento(venda);
+    return rotuloControlePorNumero(n);
+  }
 
   static String? rotuloNfce(Venda venda) {
     if (!venda.nfceEmitida) return null;
@@ -48,6 +72,9 @@ abstract final class VendaDocumentoRotuloHelper {
     Venda venda, {
     VendaDocumentoNfe55Resumo? nfe55,
   }) {
+    if (venda.status == 'orcamento') {
+      return rotuloOrcamento(venda);
+    }
     final partes = <String>[];
     final nfce = rotuloNfce(venda);
     if (nfce != null) partes.add(nfce);
@@ -62,6 +89,11 @@ abstract final class VendaDocumentoRotuloHelper {
     Venda venda, {
     VendaDocumentoNfe55Resumo? nfe55,
   }) {
+    if (venda.status == 'orcamento') {
+      return venda.cancelada
+          ? '${rotuloOrcamento(venda)} · cancelado'
+          : '${rotuloOrcamento(venda)} · em aberto';
+    }
     final controle = rotuloControleInterno(venda);
     if (venda.nfceProcessandoPendenteFocus) {
       final estoque = venda.estoqueBaixadoCupom
@@ -97,6 +129,9 @@ abstract final class VendaDocumentoRotuloHelper {
     Venda venda, {
     VendaDocumentoNfe55Resumo? nfe55,
   }) {
+    if (venda.status == 'orcamento') {
+      return venda.cancelada ? 'Orçamento cancelado' : 'Orçamento';
+    }
     if (venda.nfceProcessandoPendenteFocus) {
       return venda.estoqueBaixadoCupom
           ? 'SEFAZ pendente'
@@ -120,6 +155,9 @@ abstract final class VendaDocumentoRotuloHelper {
   }
 
   static Color corStatusLista(Venda venda, ColorScheme scheme) {
+    if (venda.status == 'orcamento') {
+      return scheme.outline;
+    }
     if (venda.nfceProcessandoPendenteFocus || venda.nfceEmissaoEmAndamento) {
       return scheme.tertiary;
     }
@@ -164,8 +202,13 @@ abstract final class VendaDocumentoRotuloHelper {
   /// Titulo curto em listas (caixa, modais).
   static String rotuloTituloLista(Venda venda) => rotuloControleInterno(venda);
 
-  static String badgeNumeroCurto(Venda venda) =>
-      '${numeroControleInterno(venda)}';
+  static String badgeNumeroCurto(Venda venda) {
+    if (venda.status == 'orcamento') {
+      return '${numeroOrcamentoExibido(venda)}';
+    }
+    final n = numeroControleInterno(venda);
+    return n > 0 ? '$n' : '${numeroOrcamentoExibido(venda)}';
+  }
 
   /// Subtitulo com nota fiscal quando existir (ultimas vendas do caixa).
   static String subtituloListaComDocumentos(Venda venda) {

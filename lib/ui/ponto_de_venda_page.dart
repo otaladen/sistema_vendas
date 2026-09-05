@@ -6799,9 +6799,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         SnackBar(
           content: Text(
             orcamentoEdicaoId != null
-                ? 'Venda $numeroOrcamentoSalvo atualizada'
+                ? 'Orçamento $numeroOrcamentoSalvo atualizado'
                       '${resumoEntrega.isEmpty ? '' : ' ($resumoEntrega)'}.'
-                : 'Orcamento $numeroOrcamentoSalvo salvo'
+                : 'Orçamento $numeroOrcamentoSalvo salvo'
                       '${resumoEntrega.isEmpty ? '' : ' ($resumoEntrega)'}'
                       ' — finalize no caixa'
                       '${temFutura ? ' para reservar estoque' : ''}.',
@@ -6840,7 +6840,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         );
       } else {
         _pdvErro(
-          'Erro ao salvar venda: ${LanApiFeedback.mensagem(e)}',
+          'Erro ao salvar orçamento: ${LanApiFeedback.mensagem(e)}',
         );
       }
     } finally {

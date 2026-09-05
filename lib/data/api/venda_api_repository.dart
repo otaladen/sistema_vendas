@@ -179,7 +179,9 @@ class VendaApiRepository extends ChangeNotifier {
   Future<void> hidratarOrcamentos({int limit = 120}) async {
     _exigirServidorOnline();
     final items = await _client.listarOrcamentos(limit: limit);
-    _orcamentos = List<Venda>.from(items);
+    _orcamentos = items
+        .where((v) => v.status == 'orcamento' && !v.cancelada)
+        .toList();
     for (final v in items) {
       _porId[v.id] = v;
       _cacheItensDaVenda(v);
@@ -197,7 +199,9 @@ class VendaApiRepository extends ChangeNotifier {
       _porId[v.id] = v;
       _cacheItensDaVenda(v);
     }
-    _vendasFinalizadas = List<Venda>.from(items);
+    _vendasFinalizadas = items
+        .where((v) => v.status == 'finalizada' && !v.cancelada)
+        .toList();
     notifyListeners();
   }
 
@@ -1666,7 +1670,9 @@ class VendaApiRepository extends ChangeNotifier {
     int? limit,
   }) {
     if (_offline) return const [];
-    var lista = List<Venda>.from(_orcamentos);
+    var lista = _orcamentos
+        .where((v) => v.status == 'orcamento' && !v.cancelada)
+        .toList();
     if (desde != null) {
       final ini = DateTime(desde.year, desde.month, desde.day).toUtc();
       lista = lista.where((v) => !v.data.isBefore(ini)).toList();
@@ -1684,6 +1690,7 @@ class VendaApiRepository extends ChangeNotifier {
   Venda? buscarOrcamentoPendentePorNumero(int numero) {
     if (_offline) return null;
     for (final v in _orcamentos) {
+      if (v.status != 'orcamento' || v.cancelada) continue;
       if (v.numeroOrcamento == numero) return v;
     }
     return null;
@@ -1695,10 +1702,14 @@ class VendaApiRepository extends ChangeNotifier {
     if (v != null) {
       _porId[v.id] = v;
       final i = _orcamentos.indexWhere((e) => e.id == v.id);
-      if (i >= 0) {
-        _orcamentos[i] = v;
-      } else if (v.status == 'orcamento' && !v.cancelada) {
-        _orcamentos.insert(0, v);
+      if (v.status == 'orcamento' && !v.cancelada) {
+        if (i >= 0) {
+          _orcamentos[i] = v;
+        } else {
+          _orcamentos.insert(0, v);
+        }
+      } else if (i >= 0) {
+        _orcamentos.removeAt(i);
       }
       notifyListeners();
     }
@@ -1929,10 +1940,14 @@ class VendaApiRepository extends ChangeNotifier {
     if (v != null) {
       _porId[vendaId] = v;
       final i = _orcamentos.indexWhere((e) => e.id == vendaId);
-      if (i >= 0) {
-        _orcamentos[i] = v;
-      } else if (v.status == 'orcamento' && !v.cancelada) {
-        _orcamentos.insert(0, v);
+      if (v.status == 'orcamento' && !v.cancelada) {
+        if (i >= 0) {
+          _orcamentos[i] = v;
+        } else {
+          _orcamentos.insert(0, v);
+        }
+      } else if (i >= 0) {
+        _orcamentos.removeAt(i);
       }
     }
     await carregarItensRemoto(vendaId);
@@ -2555,8 +2570,12 @@ class VendaApiRepository extends ChangeNotifier {
     switch (modo) {
       case UltimasVendasFinalizadasOrdenacao.porControle:
         lista.sort((a, b) {
-          final na = a.numeroOrcamento > 0 ? a.numeroOrcamento : a.id;
-          final nb = b.numeroOrcamento > 0 ? b.numeroOrcamento : b.id;
+          final na = a.numeroControle > 0
+              ? a.numeroControle
+              : (a.numeroOrcamento > 0 ? a.numeroOrcamento : a.id);
+          final nb = b.numeroControle > 0
+              ? b.numeroControle
+              : (b.numeroOrcamento > 0 ? b.numeroOrcamento : b.id);
           final cmp = nb.compareTo(na);
           if (cmp != 0) return cmp;
           return b.id.compareTo(a.id);
@@ -2595,7 +2614,11 @@ class VendaApiRepository extends ChangeNotifier {
   Venda? buscarVendaFinalizadaPorNumeroOuId(int numeroOuId) {
     if (numeroOuId <= 0) return null;
     for (final v in listarUltimasVendasFinalizadas(limit: 0)) {
-      if (v.numeroOrcamento == numeroOuId || v.id == numeroOuId) return v;
+      if (v.numeroControle == numeroOuId ||
+          v.numeroOrcamento == numeroOuId ||
+          v.id == numeroOuId) {
+        return v;
+      }
     }
     final cached = _porId[numeroOuId];
     if (cached != null &&

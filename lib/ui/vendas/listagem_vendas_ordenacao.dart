@@ -1,3 +1,4 @@
+import '../../domain/venda_documento_rotulo_helper.dart';
 import 'listagem_venda_item_ui.dart';
 
 enum ListagemVendasColuna {
@@ -38,7 +39,7 @@ List<ListagemVendaItemUi> ordenarItensListagemVendas(
   int cmpNum(num a, num b) => a.compareTo(b);
 
   int numeroControle(ListagemVendaItemUi item) {
-    final n = item.venda.numeroOrcamento;
+    final n = VendaDocumentoRotuloHelper.numeroControleInterno(item.venda);
     return n > 0 ? n : item.venda.id;
   }
 

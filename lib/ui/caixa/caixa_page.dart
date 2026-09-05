@@ -5154,16 +5154,17 @@ class _CaixaPageState extends State<CaixaPage> {
       _atualizarListaUltimasVendasFinalizadasCaixa();
       if (!mounted) return;
       final numCupom =
-          vendaFinalizada.numeroOrcamento > 0
-              ? vendaFinalizada.numeroOrcamento
-              : venda.numeroOrcamento;
+          VendaDocumentoRotuloHelper.numeroControleInterno(vendaFinalizada);
       await _registrarUltimoTrocoFinalizado(
         vendaId: vendaFinalizada.id,
         numeroOrcamento: numCupom,
         troco: trocoFinal,
       );
       if (!mounted) return;
-      CaixaFeedback.sucesso(context, 'Venda $numCupom finalizada.');
+      CaixaFeedback.sucesso(
+        context,
+        '${VendaDocumentoRotuloHelper.rotuloControleInterno(vendaFinalizada)} finalizada.',
+      );
       unawaited(_tentarAbrirGavetaPosPagamento());
       final sessaoPosVenda = CaixaPosVendaSessao(
         venda: vendaFinalizada,
@@ -5306,7 +5307,7 @@ class _CaixaPageState extends State<CaixaPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Venda ${vendaAtual.numeroOrcamento} exige NF-e 55. '
+            '${VendaDocumentoRotuloHelper.rotuloControleInterno(vendaAtual)} exige NF-e 55. '
             'Abra Notas fiscais quando puder.',
           ),
           duration: const Duration(seconds: 8),
@@ -5963,7 +5964,7 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
 
-    final numCupom = v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id;
+    final numCupom = VendaDocumentoRotuloHelper.numeroControleInterno(v);
     final cliente = _clienteDaVenda(v);
     final nfceEmitida = v.nfceEmitida;
     final nfe55Autorizada = v.nfe55Autorizada;
@@ -8396,7 +8397,9 @@ class _DialogoResumoFechamentoVendaState
         const SingleActivator(LogicalKeyboardKey.numpadEnter): _concluir,
       },
       child: AlertDialog(
-        title: Text('Venda ${widget.numeroOrcamento} finalizada'),
+        title: Text(
+          'Finalizar ${VendaDocumentoRotuloHelper.rotuloOrcamentoPorNumero(widget.numeroOrcamento)}',
+        ),
         content: SizedBox(
           width: 520,
           child: Column(

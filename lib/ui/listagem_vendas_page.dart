@@ -1295,7 +1295,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
               vendedor: 'Sem vendedor',
               pagamento: v.formaPagamento,
               entrega: v.tipoEntrega,
-              badgeNumero: '${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}',
+              badgeNumero: VendaDocumentoRotuloHelper.badgeNumeroCurto(v),
               totalFormatado: _formatarMoeda(v.total),
               cancelada: v.cancelada,
               alertas: const [],

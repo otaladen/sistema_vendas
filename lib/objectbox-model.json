@@ -406,7 +406,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "70:7421175120462555210",
+      "lastPropertyId": "71:2129533980183763586",
       "name": "Venda",
       "properties": [
         {
@@ -770,6 +770,13 @@
           "id": "70:7421175120462555210",
           "name": "valorTrocoCaixa",
           "type": 8
+        },
+        {
+          "id": "71:2129533980183763586",
+          "name": "numeroControle",
+          "indexId": "89:4261387862428198274",
+          "type": 6,
+          "flags": 8
         }
       ],
       "relations": []
@@ -3621,7 +3628,7 @@
     }
   ],
   "lastEntityId": "41:1697472292442925530",
-  "lastIndexId": "88:687633053083918975",
+  "lastIndexId": "89:4261387862428198274",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,
