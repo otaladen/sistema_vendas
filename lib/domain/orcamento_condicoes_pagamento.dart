@@ -1,39 +1,124 @@
-/// Simulacao de formas de pagamento / parcelamento no orcamento impresso.
+import '../model/venda.dart';
+import 'pagamento_orcamento.dart';
+
+/// Texto da forma de pagamento escolhida no orcamento impresso.
 ///
-/// Reutilizada no PDF e no ESC/POS para o cliente ver as opcoes a vista e
-/// as parcelas no cartao (mesmo teto do checkout do PDV).
+/// Nao gera tabela generica de parcelas: so a condicao salva na venda.
 abstract final class OrcamentoCondicoesPagamento {
   OrcamentoCondicoesPagamento._();
 
-  /// Mesmo teto de [_parcelasMaximasCheckoutPdV] no PDV.
-  static const int parcelasMaximas = 12;
+  static const String tituloSecao = 'FORMA DE PAGAMENTO';
 
-  static const String tituloSecao = 'FORMAS DE PAGAMENTO';
-  static const String subtituloSecao = 'Condicoes de parcelamento';
-
-  /// Titulo + subtitulo + a vista + cabecalho credito + parcelas 2x..N.
-  static int quantidadeLinhasLayout({int maxParcelas = parcelasMaximas}) {
-    final n = maxParcelas.clamp(1, 24);
-    final parcelasCredito = n < 2 ? 0 : n - 1;
-    return 2 + 1 + (parcelasCredito > 0 ? 1 + parcelasCredito : 0);
+  static bool meioAVista(String meio) {
+    switch (meio) {
+      case PagamentoMeio.dinheiro:
+      case PagamentoMeio.pix:
+      case PagamentoMeio.cartaoDebito:
+      case '':
+        return true;
+      default:
+        return false;
+    }
   }
 
-  /// Linhas da simulacao (sem o titulo da secao).
+  static int quantidadeLinhasLayout({
+    String formaPagamento = PagamentoMeio.dinheiro,
+    int quantidadeParcelas = 1,
+    String pagamentosJson = '',
+  }) {
+    return linhas(
+      total: 1,
+      formatarMoeda: (_) => '',
+      formaPagamento: formaPagamento,
+      quantidadeParcelas: quantidadeParcelas,
+      pagamentosJson: pagamentosJson,
+    ).length;
+  }
+
+  static List<String> linhasDaVenda(
+    Venda venda, {
+    required double total,
+    required String Function(double) formatarMoeda,
+  }) {
+    return linhas(
+      total: total,
+      formatarMoeda: formatarMoeda,
+      formaPagamento: venda.formaPagamento,
+      quantidadeParcelas: venda.quantidadeParcelas,
+      pagamentosJson: venda.pagamentosJson,
+    );
+  }
+
+  /// Linhas da condicao escolhida (sem titulo de secao).
   static List<String> linhas({
     required double total,
     required String Function(double) formatarMoeda,
-    int maxParcelas = parcelasMaximas,
+    String formaPagamento = PagamentoMeio.dinheiro,
+    int quantidadeParcelas = 1,
+    String pagamentosJson = '',
   }) {
-    final t = total.isNaN || total.isInfinite || total < 0 ? 0.0 : total;
-    final out = <String>[
-      'A vista (Dinheiro/PIX/Debito): ${formatarMoeda(t)}',
-    ];
-    final n = maxParcelas.clamp(1, 24);
-    if (n < 2) return out;
-    out.add('Cartao credito:');
-    for (var i = 2; i <= n; i++) {
-      out.add('  ${i}x de ${formatarMoeda(t / i)}');
+    final t = _valorSeguro(total);
+    if (formaPagamento == PagamentoMeio.misto) {
+      final mistos = PagamentoOrcamentoCodec.decode(pagamentosJson);
+      if (mistos.isNotEmpty) {
+        return mistos
+            .map(
+              (l) => _linhaMeio(
+                meio: l.meio,
+                valor: _valorSeguro(l.valor),
+                parcelas: l.parcelas,
+                formatarMoeda: formatarMoeda,
+              ),
+            )
+            .toList();
+      }
     }
-    return out;
+    return [
+      _linhaMeio(
+        meio: formaPagamento,
+        valor: t,
+        parcelas: quantidadeParcelas,
+        formatarMoeda: formatarMoeda,
+      ),
+    ];
+  }
+
+  static String _linhaMeio({
+    required String meio,
+    required double valor,
+    required int parcelas,
+    required String Function(double) formatarMoeda,
+  }) {
+    if (meioAVista(meio)) {
+      return 'Forma de Pagamento: A vista (Dinheiro/PIX/Debito) - '
+          'Total: ${formatarMoeda(valor)}';
+    }
+    if (meio == PagamentoMeio.cartaoCredito) {
+      final n = parcelas < 1 ? 1 : parcelas;
+      return 'Forma de Pagamento: Cartao de credito - '
+          '${n}x de ${formatarMoeda(valor / n)}';
+    }
+    return 'Forma de Pagamento: ${_rotulo(meio)} - '
+        'Total: ${formatarMoeda(valor)}';
+  }
+
+  static String _rotulo(String meio) {
+    switch (meio) {
+      case PagamentoMeio.transferencia:
+        return 'Transferencia';
+      case PagamentoMeio.fiado:
+        return 'Fiado';
+      case PagamentoMeio.vale:
+        return 'Vale';
+      case PagamentoMeio.misto:
+        return 'Misto';
+      default:
+        return meio.isEmpty ? 'A vista' : meio;
+    }
+  }
+
+  static double _valorSeguro(double total) {
+    if (total.isNaN || total.isInfinite || total < 0) return 0;
+    return total;
   }
 }

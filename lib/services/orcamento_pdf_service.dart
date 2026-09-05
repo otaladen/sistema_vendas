@@ -223,9 +223,13 @@ abstract final class OrcamentoPdfService {
           (layout.exibirValidadeOrcamento ? 1 : 0) +
           (telLoja.isNotEmpty || whatsappLoja.isNotEmpty ? 1 : 0) +
           (cnpjEmpresa.trim().isNotEmpty ? 1 : 0),
-      // Folga: aviso fiscal + condicoes de pagamento (+ rodape config).
+      // Folga: aviso fiscal + forma de pagamento escolhida (+ rodape config).
       linhasExtras: 6 +
-          OrcamentoCondicoesPagamento.quantidadeLinhasLayout() +
+          OrcamentoCondicoesPagamento.quantidadeLinhasLayout(
+            formaPagamento: venda.formaPagamento,
+            quantidadeParcelas: venda.quantidadeParcelas,
+            pagamentosJson: venda.pagamentosJson,
+          ) +
           (temFrete ? 1 : 0) +
           (desconto > 0 ? 1 : 0) +
           (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda) ? 3 : 0) +
@@ -364,21 +368,15 @@ abstract final class OrcamentoPdfService {
                 OrcamentoCondicoesPagamento.tituloSecao,
                 layout,
               ),
-              CupomPdfLayout.textoCorpo(
-                OrcamentoCondicoesPagamento.subtituloSecao,
-                layout,
-                fontWeight: pw.FontWeight.bold,
-              ),
-              ...OrcamentoCondicoesPagamento.linhas(
+              ...OrcamentoCondicoesPagamento.linhasDaVenda(
+                venda,
                 total: total,
                 formatarMoeda: formatar,
               ).map(
                 (linha) => CupomPdfLayout.textoCorpo(
                   CupomPdfLayout.textoTermicoAscii(linha),
                   layout,
-                  fontWeight: linha.startsWith('A vista')
-                      ? pw.FontWeight.bold
-                      : pw.FontWeight.normal,
+                  fontWeight: pw.FontWeight.bold,
                 ),
               ),
               if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) ...[

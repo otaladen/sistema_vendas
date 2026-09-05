@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
+import '../domain/pagamento_orcamento.dart';
 import '../model/config_layout_impressao.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
 import 'cupom_pdf_gerado.dart';
@@ -295,16 +296,16 @@ class CupomLayoutPreviewPdf {
                   OrcamentoCondicoesPagamento.tituloSecao,
                   layout,
                 ),
-                CupomPdfLayout.textoCorpo(
-                  OrcamentoCondicoesPagamento.subtituloSecao,
-                  layout,
-                  fontWeight: pw.FontWeight.bold,
-                ),
                 ...OrcamentoCondicoesPagamento.linhas(
                   total: total,
                   formatarMoeda: _moeda,
+                  formaPagamento: PagamentoMeio.dinheiro,
                 ).map(
-                  (linha) => CupomPdfLayout.textoCorpo(linha, layout),
+                  (linha) => CupomPdfLayout.textoCorpo(
+                    linha,
+                    layout,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                 ),
               ],
               if (!orcamento) ...[

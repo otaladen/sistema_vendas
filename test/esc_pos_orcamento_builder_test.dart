@@ -55,12 +55,37 @@ void main() {
     expect(texto, contains('Cimento'));
     expect(texto, contains('VALOR TOTAL'));
     expect(texto, contains('COTACAO'));
-    expect(texto, contains('FORMAS DE PAGAMENTO'));
-    expect(texto, contains('Condicoes de parcelamento'));
+    expect(texto, contains('FORMA DE PAGAMENTO'));
     expect(texto, contains('A vista'));
-    expect(texto, contains('2x de'));
+    expect(texto, contains('Dinheiro/PIX/Debito'));
+    expect(texto, isNot(contains('2x de')));
+    expect(texto, isNot(contains('12x')));
+    expect(texto, isNot(contains('Condicoes de parcelamento')));
     expect(texto, isNot(contains('RETIRA LOGO')));
     expect(texto, isNot(contains('RETIRADA FUTURA')));
     expect(texto, isNot(contains('ENTREGA/CARRETO')));
+  });
+
+  test('montar orcamento ESC/POS imprime so o credito escolhido', () {
+    final venda = Venda(
+      numeroOrcamento: 2,
+      total: 90,
+      formaPagamento: 'cartao_credito',
+      quantidadeParcelas: 3,
+    );
+    final bytes = EscPosOrcamentoBuilder.montar(
+      OrcamentoEscPosDados(
+        venda: venda,
+        config: const EmpresaConfig(nomeLoja: 'Comprou Levou'),
+        itens: const [],
+        validadeDias: 7,
+      ),
+    );
+    final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    expect(texto, contains('Cartao de credito'));
+    expect(texto, contains('3x de'));
+    expect(texto, isNot(contains('2x de')));
+    expect(texto, isNot(contains('12x')));
+    expect(texto, isNot(contains('A vista')));
   });
 }
