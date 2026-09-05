@@ -174,14 +174,15 @@ abstract final class EmitirNfceVendaFlow {
     }
   }
 
-  static Future<void> executar(
+  static Future<EmissaoNfceVendaResult?> executar(
     BuildContext context, {
     required EmitirNfceVendaDeps deps,
     required Venda venda,
     VoidCallback? onConcluidoComSucesso,
     bool fluxoAutomaticoPosVenda = false,
+    bool posVendaCaixaAutomatico = false,
   }) async {
-    if (!context.mounted) return;
+    if (!context.mounted) return null;
     final messenger = ScaffoldMessenger.of(context);
     // Terminal leve deve emitir NFC-e via LAN API (PC servidor), nao Focus local.
     if (deps.vendaRepository is VendaApiRepository) {
@@ -194,7 +195,7 @@ abstract final class EmitirNfceVendaFlow {
           duration: Duration(seconds: 6),
         ),
       );
-      return;
+      return null;
     }
     var vendaAtual = deps.vendaRepository.obterPorId(venda.id) ?? venda;
     final cliente = clienteDaVenda(vendaAtual, deps.clienteRepository);
@@ -220,11 +221,11 @@ abstract final class EmitirNfceVendaFlow {
             duration: const Duration(seconds: 8),
           ),
         );
-        return;
+        return null;
       }
 
       final deviceId = await SyncCursorStorage().obterOuCriarDeviceId();
-      if (!context.mounted) return;
+      if (!context.mounted) return null;
 
       if (FiscalEmissaoLock.nfceBloqueadaPorOutroDispositivo(
         vendaAtual,
@@ -239,7 +240,7 @@ abstract final class EmitirNfceVendaFlow {
             duration: Duration(seconds: 8),
           ),
         );
-        return;
+        return null;
       }
 
       final refNfce = FocusNfeService.referenciaVendaNfce(vendaAtual);
@@ -250,7 +251,7 @@ abstract final class EmitirNfceVendaFlow {
       );
 
       final rootNav = Navigator.of(context, rootNavigator: true);
-      if (!context.mounted) return;
+      if (!context.mounted) return null;
 
       showDialog<void>(
         context: context,
@@ -293,7 +294,7 @@ abstract final class EmitirNfceVendaFlow {
       }
 
       await _aguardarEntreDialogos();
-      if (!context.mounted) return;
+      if (!context.mounted) return null;
 
       switch (dialogResult.kind) {
         case EmissaoNfceVendaKind.erroConfig:
@@ -304,7 +305,7 @@ abstract final class EmitirNfceVendaFlow {
               duration: const Duration(seconds: 8),
             ),
           );
-          return;
+          return dialogResult;
         case EmissaoNfceVendaKind.erroValidacao:
           deps.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
           deps.vendaRepository.registrarNfceErroEmissao(
@@ -318,7 +319,7 @@ abstract final class EmitirNfceVendaFlow {
               duration: const Duration(seconds: 8),
             ),
           );
-          return;
+          return dialogResult;
         case EmissaoNfceVendaKind.erroApi:
         case EmissaoNfceVendaKind.erroGenerico:
           deps.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
@@ -326,12 +327,15 @@ abstract final class EmitirNfceVendaFlow {
             vendaId: vendaAtual.id,
             mensagem: dialogResult.mensagem,
           );
+          if (posVendaCaixaAutomatico) {
+            return dialogResult;
+          }
           final tentar = await _mostrarDialogoFalhaNfce(
             context,
             mensagem: dialogResult.mensagem,
           );
           await _aguardarEntreDialogos();
-          if (!context.mounted) return;
+          if (!context.mounted) return dialogResult;
           if (tentar == true) {
             vendaAtual = dialogResult.vendaAtual ??
                 deps.vendaRepository.obterPorId(vendaAtual.id) ??
@@ -345,7 +349,7 @@ abstract final class EmitirNfceVendaFlow {
               duration: const Duration(seconds: 8),
             ),
           );
-          return;
+          return dialogResult;
         case EmissaoNfceVendaKind.processando:
           final r = dialogResult.resultado!;
           final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
@@ -367,45 +371,58 @@ abstract final class EmitirNfceVendaFlow {
               ),
             );
           }
-          await showDialog<void>(
-            context: context,
-            useRootNavigator: true,
-            builder: (ctx) {
-              final theme = Theme.of(ctx);
-              return AlertDialog(
-                icon: Icon(
-                  Icons.hourglass_top_outlined,
-                  color: theme.colorScheme.primary,
-                  size: 32,
-                ),
-                title: const Text('NFC-e em processamento'),
+          if (posVendaCaixaAutomatico || fluxoAutomaticoPosVenda) {
+            messenger.showSnackBar(
+              SnackBar(
                 content: Text(
                   r.mensagem.isEmpty
-                      ? 'A nota foi enviada a Focus NFe e aguarda retorno da '
-                          'SEFAZ.\n\n'
-                          'Referencia: ${r.referencia}'
-                      : '${r.mensagem}\n\n'
-                          'Referencia: ${r.referencia}',
-                  textAlign: TextAlign.center,
+                      ? 'NFC-e em processamento na SEFAZ (fiscal pendente).'
+                      : r.mensagem,
                 ),
-                actionsAlignment: MainAxisAlignment.center,
-                actions: [
-                  FilledButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Entendi'),
+                duration: const Duration(seconds: 8),
+              ),
+            );
+          } else {
+            await showDialog<void>(
+              context: context,
+              useRootNavigator: true,
+              builder: (ctx) {
+                final theme = Theme.of(ctx);
+                return AlertDialog(
+                  icon: Icon(
+                    Icons.hourglass_top_outlined,
+                    color: theme.colorScheme.primary,
+                    size: 32,
                   ),
-                ],
-              );
-            },
-          );
+                  title: const Text('NFC-e em processamento'),
+                  content: Text(
+                    r.mensagem.isEmpty
+                        ? 'A nota foi enviada a Focus NFe e aguarda retorno da '
+                            'SEFAZ.\n\n'
+                            'Referencia: ${r.referencia}'
+                        : '${r.mensagem}\n\n'
+                            'Referencia: ${r.referencia}',
+                    textAlign: TextAlign.center,
+                  ),
+                  actionsAlignment: MainAxisAlignment.center,
+                  actions: [
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Entendi'),
+                    ),
+                  ],
+                );
+              },
+            );
+          }
           onConcluidoComSucesso?.call();
-          return;
+          return dialogResult;
         case EmissaoNfceVendaKind.sucesso:
           final r = dialogResult.resultado!;
           final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
           final config =
               await deps.appConfigRepository.carregarEmpresaConfig();
-          if (!context.mounted) return;
+          if (!context.mounted) return dialogResult;
 
           try {
             deps.vendaRepository.registrarNfceEmitidaComBaixaEstoque(
@@ -432,7 +449,7 @@ abstract final class EmitirNfceVendaFlow {
                 duration: const Duration(seconds: 10),
               ),
             );
-            return;
+            return dialogResult;
           }
 
           final vendaComNfce =
@@ -445,15 +462,27 @@ abstract final class EmitirNfceVendaFlow {
           );
           final estoqueOk = vendaComNfce.estoqueBaixadoCupom;
 
-          if (fluxoAutomaticoPosVenda && estoqueOk) {
+          if (fluxoAutomaticoPosVenda || posVendaCaixaAutomatico) {
+            await _imprimirCupomNfce(
+              context,
+              deps: deps,
+              venda: vendaComNfce,
+              config: config,
+            );
+            if (!context.mounted) return dialogResult;
             messenger.showSnackBar(
               SnackBar(
-                content: Text('$resumoPos — proxima venda.'),
-                backgroundColor: Colors.green.shade700,
+                content: Text(
+                  estoqueOk
+                      ? '$resumoPos — NFC-e autorizada.'
+                      : '$resumoPos — verifique a baixa de estoque.',
+                ),
+                backgroundColor:
+                    estoqueOk ? Colors.green.shade700 : Colors.orange.shade800,
                 duration: const Duration(seconds: 5),
               ),
             );
-            return;
+            return dialogResult;
           }
 
           final detalhe = <String>[
@@ -521,7 +550,7 @@ abstract final class EmitirNfceVendaFlow {
               );
             },
           );
-          if (!context.mounted) return;
+          if (!context.mounted) return dialogResult;
           messenger.showSnackBar(
             SnackBar(
               content: Text(
@@ -534,9 +563,10 @@ abstract final class EmitirNfceVendaFlow {
               duration: const Duration(seconds: 8),
             ),
           );
-          return;
+          return dialogResult;
       }
     }
+    return null;
   }
 
   static Future<void> _aguardarEntreDialogos() async {
@@ -630,6 +660,19 @@ abstract final class EmitirNfceVendaFlow {
       },
     );
   }
+
+  static Future<void> imprimirCupomNfcePosVenda(
+    BuildContext context, {
+    required EmitirNfceVendaDeps deps,
+    required Venda venda,
+    required EmpresaConfig config,
+  }) =>
+      _imprimirCupomNfce(
+        context,
+        deps: deps,
+        venda: venda,
+        config: config,
+      );
 
   static Future<EmissaoNfceVendaResult> _executarChamadaFiscal(
     EmitirNfceVendaDeps deps,

@@ -3813,7 +3813,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         _precisaPlanoFiadoPdV() &&
         (_clienteSelecionadoId == null || _clienteSelecionadoId! <= 0);
     final tooltip = clienteAtual == null
-        ? 'Cliente da venda (opcional) · Shift+F2 · Shift+F4 lista · Ctrl+N novo'
+        ? 'Cliente da venda (opcional) · Shift+F2 · Shift+F4 cadastro · Ctrl+N cadastro rapido'
         : clienteAtual.nomeRazao;
 
     return FocusTraversalOrder(
@@ -3888,8 +3888,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                tooltip: 'Lista de clientes (Shift+F4)',
-                icon: const Icon(Icons.list_alt, size: 18),
+                tooltip: 'Cadastro (Shift+F4)',
+                icon: const Icon(Icons.contact_page_outlined, size: 18),
                 onPressed: () => unawaited(_abrirSeletorClienteNoPdv()),
               ),
             ),
@@ -3899,8 +3899,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                tooltip: 'Novo cliente (Ctrl+N)',
-                icon: const Icon(Icons.person_add_alt, size: 18),
+                tooltip: 'Cadastro rapido (Ctrl+N)',
+                icon: const Icon(Icons.flash_on_outlined, size: 18),
                 onPressed: () => unawaited(_abrirCadastroRapidoClientePdv()),
               ),
             ),
@@ -4020,8 +4020,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                       ),
                     ListTile(
                       dense: true,
-                      leading: const Icon(Icons.person_add_alt_1_outlined),
-                      title: const Text('+ Novo cliente...'),
+                      leading: const Icon(Icons.app_registration_outlined),
+                      title: const Text('+ Cadastro...'),
                       onTap: () => Navigator.pop(
                         dialogContext,
                         _selecaoNovoClienteValor,

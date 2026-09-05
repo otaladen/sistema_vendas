@@ -204,8 +204,8 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   static const _precoCliente = <_PdvAtalhoItem>[
     (tecla: 'F1–F3', descricao: 'tabela da linha no carrinho', destaque: false),
     (tecla: 'Shift+F2', descricao: 'foco no cliente', destaque: false),
-    (tecla: 'Ctrl+N', descricao: 'novo cliente', destaque: false),
-    (tecla: 'Shift+F4', descricao: 'lista de clientes', destaque: false),
+    (tecla: 'Ctrl+N', descricao: 'cadastro rapido', destaque: false),
+    (tecla: 'Shift+F4', descricao: 'cadastro', destaque: false),
     (tecla: 'Ctrl+F1–F3', descricao: 'entrega no carrinho', destaque: false),
   ];
 

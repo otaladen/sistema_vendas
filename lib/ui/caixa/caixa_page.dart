@@ -5248,8 +5248,7 @@ class _CaixaPageState extends State<CaixaPage> {
         m.contains('timed out');
   }
 
-  /// NFC-e / NF-e 55 conforme pagamento. Comprovante (cupom) e oferecido
-  /// sempre, em fluxo separado — independente desta acao.
+  /// NFC-e / NF-e 55 conforme pagamento. Comprovante (cupom) so apos falha NFC-e.
   String? _acaoFiscalAutomaticaPorPagamento(Venda venda) {
     return CaixaFiscalAcaoHelper.acaoAutomaticaPorPagamento(
       venda: venda,
@@ -5274,7 +5273,7 @@ class _CaixaPageState extends State<CaixaPage> {
     unawaited(_executarFiscalPosVendaEmSegundoPlano(sessao));
   }
 
-  /// Pergunta de comprovante para qualquer forma de pagamento.
+  /// Pergunta de comprovante para pagamentos sem NFC-e (dinheiro, fiado, etc.).
   Future<void> _oferecerComprovantePosVenda(CaixaPosVendaSessao sessao) async {
     final venda =
         widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
@@ -5285,36 +5284,145 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
+  Future<void> _oferecerComprovanteControleAposFalhaNfce(
+    CaixaPosVendaSessao sessao,
+  ) async {
+    if (!mounted) return;
+    await _aguardarEntreDialogos();
+    if (!mounted) return;
+    final imprimir = await showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(Icons.error_outline, color: Theme.of(ctx).colorScheme.error),
+        title: const Text('Falha na NFC-e'),
+        content: const Text(
+          'A emissao da NFC-e falhou. Deseja imprimir o Comprovante de '
+          'Controle (Nao Fiscal)?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Nao'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sim'),
+          ),
+        ],
+      ),
+    );
+    if (imprimir != true || !mounted) return;
+    final venda =
+        widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
+    await _imprimirCupomNaoFiscalPosVenda(
+      venda: venda,
+      totalRecebido: sessao.totalRecebido,
+      troco: sessao.troco,
+    );
+  }
+
+  bool _nfcePosVendaConsideradaFalha(EmissaoNfceVendaResult? resultado) {
+    if (resultado == null) return true;
+    switch (resultado.kind) {
+      case EmissaoNfceVendaKind.sucesso:
+      case EmissaoNfceVendaKind.processando:
+        return false;
+      case EmissaoNfceVendaKind.erroApi:
+      case EmissaoNfceVendaKind.erroGenerico:
+      case EmissaoNfceVendaKind.erroValidacao:
+      case EmissaoNfceVendaKind.erroConfig:
+        return true;
+    }
+  }
+
+  Future<void> _executarFluxoNfcePosVenda(
+    CaixaPosVendaSessao sessao, {
+    bool encerrarAoConcluir = false,
+  }) async {
+    var venda =
+        widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
+    final bloqueioCnpj = CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
+      cliente: _clienteDaVenda(venda),
+      venda: venda,
+    );
+    if (bloqueioCnpj != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(bloqueioCnpj)),
+        );
+      }
+      await _oferecerComprovanteControleAposFalhaNfce(sessao);
+      return;
+    }
+    if (_documentoFiscalCaixaJaAtendido(venda, 'nfce')) {
+      _atualizarResumoNfcePendenteEmissao();
+      if (encerrarAoConcluir &&
+          _vendaComDocumentoPosCaixaObrigatorio(venda)) {
+        await _encerrarPosVendaFiscal();
+      }
+      return;
+    }
+
+    final resultado = await _emitirNfceParaVenda(
+      venda,
+      posVendaAutomatico: true,
+    );
+    _atualizarPosVendaDoRepositorio();
+    _atualizarResumoNfcePendenteEmissao();
+    if (!mounted) return;
+
+    venda = _vendaPosCaixaAtualizada() ?? venda;
+    if (_nfcePosVendaConsideradaFalha(resultado)) {
+      await _oferecerComprovanteControleAposFalhaNfce(sessao);
+      return;
+    }
+    if (encerrarAoConcluir && _vendaComDocumentoPosCaixaObrigatorio(venda)) {
+      await _encerrarPosVendaFiscal();
+    }
+  }
+
   Future<void> _executarFiscalPosVendaEmSegundoPlano(
     CaixaPosVendaSessao sessao,
   ) async {
     final venda =
         widget.vendaRepository.obterPorId(sessao.venda.id) ?? sessao.venda;
+    final acao = _acaoFiscalAutomaticaPorPagamento(venda);
 
-    // Sempre pergunta o comprovante (dinheiro, PIX, cartao, fiado, misto...).
-    try {
-      if (mounted) {
-        await _oferecerComprovantePosVenda(sessao);
+    if (acao == 'nfce') {
+      try {
+        if (mounted) {
+          await _executarFluxoNfcePosVenda(sessao);
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Documento fiscal em segundo plano: $e'),
+              duration: const Duration(seconds: 6),
+            ),
+          );
+          await _oferecerComprovanteControleAposFalhaNfce(sessao);
+        }
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Comprovante: ${LanApiFeedback.mensagem(e)}'),
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-    }
-
-    final vendaAtual =
-        widget.vendaRepository.obterPorId(sessao.venda.id) ?? venda;
-    final acao = _acaoFiscalAutomaticaPorPagamento(vendaAtual);
-    if (acao == null || acao == 'cupom') {
-      _atualizarResumoNfcePendenteEmissao();
       return;
     }
-    if (_documentoFiscalCaixaJaAtendido(vendaAtual, acao)) {
+
+    if (acao == 'cupom' || acao == null) {
+      try {
+        if (mounted) {
+          await _oferecerComprovantePosVenda(sessao);
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Comprovante: ${LanApiFeedback.mensagem(e)}'),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
       _atualizarResumoNfcePendenteEmissao();
       return;
     }
@@ -5324,38 +5432,10 @@ class _CaixaPageState extends State<CaixaPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${VendaDocumentoRotuloHelper.rotuloControleInterno(vendaAtual)} exige NF-e 55. '
+            '${VendaDocumentoRotuloHelper.rotuloControleInterno(venda)} exige NF-e 55. '
             'Abra Notas fiscais quando puder.',
           ),
           duration: const Duration(seconds: 8),
-        ),
-      );
-      return;
-    }
-
-    try {
-      if (acao == 'nfce') {
-        final bloqueioCnpj = CaixaFiscalAcaoHelper.mensagemBloqueioNfceClienteCnpj(
-          cliente: _clienteDaVenda(vendaAtual),
-          venda: vendaAtual,
-        );
-        if (bloqueioCnpj != null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(bloqueioCnpj)),
-            );
-          }
-          return;
-        }
-        await _emitirNfceParaVenda(vendaAtual);
-      }
-      _atualizarResumoNfcePendenteEmissao();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Documento fiscal em segundo plano: $e'),
-          duration: const Duration(seconds: 6),
         ),
       );
     }
@@ -5372,20 +5452,31 @@ class _CaixaPageState extends State<CaixaPage> {
     final sessao = _posVenda!;
     _documentoFiscalAutomaticoDisparado = true;
 
-    // Sempre oferece o comprovante, independente do pagamento.
-    setState(() => _posVendaProcessando = true);
-    try {
-      await _oferecerComprovantePosVenda(sessao);
-      _atualizarPosVendaDoRepositorio();
-    } finally {
-      if (mounted) setState(() => _posVendaProcessando = false);
-    }
-    if (!mounted || _posVenda == null) return;
-
     final venda = _vendaPosCaixaAtualizada() ?? sessao.venda;
     final acao = _acaoFiscalAutomaticaPorPagamento(venda);
-    if (acao == null || acao == 'cupom') {
-      if (_vendaComDocumentoPosCaixaObrigatorio(venda)) {
+
+    if (acao == 'nfce') {
+      setState(() => _posVendaProcessando = true);
+      try {
+        await _executarFluxoNfcePosVenda(sessao, encerrarAoConcluir: true);
+        _atualizarPosVendaDoRepositorio();
+      } finally {
+        if (mounted) setState(() => _posVendaProcessando = false);
+      }
+      return;
+    }
+
+    if (acao == 'cupom' || acao == null) {
+      setState(() => _posVendaProcessando = true);
+      try {
+        await _oferecerComprovantePosVenda(sessao);
+        _atualizarPosVendaDoRepositorio();
+      } finally {
+        if (mounted) setState(() => _posVendaProcessando = false);
+      }
+      if (!mounted || _posVenda == null) return;
+      final vendaAtual = _vendaPosCaixaAtualizada() ?? sessao.venda;
+      if (_vendaComDocumentoPosCaixaObrigatorio(vendaAtual)) {
         await _encerrarPosVendaFiscal();
       }
       return;
@@ -5610,11 +5701,16 @@ class _CaixaPageState extends State<CaixaPage> {
       try {
         await _aguardarEntreDialogos();
         if (!mounted) return;
-        await _emitirNfceParaVenda(venda);
+        final resultado = await _emitirNfceParaVenda(
+          venda,
+          posVendaAutomatico: _documentoFiscalAutomaticoDisparado,
+        );
         _atualizarPosVendaDoRepositorio();
         if (!mounted) return;
         final vendaAtual = _vendaPosCaixaAtualizada() ?? venda;
-        if (_vendaComDocumentoPosCaixaObrigatorio(vendaAtual)) {
+        if (_nfcePosVendaConsideradaFalha(resultado)) {
+          await _oferecerComprovanteControleAposFalhaNfce(sessao);
+        } else if (_vendaComDocumentoPosCaixaObrigatorio(vendaAtual)) {
           await _encerrarPosVendaFiscal();
         }
       } finally {
@@ -5839,53 +5935,111 @@ class _CaixaPageState extends State<CaixaPage> {
         focusNfeService: _focusNfeService,
       );
 
-  Future<void> _emitirNfceParaVenda(Venda venda) async {
+  Future<EmissaoNfceVendaResult?> _emitirNfceParaVenda(
+    Venda venda, {
+    bool posVendaAutomatico = false,
+  }) async {
     if (widget.vendaRepository is VendaApiRepository) {
       final client = MainMenuDeps.maybeOf(context)?.lanApiClient;
       if (client == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'API do servidor indisponivel para emitir NFC-e.',
-            ),
-          ),
-        );
-        return;
-      }
-      try {
-        final r = await client.emitirNfce(venda.id);
-        if (!mounted) return;
-        if (r['ok'] == true) {
-          await _aposMutacaoFiscalOuCancelamentoCaixa(vendaId: venda.id);
-          if (!mounted) return;
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
+            const SnackBar(
               content: Text(
-                r['autorizada'] == true
-                    ? 'NFC-e ${(r['numero'] ?? '').toString()} autorizada no servidor.'
-                    : 'NFC-e em processamento no servidor.',
+                'API do servidor indisponivel para emitir NFC-e.',
               ),
             ),
           );
-        } else {
+        }
+        return EmissaoNfceVendaResult.erroConfig(
+          'API do servidor indisponivel para emitir NFC-e.',
+        );
+      }
+      try {
+        final r = await client.emitirNfce(venda.id);
+        if (!mounted) return null;
+        if (r['ok'] == true) {
+          await _aposMutacaoFiscalOuCancelamentoCaixa(vendaId: venda.id);
+          if (!mounted) return null;
+          final vAtual = widget.vendaRepository.obterPorId(venda.id) ?? venda;
+          if (r['autorizada'] == true) {
+            if (posVendaAutomatico && mounted) {
+              final config =
+                  await widget.appConfigRepository.carregarEmpresaConfig();
+              if (mounted) {
+                await EmitirNfceVendaFlow.imprimirCupomNfcePosVenda(
+                  context,
+                  deps: _emitirNfceDeps,
+                  venda: vAtual,
+                  config: config,
+                );
+              }
+            }
+            if (!mounted) return null;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'NFC-e ${(r['numero'] ?? vAtual.nfceNumero).toString()} '
+                  'autorizada no servidor.',
+                ),
+              ),
+            );
+            return EmissaoNfceVendaResult.sucesso(
+              resultado: FocusNfeEmissaoResultado(
+                autorizada: true,
+                rejeitada: false,
+                processando: false,
+                referencia: FocusNfeService.referenciaVendaNfce(vAtual),
+                chaveNfe: vAtual.nfceChaveAcesso,
+                numero: vAtual.nfceNumero,
+                serie: vAtual.nfceSerie,
+                protocolo: vAtual.nfceProtocolo,
+                urlDanfe: vAtual.nfceUrlDanfe,
+                urlXml: vAtual.nfceUrlXml,
+                statusFocus: vAtual.nfceStatusFocus,
+                urlXmlCancelamento: vAtual.nfceUrlXmlCancelamento,
+              ),
+              vendaAtual: vAtual,
+            );
+          }
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${r['error'] ?? 'Falha ao emitir NFC-e'}'),
+            const SnackBar(
+              content: Text('NFC-e em processamento no servidor.'),
             ),
           );
+          return EmissaoNfceVendaResult.processando(
+            resultado: FocusNfeEmissaoResultado(
+              autorizada: false,
+              rejeitada: false,
+              processando: true,
+              referencia: FocusNfeService.referenciaVendaNfce(vAtual),
+              statusFocus: 'processando',
+            ),
+            vendaAtual: vAtual,
+          );
         }
+        final msg = '${r['error'] ?? 'Falha ao emitir NFC-e'}';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+        return EmissaoNfceVendaResult.erroApi(
+          msg,
+          widget.vendaRepository.obterPorId(venda.id) ?? venda,
+        );
       } catch (e) {
-        if (!mounted) return;
+        if (!mounted) return null;
         LanApiFeedback.snackErro(context, e, prefixo: 'Falha ao emitir NFC-e');
+        return EmissaoNfceVendaResult.erroGenerico(
+          LanApiFeedback.mensagem(e),
+        );
       }
-      return;
     }
-    await EmitirNfceVendaFlow.executar(
+    return EmitirNfceVendaFlow.executar(
       context,
       deps: _emitirNfceDeps,
       venda: venda,
-      fluxoAutomaticoPosVenda: _documentoFiscalAutomaticoDisparado,
+      fluxoAutomaticoPosVenda: posVendaAutomatico,
+      posVendaCaixaAutomatico: posVendaAutomatico,
       onConcluidoComSucesso: () {
         _atualizarListaUltimasVendasFinalizadasCaixa();
         _atualizarResumoNfcePendenteEmissao();
