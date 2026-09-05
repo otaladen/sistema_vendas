@@ -55,5 +55,12 @@ void main() {
     expect(texto, contains('Cimento'));
     expect(texto, contains('VALOR TOTAL'));
     expect(texto, contains('COTACAO'));
+    expect(texto, contains('FORMAS DE PAGAMENTO'));
+    expect(texto, contains('Condicoes de parcelamento'));
+    expect(texto, contains('A vista'));
+    expect(texto, contains('2x de'));
+    expect(texto, isNot(contains('RETIRA LOGO')));
+    expect(texto, isNot(contains('RETIRADA FUTURA')));
+    expect(texto, isNot(contains('ENTREGA/CARRETO')));
   });
 }

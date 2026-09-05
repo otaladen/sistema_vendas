@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
-import '../domain/entrega_venda_helper.dart';
+import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
@@ -153,12 +153,6 @@ abstract final class EscPosOrcamentoBuilder {
         for (final l in _wrap(titulo, cols)) {
           out.add(EscPosCommands.line(l));
         }
-        final modalidade = EntregaVendaHelper.rotuloModalidadeOrcamentoPdf(
-          item.tipoEntregaItem,
-        );
-        if (modalidade.trim().isNotEmpty) {
-          out.add(EscPosCommands.line(_trunc(modalidade, cols)));
-        }
         final qtdTxt = OrcamentoPdfService.quantidadeComUnidade(
           item: item,
           produto: produto,
@@ -202,13 +196,20 @@ abstract final class EscPosOrcamentoBuilder {
       _padCols('VALOR TOTAL:', 'R\$ ${_moeda.format(total)}', cols),
     ));
     out.add(EscPosCommands.boldOff);
-    out.add(EscPosCommands.line(
-      _padCols(
-        'Pagamento:',
-        OrcamentoPdfService.textoPagamento(venda),
-        cols,
-      ),
-    ));
+
+    out.add(EscPosCommands.separator(cols));
+    out.add(EscPosCommands.boldOn);
+    out.add(EscPosCommands.line(OrcamentoCondicoesPagamento.tituloSecao));
+    out.add(EscPosCommands.line(OrcamentoCondicoesPagamento.subtituloSecao));
+    out.add(EscPosCommands.boldOff);
+    for (final linha in OrcamentoCondicoesPagamento.linhas(
+      total: total,
+      formatarMoeda: (v) => 'R\$ ${_moeda.format(v)}',
+    )) {
+      for (final l in _wrap(linha, cols)) {
+        out.add(EscPosCommands.line(l));
+      }
+    }
 
     if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) {
       out.add(EscPosCommands.line('Condicao de quitacao (fiado):'));

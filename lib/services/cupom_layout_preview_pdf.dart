@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
+import '../domain/orcamento_condicoes_pagamento.dart';
 import '../model/config_layout_impressao.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
 import 'cupom_pdf_gerado.dart';
@@ -55,7 +56,9 @@ class CupomLayoutPreviewPdf {
       layout: layout,
       linhasTexto: orcamento ? 16 : 42,
       qtdItens: 2,
-      linhasExtras: 4,
+      linhasExtras: orcamento
+          ? 4 + OrcamentoCondicoesPagamento.quantidadeLinhasLayout()
+          : 4,
       comLogo: comLogo,
       segundaVia: !orcamento,
     );
@@ -261,7 +264,6 @@ class CupomLayoutPreviewPdf {
                   layout: layout,
                   nomeProduto: i.nome,
                   codigoSku: orcamento ? 'SKU-01' : null,
-                  modalidade: orcamento ? '[RETIRA LOGO]' : null,
                   quantidade: i.qtd,
                   quantidadeExibicao: orcamento ? '${i.qtd} UN' : null,
                   precoUnitario: i.unit,
@@ -287,13 +289,24 @@ class CupomLayoutPreviewPdf {
                 valor: _moeda(total),
                 destaque: layout.destacarTotal || orcamento,
               ),
-              if (orcamento)
-                CupomPdfLayout.linhaTotal(
-                  layout: layout,
-                  rotulo: 'Pagamento:',
-                  valor: 'PIX a vista',
-                  colunas: layout.alinharPagamentoColunas,
+              if (orcamento) ...[
+                CupomPdfLayout.divisoriaSecao(layout: layout),
+                CupomPdfLayout.tituloSecao(
+                  OrcamentoCondicoesPagamento.tituloSecao,
+                  layout,
                 ),
+                CupomPdfLayout.textoCorpo(
+                  OrcamentoCondicoesPagamento.subtituloSecao,
+                  layout,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                ...OrcamentoCondicoesPagamento.linhas(
+                  total: total,
+                  formatarMoeda: _moeda,
+                ).map(
+                  (linha) => CupomPdfLayout.textoCorpo(linha, layout),
+                ),
+              ],
               if (!orcamento) ...[
                 CupomPdfLayout.linhaTotal(
                   layout: layout,

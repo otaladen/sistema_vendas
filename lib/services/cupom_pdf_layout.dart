@@ -752,11 +752,11 @@ class CupomPdfLayout {
     return u.clamp(0, 999);
   }
 
-  /// Itens de orcamento: SKU+nome + modalidade + linha qtd x preco.
+  /// Itens de orcamento: SKU+nome + linha qtd x preco.
   static int unidadesAlturaItensOrcamento(
     Iterable<String> nomesProduto, {
     int caracteresPorLinha = 24,
-    bool comModalidade = true,
+    bool comModalidade = false,
   }) {
     var u = 0;
     for (final nome in nomesProduto) {

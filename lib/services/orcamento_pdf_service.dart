@@ -6,7 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
-import '../domain/entrega_venda_helper.dart';
+import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
@@ -26,7 +26,7 @@ import 'fiscal_config_store.dart';
 /// Gera PDF profissional de orcamento (materiais de construcao / ERP).
 ///
 /// Regras: sem CPF/CNPJ do cliente; cabecalho da loja com CNPJ; itens com
-/// SKU + modalidade + qtd/unidade; totais + pagamento; aviso sem valor fiscal.
+/// SKU + qtd/unidade; totais + condicoes de pagamento; aviso sem valor fiscal.
 abstract final class OrcamentoPdfService {
   OrcamentoPdfService._();
 
@@ -209,7 +209,10 @@ abstract final class OrcamentoPdfService {
       final sku = (produto?.codigoInterno ?? '').trim();
       return sku.isEmpty ? nome : '$sku - $nome';
     });
-    final unidadesItens = CupomPdfLayout.unidadesAlturaItensOrcamento(nomesItens);
+    final unidadesItens = CupomPdfLayout.unidadesAlturaItensOrcamento(
+      nomesItens,
+      comModalidade: false,
+    );
     final pageFormat = CupomPdfLayout.formatoPaginaOrcamentoSalvar(
       modelo: modelo,
       layout: layout,
@@ -220,8 +223,9 @@ abstract final class OrcamentoPdfService {
           (layout.exibirValidadeOrcamento ? 1 : 0) +
           (telLoja.isNotEmpty || whatsappLoja.isNotEmpty ? 1 : 0) +
           (cnpjEmpresa.trim().isNotEmpty ? 1 : 0),
-      // Folga curta: so aviso fiscal (+ rodape config se houver). Sem assinatura.
+      // Folga: aviso fiscal + condicoes de pagamento (+ rodape config).
       linhasExtras: 6 +
+          OrcamentoCondicoesPagamento.quantidadeLinhasLayout() +
           (temFrete ? 1 : 0) +
           (desconto > 0 ? 1 : 0) +
           (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda) ? 3 : 0) +
@@ -311,10 +315,6 @@ abstract final class OrcamentoPdfService {
                       ? ProdutoNomeExibicao.paraImpressao(produto)
                       : (snap.isEmpty ? 'Produto' : snap);
                   final sku = (produto?.codigoInterno ?? '').trim();
-                  final modalidade =
-                      EntregaVendaHelper.rotuloModalidadeOrcamentoPdf(
-                    item.tipoEntregaItem,
-                  );
                   final qtdUnidade = quantidadeComUnidade(
                     item: item,
                     produto: produto,
@@ -323,7 +323,6 @@ abstract final class OrcamentoPdfService {
                     layout: layout,
                     nomeProduto: CupomPdfLayout.textoTermicoAscii(nome),
                     codigoSku: sku.isEmpty ? null : sku,
-                    modalidade: modalidade,
                     quantidade: item.quantidade,
                     quantidadeExibicao:
                         CupomPdfLayout.textoTermicoAscii(qtdUnidade),
@@ -360,11 +359,27 @@ abstract final class OrcamentoPdfService {
                 valor: formatar(total),
                 destaque: true,
               ),
-              CupomPdfLayout.linhaTotal(
-                layout: layout,
-                rotulo: 'Pagamento:',
-                valor: CupomPdfLayout.textoTermicoAscii(textoPagamento(venda)),
-                colunas: layout.alinharPagamentoColunas,
+              CupomPdfLayout.divisoriaSecao(layout: layout),
+              CupomPdfLayout.tituloSecao(
+                OrcamentoCondicoesPagamento.tituloSecao,
+                layout,
+              ),
+              CupomPdfLayout.textoCorpo(
+                OrcamentoCondicoesPagamento.subtituloSecao,
+                layout,
+                fontWeight: pw.FontWeight.bold,
+              ),
+              ...OrcamentoCondicoesPagamento.linhas(
+                total: total,
+                formatarMoeda: formatar,
+              ).map(
+                (linha) => CupomPdfLayout.textoCorpo(
+                  CupomPdfLayout.textoTermicoAscii(linha),
+                  layout,
+                  fontWeight: linha.startsWith('A vista')
+                      ? pw.FontWeight.bold
+                      : pw.FontWeight.normal,
+                ),
               ),
               if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) ...[
                 CupomPdfLayout.textoCorpo(

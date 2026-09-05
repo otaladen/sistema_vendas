@@ -71,7 +71,6 @@ void main() {
       layout: ConfigLayoutImpressao.padraoOrcamento(),
       nomeProduto: 'Areia',
       codigoSku: '941',
-      modalidade: '[RETIRA LOGO]',
       quantidade: 2,
       quantidadeExibicao: '2 M³',
       precoUnitario: 70,
@@ -94,13 +93,20 @@ void main() {
     );
   });
 
-  test('unidadesAlturaItensOrcamento conta modalidade e linha de preco', () {
+  test('unidadesAlturaItensOrcamento conta nome e linha de preco', () {
     final u = CupomPdfLayout.unidadesAlturaItensOrcamento(const [
       '941 - Cimento',
       'Areia',
     ]);
-    // Cada item: 1 linha nome + modalidade + qtd/preco = 3
-    expect(u, 6);
+    // Cada item: 1 linha nome + qtd/preco = 2
+    expect(u, 4);
+    expect(
+      CupomPdfLayout.unidadesAlturaItensOrcamento(
+        const ['Cimento'],
+        comModalidade: true,
+      ),
+      3,
+    );
   });
 
   test('formatoPaginaOrcamentoSalvar nao encolhe com preset economico', () {
