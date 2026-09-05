@@ -346,6 +346,8 @@ class SyncEntityCodec {
       'nfceUrlXmlCancelamento': v.nfceUrlXmlCancelamento,
       'nfceUltimoErro': v.nfceUltimoErro,
       'nfceEmitidaEm': v.nfceEmitidaEm?.toUtc().toIso8601String(),
+      'valorRecebidoCaixa': v.valorRecebidoCaixa,
+      'valorTrocoCaixa': v.valorTrocoCaixa,
       'nfeReferenciaFocus': v.nfeReferenciaFocus,
       'nfeChaveAcesso': v.nfeChaveAcesso,
       'nfeNumero': v.nfeNumero,
@@ -434,6 +436,8 @@ class SyncEntityCodec {
       nfceEmitidaEm: DateTime.tryParse(
         (m['nfceEmitidaEm'] ?? '').toString(),
       )?.toUtc(),
+      valorRecebidoCaixa: (m['valorRecebidoCaixa'] as num?)?.toDouble() ?? 0,
+      valorTrocoCaixa: (m['valorTrocoCaixa'] as num?)?.toDouble() ?? 0,
       nfeReferenciaFocus: (m['nfeReferenciaFocus'] ?? '').toString(),
       nfeChaveAcesso: (m['nfeChaveAcesso'] ?? '').toString(),
       nfeNumero: (m['nfeNumero'] ?? '').toString(),

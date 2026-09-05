@@ -55,6 +55,8 @@ class Venda {
     this.nfceUrlXmlCancelamento = '',
     this.nfceUltimoErro = '',
     this.nfceEmitidaEm,
+    this.valorRecebidoCaixa = 0,
+    this.valorTrocoCaixa = 0,
     this.nfeReferenciaFocus = '',
     this.nfeChaveAcesso = '',
     this.nfeNumero = '',
@@ -177,6 +179,12 @@ class Venda {
 
   @Property(type: PropertyType.dateUtc)
   DateTime? nfceEmitidaEm;
+
+  /// Valor recebido no caixa (dinheiro/misto). Zero = nao registrado.
+  double valorRecebidoCaixa;
+
+  /// Troco devolvido ao cliente no caixa.
+  double valorTrocoCaixa;
 
   /// Ultima referencia Focus da NF-e modelo 55 (`venda_{id}_nfe` ou `venda_{id}_nfe_2`).
   String nfeReferenciaFocus;

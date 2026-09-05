@@ -96,17 +96,32 @@ class CupomNaoFiscalVendaPdf {
     return codigo.isEmpty ? nome : '$codigo · $nome';
   }
 
-  /// Estimativa para segunda via (valores exatos de dinheiro nao ficam gravados).
+  /// Valores de recebido/troco para impressao do cupom (primeira via ou reimpressao).
+  static ({double recebido, double troco}) recebidoTrocoParaCupom(Venda v) {
+    if (v.valorRecebidoCaixa > 0.009 || v.valorTrocoCaixa > 0.009) {
+      final recebido = v.valorRecebidoCaixa > 0.009
+          ? v.valorRecebidoCaixa
+          : (v.total + v.valorTrocoCaixa);
+      return (recebido: recebido, troco: v.valorTrocoCaixa);
+    }
+    return inferirRecebidoTrocoSegundaVia(v);
+  }
+
+  /// Estimativa quando troco nao foi gravado no caixa (vendas antigas).
   static ({double recebido, double troco}) inferirRecebidoTrocoSegundaVia(
     Venda v,
   ) {
     final t = v.total;
-    if (v.formaPagamento == 'misto' && v.pagamentosJson.trim().isNotEmpty) {
+    if (v.formaPagamento == 'misto' &&
+        v.pagamentosJson.trim().isNotEmpty) {
       final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
       if (linhas.isEmpty) return (recebido: t, troco: 0.0);
       final soma = PagamentoOrcamentoCodec.soma(linhas);
       final troco = (soma - t).clamp(0.0, double.infinity).toDouble();
       return (recebido: soma, troco: troco);
+    }
+    if (v.formaPagamento == 'dinheiro') {
+      return (recebido: t, troco: 0.0);
     }
     return (recebido: t, troco: 0.0);
   }

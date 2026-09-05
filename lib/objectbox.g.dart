@@ -537,7 +537,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(68, 2971576588614774501),
+    lastPropertyId: const obx_int.IdUid(70, 7421175120462555210),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -951,6 +951,18 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(68, 2971576588614774501),
         name: 'nfceUltimoErro',
         type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(69, 3757114151768534259),
+        name: 'valorRecebidoCaixa',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(70, 7421175120462555210),
+        name: 'valorTrocoCaixa',
+        type: 8,
         flags: 0,
       ),
     ],
@@ -5042,7 +5054,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           object.lojaOrigemMercadoria,
         );
         final nfceUltimoErroOffset = fbb.writeString(object.nfceUltimoErro);
-        fbb.startTable(69);
+        fbb.startTable(71);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -5113,6 +5125,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(65, uuidLocalOffset);
         fbb.addOffset(66, lojaOrigemMercadoriaOffset);
         fbb.addOffset(67, nfceUltimoErroOffset);
+        fbb.addFloat64(68, object.valorRecebidoCaixa);
+        fbb.addFloat64(69, object.valorTrocoCaixa);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -5345,6 +5359,18 @@ obx_int.ModelDefinition getObjectBoxModel() {
                 nfceEmitidaEmValue,
                 isUtc: true,
               );
+        final valorRecebidoCaixaParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          140,
+          0,
+        );
+        final valorTrocoCaixaParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          142,
+          0,
+        );
         final nfeReferenciaFocusParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 102, '');
@@ -5460,6 +5486,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
           nfceUrlXmlCancelamento: nfceUrlXmlCancelamentoParam,
           nfceUltimoErro: nfceUltimoErroParam,
           nfceEmitidaEm: nfceEmitidaEmParam,
+          valorRecebidoCaixa: valorRecebidoCaixaParam,
+          valorTrocoCaixa: valorTrocoCaixaParam,
           nfeReferenciaFocus: nfeReferenciaFocusParam,
           nfeChaveAcesso: nfeChaveAcessoParam,
           nfeNumero: nfeNumeroParam,
@@ -10508,6 +10536,16 @@ class Venda_ {
   /// See [Venda.nfceUltimoErro].
   static final nfceUltimoErro = obx.QueryStringProperty<Venda>(
     _entities[2].properties[66],
+  );
+
+  /// See [Venda.valorRecebidoCaixa].
+  static final valorRecebidoCaixa = obx.QueryDoubleProperty<Venda>(
+    _entities[2].properties[67],
+  );
+
+  /// See [Venda.valorTrocoCaixa].
+  static final valorTrocoCaixa = obx.QueryDoubleProperty<Venda>(
+    _entities[2].properties[68],
   );
 
   /// see [Venda.itens]

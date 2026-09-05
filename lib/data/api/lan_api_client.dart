@@ -1056,6 +1056,8 @@ class LanApiClient {
     int id, {
     required bool permitirVendaSemEstoque,
     String? terminalId,
+    double valorRecebidoCaixa = 0,
+    double valorTrocoCaixa = 0,
   }) async {
     await _postJson(
       '/api/vendas/$id/finalizar',
@@ -1063,6 +1065,9 @@ class LanApiClient {
         'permitirVendaSemEstoque': permitirVendaSemEstoque,
         if (terminalId != null && terminalId.trim().isNotEmpty)
           'terminalId': terminalId.trim(),
+        if (valorRecebidoCaixa > 0.009)
+          'valorRecebidoCaixa': valorRecebidoCaixa,
+        if (valorTrocoCaixa > 0.009) 'valorTrocoCaixa': valorTrocoCaixa,
       },
       timeout: timeoutFinalizacao,
     );

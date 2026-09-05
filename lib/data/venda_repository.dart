@@ -3731,6 +3731,25 @@ class VendaRepository {
     _notificarRedeAposEscrita(vendaId: vendaId);
   }
 
+  /// Persiste valor recebido e troco informados no caixa (cupom/segunda via).
+  void registrarRecebidoTrocoCaixa({
+    required int vendaId,
+    required double valorRecebido,
+    required double valorTroco,
+  }) {
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      venda.valorRecebidoCaixa =
+          valorRecebido.clamp(0, double.infinity).toDouble();
+      venda.valorTrocoCaixa = valorTroco.clamp(0, double.infinity).toDouble();
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
   void registrarNfeEmissaoEmAndamento({
     required int vendaId,
     required String deviceId,

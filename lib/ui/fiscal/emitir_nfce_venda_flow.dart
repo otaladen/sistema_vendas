@@ -765,7 +765,7 @@ abstract final class EmitirNfceVendaFlow {
       } catch (_) {}
     }
     final infer =
-        CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(vendaAtual);
+        CupomNaoFiscalVendaPdf.recebidoTrocoParaCupom(vendaAtual);
     final nomeArquivo =
         'nfce_venda_${vendaAtual.numeroOrcamento > 0 ? vendaAtual.numeroOrcamento : vendaAtual.id}.pdf';
     await mostrarFluxoImpressaoCupomVenda(

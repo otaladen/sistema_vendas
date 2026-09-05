@@ -5121,11 +5121,18 @@ class _CaixaPageState extends State<CaixaPage> {
             .converterOrcamentoParaVendaRemoto(
           venda.id,
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
+          valorRecebidoCaixa: totalRecebido,
+          valorTrocoCaixa: trocoFinal,
         );
       } else {
         widget.vendaRepository.converterOrcamentoParaVenda(
           venda.id,
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
+        );
+        widget.vendaRepository.registrarRecebidoTrocoCaixa(
+          vendaId: venda.id,
+          valorRecebido: totalRecebido,
+          valorTroco: trocoFinal,
         );
         await LanSyncScheduler.solicitarSyncPrioritario();
       }
@@ -5745,6 +5752,13 @@ class _CaixaPageState extends State<CaixaPage> {
     }
     final vendaAtualizada =
         widget.vendaRepository.obterPorId(venda.id) ?? venda;
+    final cupomValores =
+        CupomNaoFiscalVendaPdf.recebidoTrocoParaCupom(vendaAtualizada);
+    final recebidoImp = cupomValores.recebido > 0.009
+        ? cupomValores.recebido
+        : totalRecebido;
+    final trocoImp =
+        cupomValores.troco > 0.009 ? cupomValores.troco : troco;
     final config = await widget.appConfigRepository.carregarEmpresaConfig();
     if (!mounted) return;
     List<ItemVenda> itensCupom = const [];
@@ -5773,8 +5787,8 @@ class _CaixaPageState extends State<CaixaPage> {
         config: config,
         cliente: _clienteDaVenda(vendaAtualizada),
         vendedor: _vendedorDaVenda(vendaAtualizada),
-        totalRecebido: totalRecebido,
-        troco: troco,
+        totalRecebido: recebidoImp,
+        troco: trocoImp,
         segundaVia: false,
         dataCabecalhoVenda: DateTime.now(),
         itens: itensCupom,
@@ -5785,8 +5799,8 @@ class _CaixaPageState extends State<CaixaPage> {
         itens: itensCupom,
         cliente: _clienteDaVenda(vendaAtualizada),
         vendedor: _vendedorDaVenda(vendaAtualizada),
-        totalRecebido: totalRecebido,
-        troco: troco,
+        totalRecebido: recebidoImp,
+        troco: trocoImp,
       ),
       suggestedFileName: nomeArquivo,
     );
@@ -6154,8 +6168,7 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       return;
     }
-    final infer =
-        CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(vendaAtualizada);
+    final infer = CupomNaoFiscalVendaPdf.recebidoTrocoParaCupom(vendaAtualizada);
     final nomeArquivo =
         'venda_${vendaAtualizada.numeroOrcamento > 0 ? vendaAtualizada.numeroOrcamento : vendaAtualizada.id}_2via.pdf';
     await mostrarFluxoImpressaoCupomVenda(

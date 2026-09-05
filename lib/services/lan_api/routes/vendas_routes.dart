@@ -379,6 +379,15 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         vendaId,
         permitirVendaSemEstoque: body['permitirVendaSemEstoque'] != false,
       );
+      final recebido = (body['valorRecebidoCaixa'] as num?)?.toDouble();
+      final troco = (body['valorTrocoCaixa'] as num?)?.toDouble();
+      if ((recebido ?? 0) > 0.009 || (troco ?? 0) > 0.009) {
+        d.vendaRepository.registrarRecebidoTrocoCaixa(
+          vendaId: vendaId,
+          valorRecebido: recebido ?? 0,
+          valorTroco: troco ?? 0,
+        );
+      }
       // venda+produto (com ids) ja propagados por VendaRepository / SyncWriteTrigger.
       final produtoIds = d.vendaRepository
           .listarItensPorVenda(vendaId)

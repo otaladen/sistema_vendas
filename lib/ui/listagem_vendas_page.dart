@@ -987,7 +987,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       return;
     }
 
-    final infer = CupomNaoFiscalVendaPdf.inferirRecebidoTrocoSegundaVia(v);
+    final infer = CupomNaoFiscalVendaPdf.recebidoTrocoParaCupom(v);
     final nomeArquivo =
         'venda_${v.numeroOrcamento > 0 ? v.numeroOrcamento : v.id}_2via.pdf';
     await mostrarFluxoImpressaoCupomVenda(

@@ -1889,12 +1889,16 @@ class VendaApiRepository extends ChangeNotifier {
   Future<void> converterOrcamentoParaVendaRemoto(
     int vendaId, {
     bool permitirVendaSemEstoque = true,
+    double valorRecebidoCaixa = 0,
+    double valorTrocoCaixa = 0,
   }) async {
     _exigirServidorOnline();
     await _client.finalizarVenda(
       vendaId,
       permitirVendaSemEstoque: permitirVendaSemEstoque,
       terminalId: await _terminalIdCaixa(),
+      valorRecebidoCaixa: valorRecebidoCaixa,
+      valorTrocoCaixa: valorTrocoCaixa,
     );
     _orcamentos.removeWhere((v) => v.id == vendaId);
     final v = await _client.obterVenda(vendaId);

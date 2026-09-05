@@ -18,6 +18,11 @@ abstract final class FiscalErroDicaHelper {
       return 'Verifique o CFOP da operacao (venda, entrega, devolucao) '
           'no cadastro fiscal do produto ou da venda.';
     }
+    if (m.contains('troco') || m.contains('866')) {
+      return 'O cliente pagou a mais que o total da nota (ex.: dinheiro com '
+          'troco ou desconto aplicado no caixa). O sistema agora envia o troco '
+          'automaticamente; tente emitir novamente.';
+    }
     if (m.contains('frete') || m.contains('vfrete') || m.contains('537')) {
       return 'O total de frete ou desconto pode divergir do somatorio dos '
           'itens. Confira frete, desconto e totais no PDV/caixa.';

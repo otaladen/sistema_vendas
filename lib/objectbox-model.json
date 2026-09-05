@@ -406,7 +406,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "68:2971576588614774501",
+      "lastPropertyId": "70:7421175120462555210",
       "name": "Venda",
       "properties": [
         {
@@ -760,6 +760,16 @@
           "id": "68:2971576588614774501",
           "name": "nfceUltimoErro",
           "type": 9
+        },
+        {
+          "id": "69:3757114151768534259",
+          "name": "valorRecebidoCaixa",
+          "type": 8
+        },
+        {
+          "id": "70:7421175120462555210",
+          "name": "valorTrocoCaixa",
+          "type": 8
         }
       ],
       "relations": []
