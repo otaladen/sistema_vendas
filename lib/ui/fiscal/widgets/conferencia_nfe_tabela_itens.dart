@@ -18,6 +18,7 @@ class ConferenciaNfeTabelaLinha {
     required this.statusCorTexto,
     required this.entradaRotulo,
     required this.unidadeInterna,
+    required this.unidadeTravada,
     required this.fatorController,
     required this.embalagemMultiplica,
     required this.erroFator,
@@ -38,6 +39,7 @@ class ConferenciaNfeTabelaLinha {
   final Color statusCorTexto;
   final String entradaRotulo;
   final String unidadeInterna;
+  final bool unidadeTravada;
   final TextEditingController fatorController;
   final bool embalagemMultiplica;
   final String? erroFator;
@@ -211,19 +213,25 @@ class ConferenciaNfeTabelaItens extends StatelessWidget {
   }
 
   Future<void> _abrirMenuUnidade(
-    BuildContext context,
+    BuildContext anchorContext,
     ConferenciaNfeTabelaLinha l,
   ) async {
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null || !context.mounted) return;
-    final pos = box.localToGlobal(Offset.zero);
+    if (l.unidadeTravada) return;
+    final box = anchorContext.findRenderObject() as RenderBox?;
+    if (box == null || !anchorContext.mounted) return;
+    final overlay = Overlay.of(anchorContext).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    final pos = box.localToGlobal(Offset.zero, ancestor: overlay);
     final sel = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        pos.dx,
-        pos.dy + box.size.height + 2,
-        pos.dx + 96,
-        pos.dy + box.size.height + 240,
+      context: anchorContext,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(
+          pos.dx,
+          pos.dy + box.size.height + 2,
+          box.size.width,
+          box.size.height,
+        ),
+        Offset.zero & overlay.size,
       ),
       items: [
         for (final u in NfeEntradaRepository.unidadesInternasValidas)
@@ -235,32 +243,43 @@ class ConferenciaNfeTabelaItens extends StatelessWidget {
 
   Widget _celulaUnidade(BuildContext context, ConferenciaNfeTabelaLinha l) {
     final cs = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 76,
-      height: 40,
-      child: Material(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => _abrirMenuUnidade(context, l),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    l.unidadeInterna,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+    return Builder(
+      builder: (anchorContext) {
+        return SizedBox(
+          width: 76,
+          height: 40,
+          child: Material(
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: l.unidadeTravada
+                  ? null
+                  : () => _abrirMenuUnidade(anchorContext, l),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l.unidadeInterna,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (!l.unidadeTravada)
+                      Icon(
+                        Icons.arrow_drop_down,
+                        size: 20,
+                        color: cs.onSurfaceVariant,
+                      ),
+                  ],
                 ),
-                Icon(Icons.arrow_drop_down, size: 20, color: cs.onSurfaceVariant),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

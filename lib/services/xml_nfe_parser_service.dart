@@ -200,6 +200,9 @@ class XmlParserService {
       final uCom = _primeiroTexto(prod, 'uCom') ?? '';
       final qCom = _parseDecimal(_primeiroTexto(prod, 'qCom') ?? '0');
       final vUnCom = _parseDecimal(_primeiroTexto(prod, 'vUnCom') ?? '0');
+      final uTrib = _primeiroTexto(prod, 'uTrib') ?? '';
+      final qTrib = _parseDecimal(_primeiroTexto(prod, 'qTrib') ?? '0');
+      final vUnTrib = _parseDecimal(_primeiroTexto(prod, 'vUnTrib') ?? '0');
       if (qCom < 0) {
         throw FormatException(
           'Quantidade comercial negativa no item $nItem (cProd ${codigo.trim()}).',
@@ -226,6 +229,9 @@ class XmlParserService {
           unidadeComercial: uCom.trim(),
           quantidadeComercial: qCom,
           valorUnitarioComercial: vUnCom,
+          unidadeTributavel: uTrib.trim(),
+          quantidadeTributavel: qTrib > 0 ? qTrib : 0,
+          valorUnitarioTributavel: vUnTrib > 0 ? vUnTrib : 0,
           codigoBarras: ean,
           ncm: ncm.trim(),
           cfop: cfop,

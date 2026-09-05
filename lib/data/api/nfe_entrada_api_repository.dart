@@ -1,4 +1,5 @@
 import '../../domain/conferencia_nfe_opcoes.dart';
+import '../../domain/nfe_entrada_conversao_util.dart';
 import '../../domain/produto_embalagem.dart';
 import '../../model/item_nota_temporario.dart';
 import '../../model/produto.dart';
@@ -79,13 +80,10 @@ class NfeEntradaApiRepository {
           resolvidoPorEan = true;
         }
       }
-      final fatorInicial = produtoResolvido != null
-          ? (ProdutoEmbalagem.fatorSugeridoNotaParaEstoque(
-                  produto: produtoResolvido,
-                  unidadeNota: item.unidadeComercial,
-                ) ??
-                1.0)
-          : 1.0;
+      final fatorInicial = NfeEntradaConversaoUtil.fatorInicialConferencia(
+        item: item,
+        produto: produtoResolvido,
+      );
       if (produtoResolvido != null) {
         sugestoes.add(
           SugestaoLinhaConferencia(
@@ -156,6 +154,7 @@ class NfeEntradaApiRepository {
               'fatorConversao': l.fatorConversao,
               'unidadeInterna': l.unidadeInterna,
               'embalagemMultiplica': l.embalagemMultiplica,
+              'confirmarConversaoEmbalagem': l.confirmarConversaoEmbalagem,
               'produtoExistenteId': l.produtoExistenteId,
               if (l.numeroLoteEfetivo.isNotEmpty)
                 'numeroLote': l.numeroLoteEfetivo,
@@ -317,6 +316,11 @@ class NfeEntradaApiRepository {
             (im['quantidadeComercial'] as num?)?.toDouble() ?? 0,
         valorUnitarioComercial:
             (im['valorUnitarioComercial'] as num?)?.toDouble() ?? 0,
+        unidadeTributavel: (im['unidadeTributavel'] ?? '').toString(),
+        quantidadeTributavel:
+            (im['quantidadeTributavel'] as num?)?.toDouble() ?? 0,
+        valorUnitarioTributavel:
+            (im['valorUnitarioTributavel'] as num?)?.toDouble() ?? 0,
         codigoBarras: (im['codigoBarras'] ?? '').toString(),
         ncm: (im['ncm'] ?? '').toString(),
         cfop: (im['cfop'] ?? '').toString(),

@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../domain/conferencia_nfe_opcoes.dart';
 import '../domain/lista_compra_entrada_nfe_linha.dart';
 import '../domain/custo_medio_entrada_util.dart';
+import '../domain/nfe_entrada_conversao_util.dart';
 import '../domain/produto_embalagem.dart';
 import '../data/models/conta_pagar.dart';
 import '../model/fornecedor_nfe.dart';
@@ -98,6 +99,7 @@ class ConferenciaNfeLinhaConfirmacao {
     this.produtoExistenteId,
     this.numeroLote = '',
     this.dataValidade,
+    this.confirmarConversaoEmbalagem = false,
   });
 
   final ItemNotaTemporario item;
@@ -105,6 +107,9 @@ class ConferenciaNfeLinhaConfirmacao {
   final String unidadeInterna;
   final bool embalagemMultiplica;
   final int? produtoExistenteId;
+
+  /// Quando true, grava unidadeCompra/fator no cadastro do produto existente.
+  final bool confirmarConversaoEmbalagem;
 
   /// Override da conferencia (vazio = usar [item.numeroLote]).
   final String numeroLote;
@@ -204,7 +209,7 @@ class NfeEntradaRepository {
       final fatorInicial = _fatorInicialConferencia(
         produto: produtoResolvido,
         fatorVinculo: fatorVinculo,
-        unidadeNota: item.unidadeComercial,
+        item: item,
       );
 
       if (produtoResolvido != null) {
@@ -577,9 +582,9 @@ class NfeEntradaRepository {
             'Qtd. na embalagem invalida (${linha.item.codigo}).',
           );
         }
-        final unidade = linha.unidadeInterna.trim().toUpperCase();
-        if (!unidadesInternasValidas.contains(unidade)) {
-          throw StateError('Unidade interna invalida: $unidade');
+        final unidadeConferencia = linha.unidadeInterna.trim().toUpperCase();
+        if (!unidadesInternasValidas.contains(unidadeConferencia)) {
+          throw StateError('Unidade interna invalida: $unidadeConferencia');
         }
 
         final embalagemMultiplica = linha.embalagemMultiplica;
@@ -588,13 +593,23 @@ class NfeEntradaRepository {
           produtoEmbalagemRef = _db.produtoBox.get(linha.produtoExistenteId!);
         }
 
+        final unidadeEstoque = produtoEmbalagemRef != null
+            ? NfeEntradaConversaoUtil.unidadeEstoqueProdutoExistente(
+                produto: produtoEmbalagemRef,
+                unidadeConferencia: unidadeConferencia,
+              )
+            : unidadeConferencia;
+        if (!unidadesInternasValidas.contains(unidadeEstoque)) {
+          throw StateError('Unidade de estoque invalida: $unidadeEstoque');
+        }
+
         final qtdInterna = ProdutoEmbalagem.quantidadeNotaParaEstoque(
           quantidadeComercial: linha.item.quantidadeComercial,
           fator: fator,
           embalagemMultiplica: embalagemMultiplica,
           produto: produtoEmbalagemRef,
           unidadeComercial: linha.item.unidadeComercial,
-          unidadeInterna: unidade,
+          unidadeInterna: unidadeEstoque,
         );
         if (qtdInterna < 0) {
           throw StateError(
@@ -602,12 +617,11 @@ class NfeEntradaRepository {
           );
         }
 
-        final custoUnitInterno =
-            linha.item.valorUnitarioComercial > 0 && fator > 0
-            ? (embalagemMultiplica
-                  ? linha.item.valorUnitarioComercial / fator
-                  : linha.item.valorUnitarioComercial * fator)
-            : 0.0;
+        final custoUnitInterno = NfeEntradaConversaoUtil.custoUnitarioInterno(
+          item: linha.item,
+          fator: fator,
+          embalagemMultiplica: embalagemMultiplica,
+        );
 
         final nomeFantasiaOuRazao = fornecedor.nomeFantasia.trim().isNotEmpty
             ? fornecedor.nomeFantasia
@@ -623,6 +637,10 @@ class NfeEntradaRepository {
           }
           produto = existente;
           final estoqueAntes = produto.estoqueReal;
+          final estoqueAntesNorm = ProdutoEmbalagem.estoqueLegadoParaArmazenado(
+            produto,
+            estoqueAntes,
+          );
           final custoCadastroAntes = produto.precoCusto;
           final custoAntes = CustoMedioEntradaUtil.custoReferenciaSaldo(
             custoMedio: produto.custoMedio,
@@ -639,15 +657,16 @@ class NfeEntradaRepository {
               margemMinimaPercentual: margemMinimaVendaPercentual,
             );
           }
-          produto.unidade = unidade;
-          _sincronizarEmbalagemProdutoComNota(
-            produto,
-            unidadeNota: linha.item.unidadeComercial,
-            fator: fator,
-            embalagemMultiplica: embalagemMultiplica,
-          );
+          if (linha.confirmarConversaoEmbalagem) {
+            _sincronizarEmbalagemProdutoComNota(
+              produto,
+              unidadeNota: linha.item.unidadeComercial,
+              fator: fator,
+              embalagemMultiplica: embalagemMultiplica,
+            );
+          }
           produto.fornecedor = nomeFantasiaOuRazao;
-          if (linha.item.ncm.isNotEmpty) {
+          if (linha.item.ncm.isNotEmpty && produto.ncm.trim().isEmpty) {
             produto.ncm = linha.item.ncm;
           }
           if (linha.item.codigoBarras.isNotEmpty &&
@@ -669,7 +688,7 @@ class NfeEntradaRepository {
               qtdEntrada > 0 &&
               custoUnitInterno > 0) {
             final cm = CustoMedioEntradaUtil.custoMedioAposEntrada(
-              estoqueAntes: estoqueAntes,
+              estoqueAntes: estoqueAntesNorm,
               custoMedioAntes: custoAntes,
               quantidadeEntrada: qtdEntrada,
               custoUnitarioEntrada: custoUnitInterno,
@@ -684,7 +703,7 @@ class NfeEntradaRepository {
           final uNota = ProdutoEmbalagem.normalizarUnidade(
             linha.item.unidadeComercial,
           );
-          final uVenda = ProdutoEmbalagem.normalizarUnidade(unidade);
+          final uVenda = ProdutoEmbalagem.normalizarUnidade(unidadeEstoque);
           final converteEmbalagem =
               uNota != uVenda && fator > 0 && (fator - 1).abs() > 0.0001;
           produto = Produto(
@@ -693,7 +712,7 @@ class NfeEntradaRepository {
                 ? linha.item.descricao.substring(0, 120)
                 : linha.item.descricao,
             descricao: linha.item.descricao,
-            unidade: unidade,
+            unidade: unidadeEstoque,
             unidadeCompra: converteEmbalagem ? uNota : '',
             quantidadePorEmbalagem: converteEmbalagem ? fator : 1,
             embalagemMultiplica: embalagemMultiplica,
@@ -980,23 +999,13 @@ class NfeEntradaRepository {
   double _fatorInicialConferencia({
     required Produto? produto,
     required double fatorVinculo,
-    required String unidadeNota,
+    required ItemNotaTemporario item,
   }) {
-    if (produto != null) {
-      final doCadastro = ProdutoEmbalagem.fatorSugeridoNotaParaEstoque(
-        produto: produto,
-        unidadeNota: unidadeNota,
-      );
-      if (doCadastro != null && doCadastro > 0) {
-        if (fatorVinculo > 0 &&
-            (fatorVinculo - 1).abs() > 0.0001 &&
-            (fatorVinculo - doCadastro).abs() > 0.0001) {
-          return fatorVinculo;
-        }
-        return doCadastro;
-      }
-    }
-    return fatorVinculo > 0 ? fatorVinculo : 1.0;
+    return NfeEntradaConversaoUtil.fatorInicialConferencia(
+      item: item,
+      produto: produto,
+      fatorVinculo: fatorVinculo,
+    );
   }
 
   void _sincronizarEmbalagemProdutoComNota(

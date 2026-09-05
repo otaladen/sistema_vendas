@@ -19,7 +19,7 @@ class VinculoFornecedorProduto {
   @Index()
   String codigoProdutoFornecedor;
 
-  /// Multiplicador: quantidade interna = qCom * fatorConversao.
+  /// Multiplicador/divisor configurado na conferencia (modo x ou /).
   double fatorConversao;
 
   final fornecedor = ToOne<FornecedorNfe>();

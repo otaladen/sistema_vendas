@@ -951,6 +951,8 @@ void registerFiscalRoutes(Router router, LanApiDeps d) {
             fatorConversao: (m['fatorConversao'] as num?)?.toDouble() ?? 1,
             unidadeInterna: (m['unidadeInterna'] ?? 'UN').toString(),
             embalagemMultiplica: m['embalagemMultiplica'] != false,
+            confirmarConversaoEmbalagem:
+                m['confirmarConversaoEmbalagem'] == true,
             produtoExistenteId: pid,
             numeroLote: loteOverride.isNotEmpty ? loteOverride : item.numeroLote,
             dataValidade: valOverride ?? item.dataValidade,
@@ -1071,6 +1073,9 @@ Map<String, dynamic> _itemNotaParaMap(ItemNotaTemporario i) => {
       'unidadeComercial': i.unidadeComercial,
       'quantidadeComercial': i.quantidadeComercial,
       'valorUnitarioComercial': i.valorUnitarioComercial,
+      'unidadeTributavel': i.unidadeTributavel,
+      'quantidadeTributavel': i.quantidadeTributavel,
+      'valorUnitarioTributavel': i.valorUnitarioTributavel,
       'codigoBarras': i.codigoBarras,
       'ncm': i.ncm,
       'cfop': i.cfop,

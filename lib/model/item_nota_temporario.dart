@@ -7,6 +7,9 @@ class ItemNotaTemporario {
     required this.unidadeComercial,
     required this.quantidadeComercial,
     required this.valorUnitarioComercial,
+    this.unidadeTributavel = '',
+    this.quantidadeTributavel = 0,
+    this.valorUnitarioTributavel = 0,
     this.codigoBarras = '',
     this.ncm = '',
     this.cfop = '',
@@ -29,6 +32,26 @@ class ItemNotaTemporario {
   final String unidadeComercial;
   final double quantidadeComercial;
   final double valorUnitarioComercial;
+
+  /// Tags uTrib / qTrib / vUnTrib quando informadas no XML.
+  final String unidadeTributavel;
+  final double quantidadeTributavel;
+  final double valorUnitarioTributavel;
+
+  /// Fator qTrib/qCom quando uCom difere de uTrib (ex.: 1 CX = 12 UN).
+  double get fatorComercialParaTributavel {
+    if (quantidadeComercial <= 0 ||
+        quantidadeTributavel <= 0 ||
+        !quantidadeComercial.isFinite ||
+        !quantidadeTributavel.isFinite) {
+      return 0;
+    }
+    final uCom = unidadeComercial.trim();
+    final uTrib = unidadeTributavel.trim();
+    if (uCom.isEmpty || uTrib.isEmpty) return 0;
+    if (uCom.toUpperCase() == uTrib.toUpperCase()) return 0;
+    return quantidadeTributavel / quantidadeComercial;
+  }
 
   /// cEAN / cEANTrib quando informado (sem "SEM GTIN").
   final String codigoBarras;
@@ -64,6 +87,9 @@ class ItemNotaTemporario {
       unidadeComercial: unidadeComercial,
       quantidadeComercial: quantidadeComercial,
       valorUnitarioComercial: valorUnitarioComercial,
+      unidadeTributavel: unidadeTributavel,
+      quantidadeTributavel: quantidadeTributavel,
+      valorUnitarioTributavel: valorUnitarioTributavel,
       codigoBarras: codigoBarras,
       ncm: ncm,
       cfop: cfop,

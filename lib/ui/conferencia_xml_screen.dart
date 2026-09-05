@@ -9,6 +9,7 @@ import '../data/api/produto_api_repository.dart';
 import '../data/app_config_repository.dart';
 import '../data/nfe_entrada_repository.dart';
 import '../domain/conferencia_nfe_opcoes.dart';
+import '../domain/nfe_entrada_conversao_util.dart';
 import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
@@ -58,6 +59,7 @@ class _LinhaEdicao {
     required this.fatorCtrl,
     required this.unidade,
     required this.embalagemMultiplica,
+    this.confirmarConversaoEmbalagem = false,
     required this.loteCtrl,
     this.dataValidade,
   });
@@ -67,6 +69,7 @@ class _LinhaEdicao {
   final TextEditingController loteCtrl;
   String unidade;
   bool embalagemMultiplica;
+  bool confirmarConversaoEmbalagem;
   DateTime? dataValidade;
 
   /// Quando preenchido, substitui a sugestao automatica (ex.: vincular item "novo" a um cadastro).
@@ -170,6 +173,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             fatorCtrl: c,
             unidade: s.unidadeInternaInicial,
             embalagemMultiplica: s.embalagemMultiplicaInicial,
+            confirmarConversaoEmbalagem: s.produtoNovo,
             loteCtrl: lote,
             dataValidade: s.item.dataValidade,
           );
@@ -356,6 +360,12 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     final q = linha.sugestao.item.quantidadeComercial;
     final multiplica = linha.embalagemMultiplica;
     final produto = _produtoDestinoLinha(linha);
+    final unidadeEstoque = produto != null
+        ? NfeEntradaConversaoUtil.unidadeEstoqueProdutoExistente(
+            produto: produto,
+            unidadeConferencia: linha.unidade,
+          )
+        : linha.unidade;
     final unidadeVenda = ProdutoEmbalagem.quantidadeNotaParaUnidadeVenda(
       quantidadeComercial: q,
       fator: f,
@@ -367,7 +377,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       embalagemMultiplica: multiplica,
       produto: produto,
       unidadeComercial: linha.sugestao.item.unidadeComercial,
-      unidadeInterna: linha.unidade,
+      unidadeInterna: unidadeEstoque,
     );
     return (armazenado: armazenado, unidadeVenda: unidadeVenda);
   }
@@ -393,19 +403,42 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       comUnidade: true,
     );
   }
-  /// Custo unitario na [unidade interna] do cadastro (mesma formula de [NfeEntradaRepository.confirmarEntrada]).
   double? _custoUnitarioXmlConvertidoInterno(_LinhaEdicao linha) {
     final f = _lerFator(linha.fatorCtrl.text);
-    final vUn = linha.sugestao.item.valorUnitarioComercial;
-    if (f <= 0 || !vUn.isFinite || vUn < 0) {
-      return null;
+    if (f <= 0) return null;
+    return NfeEntradaConversaoUtil.custoUnitarioInterno(
+      item: linha.sugestao.item,
+      fator: f,
+      embalagemMultiplica: linha.embalagemMultiplica,
+    );
+  }
+
+  String _unidadeEstoqueLinha(_LinhaEdicao linha) {
+    final produto = _produtoDestinoLinha(linha);
+    if (produto != null) {
+      return NfeEntradaConversaoUtil.unidadeEstoqueProdutoExistente(
+        produto: produto,
+        unidadeConferencia: linha.unidade,
+      );
     }
-    var multiplica = linha.embalagemMultiplica;
-    final unit = multiplica ? vUn / f : vUn * f;
-    if (!unit.isFinite || unit < 0) {
-      return null;
-    }
-    return unit;
+    return linha.unidade;
+  }
+
+  bool _linhaUnidadeCadastroTravada(_LinhaEdicao linha) {
+    final produto = _produtoDestinoLinha(linha);
+    if (produto == null) return false;
+    return produto.unidade.trim().isNotEmpty;
+  }
+
+  bool _linhaOfereceConfirmarConversaoEmbalagem(_LinhaEdicao linha) {
+    final produto = _produtoDestinoLinha(linha);
+    if (produto == null) return false;
+    final f = _lerFator(linha.fatorCtrl.text);
+    return NfeEntradaConversaoUtil.precisaConfirmarConversaoEmbalagem(
+      item: linha.sugestao.item,
+      produto: produto,
+      fator: f,
+    );
   }
 
   void _aplicarPadraoNovoProduto(_LinhaEdicao linha) {
@@ -413,17 +446,20 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       linha.unidade = linha.sugestao.unidadeInternaInicial;
       linha.fatorCtrl.text = _formatarFator(linha.sugestao.fatorInicial);
       linha.embalagemMultiplica = true;
+      linha.confirmarConversaoEmbalagem = true;
       return;
     }
     linha.unidade = 'UN';
     linha.fatorCtrl.text = _formatarFator(1);
     linha.embalagemMultiplica = true;
+    linha.confirmarConversaoEmbalagem = true;
   }
 
   void _restaurarSugestaoAutomatica(_LinhaEdicao linha) {
     linha.unidade = linha.sugestao.unidadeInternaInicial;
     linha.fatorCtrl.text = _formatarFator(linha.sugestao.fatorInicial);
     linha.embalagemMultiplica = linha.sugestao.embalagemMultiplicaInicial;
+    linha.confirmarConversaoEmbalagem = false;
   }
 
   void _desfazerVinculoLinha(_LinhaEdicao linha) {
@@ -957,7 +993,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   String _mensagemFatorConversao(_LinhaEdicao linha) {
     final item = linha.sugestao.item;
     final uCom = item.unidadeComercial.trim();
-    final uInt = linha.unidade.trim();
+    final uInt = _unidadeEstoqueLinha(linha).trim();
     final q = item.quantidadeComercial;
     final f = _lerFator(linha.fatorCtrl.text);
     final uComLabel = uCom.isEmpty ? '(unid. na nota)' : uCom;
@@ -1145,7 +1181,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       statusCor: status.bg,
       statusCorTexto: status.fg,
       entradaRotulo: _rotuloEntradaEstoque(linha),
-      unidadeInterna: linha.unidade,
+      unidadeInterna: _unidadeEstoqueLinha(linha),
+      unidadeTravada: _linhaUnidadeCadastroTravada(linha),
       fatorController: linha.fatorCtrl,
       embalagemMultiplica: linha.embalagemMultiplica,
       erroFator: linha.erroValidacao,
@@ -1442,27 +1479,38 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               children: [
                 Expanded(
                   flex: 2,
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('${index}_${linha.unidade}'),
-                    decoration: const InputDecoration(
-                      labelText: 'Unidade cadastro',
-                      isDense: true,
-                    ),
-                    initialValue: linha.unidade,
-                    items: NfeEntradaRepository.unidadesInternasValidas
-                        .map(
-                          (u) => DropdownMenuItem(
-                            value: u,
-                            child: Text(u),
+                  child: _linhaUnidadeCadastroTravada(linha)
+                      ? InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Unidade cadastro',
+                            isDense: true,
+                          ),
+                          child: Text(
+                            _unidadeEstoqueLinha(linha),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      linha.unidade = v;
-                      _atualizarUi(aoAtualizar: aoAtualizar);
-                    },
-                  ),
+                      : DropdownButtonFormField<String>(
+                          key: ValueKey('${index}_${linha.unidade}'),
+                          decoration: const InputDecoration(
+                            labelText: 'Unidade cadastro',
+                            isDense: true,
+                          ),
+                          initialValue: linha.unidade,
+                          items: NfeEntradaRepository.unidadesInternasValidas
+                              .map(
+                                (u) => DropdownMenuItem(
+                                  value: u,
+                                  child: Text(u),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            linha.unidade = v;
+                            _atualizarUi(aoAtualizar: aoAtualizar);
+                          },
+                        ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1556,6 +1604,23 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               ),
               const SizedBox(height: 10),
             ],
+            if (_linhaOfereceConfirmarConversaoEmbalagem(linha))
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text(
+                  'Gravar conversao de embalagem no cadastro do produto',
+                ),
+                subtitle: const Text(
+                  'Desmarcado: o fator vale so nesta nota, sem alterar venda/PDV.',
+                ),
+                value: linha.confirmarConversaoEmbalagem,
+                onChanged: (v) {
+                  linha.confirmarConversaoEmbalagem = v ?? false;
+                  _atualizarUi(aoAtualizar: aoAtualizar);
+                },
+              ),
             DecoratedBox(
               decoration: BoxDecoration(
                 color: cs.surface,
@@ -1830,6 +1895,12 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     linha.vinculoManualProdutoNome =
         '${escolhido.codigoInterno} · ${escolhido.nome}';
     linha.embalagemMultiplica = escolhido.embalagemMultiplica;
+    linha.confirmarConversaoEmbalagem = false;
+    final fator = NfeEntradaConversaoUtil.fatorInicialConferencia(
+      item: linha.sugestao.item,
+      produto: escolhido,
+    );
+    linha.fatorCtrl.text = _formatarFator(fator);
     if (NfeEntradaRepository.unidadesInternasValidas.contains(u)) {
       linha.unidade = u;
     }
@@ -1889,11 +1960,14 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         ConferenciaNfeLinhaConfirmacao(
           item: linha.sugestao.item,
           fatorConversao: f,
-          unidadeInterna: linha.unidade,
+          unidadeInterna: _unidadeEstoqueLinha(linha),
           embalagemMultiplica: linha.embalagemMultiplica,
           produtoExistenteId: linha.produtoDestinoId(),
           numeroLote: linha.loteCtrl.text.trim(),
           dataValidade: linha.dataValidade,
+          confirmarConversaoEmbalagem: linha.produtoDestinoId() == null
+              ? true
+              : linha.confirmarConversaoEmbalagem,
         ),
       );
     }
