@@ -59,6 +59,7 @@ import 'nfe_enviar_email_dialog.dart';
 import 'nfe_inutilizacao_dialog.dart';
 import 'nfe_inutilizacao_historico_dialog.dart';
 import 'relatorio_fiscal_mensal_page.dart';
+import 'widgets/fiscal_rejeicao_detalhe_dialog.dart';
 import 'widgets/nfe_aba_pendencias.dart';
 import 'widgets/nfe_ambiente_banner.dart';
 import 'widgets/nfe_checklist_panel.dart';
@@ -1777,7 +1778,10 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
                       onVerDetalheRegistro: (r) =>
                           showNfeRegistroDetalheDialog(context, r),
                       onReemitirRegistro: _reemitirVenda,
-                      onVerErroRegistro: (r) => _dialogoErroNfe(r.mensagemSefaz),
+                      onVerErroRegistro: (r) => _dialogoErroNfe(
+                        r.mensagemSefaz,
+                        registro: r,
+                      ),
                     ),
                     _buildAbaHistorico(theme),
                   ],
@@ -2362,29 +2366,18 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
     );
   }
 
-  Future<void> _dialogoErroNfe(String mensagem) async {
-    final theme = Theme.of(context);
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(Icons.error_outline, color: theme.colorScheme.error, size: 32),
-        title: const Text('NF-e rejeitada'),
-        content: Container(
-          width: 420,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.errorContainer.withValues(alpha: 0.45),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: SingleChildScrollView(child: Text(mensagem)),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Fechar'),
-          ),
-        ],
-      ),
+  Future<void> _dialogoErroNfe(
+    String mensagem, {
+    NfeSaidaFiscalRegistro? registro,
+  }) async {
+    await FiscalRejeicaoDetalheDialog.show(
+      context,
+      titulo: 'Detalhes da Rejeicao Fiscal',
+      numeroControle: registro != null
+          ? '${VendaDocumentoRotuloHelper.rotuloControlePorNumero(registro.numeroOrcamento)} · ${registro.clienteNome}'
+          : '—',
+      statusFiscal: registro?.rotuloStatus ?? 'Rejeitada',
+      mensagemErro: mensagem,
     );
   }
 }

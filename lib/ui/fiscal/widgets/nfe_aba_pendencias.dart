@@ -154,11 +154,16 @@ class NfeAbaPendencias extends StatelessWidget {
                         context,
                         r,
                         trailing: Wrap(
-                          spacing: 8,
+                          spacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            OutlinedButton(
+                            IconButton(
+                              tooltip: 'Ver detalhes do erro',
                               onPressed: () => onVerErroRegistro(r),
-                              child: const Text('Erro'),
+                              icon: Icon(
+                                Icons.info_outline,
+                                color: Theme.of(context).colorScheme.error,
+                              ),
                             ),
                             FilledButton.tonal(
                               onPressed:

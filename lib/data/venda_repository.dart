@@ -3542,6 +3542,7 @@ class VendaRepository {
         ? 'autorizado'
         : statusFocus.trim();
     venda.nfceUrlXmlCancelamento = urlXmlCancelamento.trim();
+    venda.nfceUltimoErro = '';
     venda.nfceEmitidaEm = DateTime.now().toUtc();
   }
 
@@ -3694,6 +3695,35 @@ class VendaRepository {
       }
       venda.nfceStatusFocus = '';
       if (FiscalEmissaoLock.ehMarcadorEmissao(venda.nfceProtocolo)) {
+        venda.nfceProtocolo = '';
+      }
+      _db.vendaBox.put(venda);
+    });
+    _notificarRedeAposEscrita(vendaId: vendaId);
+  }
+
+  /// Persiste rejeicao/erro da ultima tentativa de emissao NFC-e.
+  void registrarNfceErroEmissao({
+    required int vendaId,
+    required String mensagem,
+    String statusFocus = 'erro_autorizacao',
+  }) {
+    final msg = mensagem.trim();
+    if (msg.isEmpty) return;
+    final status = statusFocus.trim().isEmpty
+        ? 'erro_autorizacao'
+        : statusFocus.trim();
+    _db.store.runInTransaction(TxMode.write, () {
+      final venda = _db.vendaBox.get(vendaId);
+      if (venda == null) {
+        throw StateError('Venda $vendaId nao encontrada.');
+      }
+      if (venda.nfceEmitida) return;
+      venda.nfceUltimoErro = msg;
+      venda.nfceStatusFocus = status;
+      final prot = venda.nfceProtocolo.trim();
+      if (FiscalEmissaoLock.ehMarcadorEmissao(prot) ||
+          prot.contains('focus_pendente')) {
         venda.nfceProtocolo = '';
       }
       _db.vendaBox.put(venda);

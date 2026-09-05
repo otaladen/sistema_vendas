@@ -307,6 +307,10 @@ abstract final class EmitirNfceVendaFlow {
           return;
         case EmissaoNfceVendaKind.erroValidacao:
           deps.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
+          deps.vendaRepository.registrarNfceErroEmissao(
+            vendaId: vendaAtual.id,
+            mensagem: dialogResult.mensagem,
+          );
           messenger.showSnackBar(
             SnackBar(
               content: Text(dialogResult.mensagem),
@@ -318,6 +322,10 @@ abstract final class EmitirNfceVendaFlow {
         case EmissaoNfceVendaKind.erroApi:
         case EmissaoNfceVendaKind.erroGenerico:
           deps.vendaRepository.liberarNfceEmissaoEmAndamento(vendaAtual.id);
+          deps.vendaRepository.registrarNfceErroEmissao(
+            vendaId: vendaAtual.id,
+            mensagem: dialogResult.mensagem,
+          );
           final tentar = await _mostrarDialogoFalhaNfce(
             context,
             mensagem: dialogResult.mensagem,

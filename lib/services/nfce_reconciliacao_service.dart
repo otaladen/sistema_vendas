@@ -108,11 +108,19 @@ class NfceReconciliacaoService {
       );
     }
     if (resultado.rejeitada) {
+      final msg = resultado.mensagem.isEmpty
+          ? 'NFC-e rejeitada na reconsulta.'
+          : resultado.mensagem;
+      _vendaRepository.registrarNfceErroEmissao(
+        vendaId: venda.id,
+        mensagem: msg,
+        statusFocus: resultado.statusFocus.isNotEmpty
+            ? resultado.statusFocus
+            : 'erro_autorizacao',
+      );
       return NfceReconciliacaoResultado(
         tipo: NfceReconciliacaoTipo.erro,
-        mensagem: resultado.mensagem.isEmpty
-            ? 'NFC-e rejeitada na reconsulta.'
-            : resultado.mensagem,
+        mensagem: msg,
         vendaId: venda.id,
       );
     }

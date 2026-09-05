@@ -81,7 +81,9 @@ Future<Map<String, dynamic>> lanApiEmitirNfce({
     }
   } catch (e) {
     vendaRepo.liberarNfceEmissaoEmAndamento(vendaId);
-    return {'ok': false, 'error': 'Erro ao emitir NFC-e: $e', 'status': 502};
+    final msg = 'Erro ao emitir NFC-e: $e';
+    vendaRepo.registrarNfceErroEmissao(vendaId: vendaId, mensagem: msg);
+    return {'ok': false, 'error': msg, 'status': 502};
   }
 
   if (resultado.autorizada) {
@@ -160,11 +162,22 @@ Future<Map<String, dynamic>> lanApiEmitirNfce({
   }
 
   vendaRepo.liberarNfceEmissaoEmAndamento(vendaId);
+  final erro = resultado.mensagem.isNotEmpty
+      ? resultado.mensagem
+      : 'NFC-e nao autorizada.';
+  vendaRepo.registrarNfceErroEmissao(
+    vendaId: vendaId,
+    mensagem: erro,
+    statusFocus: resultado.statusFocus.isNotEmpty
+        ? resultado.statusFocus
+        : 'erro_autorizacao',
+  );
+  d.notificar('venda');
+  d.notificar('fiscal', ids: [vendaId]);
+  SyncRefreshHub.instance.notificarDadosAtualizados();
   return {
     'ok': false,
-    'error': resultado.mensagem.isNotEmpty
-        ? resultado.mensagem
-        : 'NFC-e nao autorizada.',
+    'error': erro,
     'status': 400,
     'statusFocus': resultado.statusFocus,
   };

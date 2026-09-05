@@ -344,6 +344,7 @@ class SyncEntityCodec {
       'nfceUrlXml': v.nfceUrlXml,
       'nfceStatusFocus': v.nfceStatusFocus,
       'nfceUrlXmlCancelamento': v.nfceUrlXmlCancelamento,
+      'nfceUltimoErro': v.nfceUltimoErro,
       'nfceEmitidaEm': v.nfceEmitidaEm?.toUtc().toIso8601String(),
       'nfeReferenciaFocus': v.nfeReferenciaFocus,
       'nfeChaveAcesso': v.nfeChaveAcesso,
@@ -429,6 +430,7 @@ class SyncEntityCodec {
       nfceUrlXml: (m['nfceUrlXml'] ?? '').toString(),
       nfceStatusFocus: (m['nfceStatusFocus'] ?? '').toString(),
       nfceUrlXmlCancelamento: (m['nfceUrlXmlCancelamento'] ?? '').toString(),
+      nfceUltimoErro: (m['nfceUltimoErro'] ?? '').toString(),
       nfceEmitidaEm: DateTime.tryParse(
         (m['nfceEmitidaEm'] ?? '').toString(),
       )?.toUtc(),

@@ -54,6 +54,24 @@ abstract final class VendaNfceObrigatoriaHelper {
     return 'NFC-e nao emitida';
   }
 
+  static String rotuloStatusFiscal(Venda venda) {
+    final st = venda.nfceStatusFocus.trim();
+    if (st.isNotEmpty) {
+      return switch (st.toLowerCase()) {
+        'erro_autorizacao' => 'Rejeitada (erro de autorizacao)',
+        'denegado' => 'Denegada pela SEFAZ',
+        'processando_autorizacao' => 'Processando autorizacao',
+        'emissao_em_andamento' => 'Emissao em andamento',
+        'autorizado' => 'Autorizada',
+        'cancelado' => 'Cancelada',
+        _ => st,
+      };
+    }
+    return motivoPendenciaEmissao(venda);
+  }
+
+  static String mensagemErroExibicao(Venda venda) => venda.nfceUltimoErro.trim();
+
   static String rotuloFormaPagamento(Venda venda) {
     if (venda.formaPagamento == 'misto') {
       final linhas = PagamentoOrcamentoCodec.decode(venda.pagamentosJson);

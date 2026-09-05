@@ -53,6 +53,7 @@ class Venda {
     this.nfceUrlXml = '',
     this.nfceStatusFocus = '',
     this.nfceUrlXmlCancelamento = '',
+    this.nfceUltimoErro = '',
     this.nfceEmitidaEm,
     this.nfeReferenciaFocus = '',
     this.nfeChaveAcesso = '',
@@ -170,6 +171,9 @@ class Venda {
 
   /// URL do XML de evento de cancelamento (Focus), quando houver.
   String nfceUrlXmlCancelamento;
+
+  /// Ultima mensagem de rejeicao/erro da SEFAZ ou validacao Focus (NFC-e).
+  String nfceUltimoErro;
 
   @Property(type: PropertyType.dateUtc)
   DateTime? nfceEmitidaEm;

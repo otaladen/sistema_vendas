@@ -10,6 +10,7 @@ import '../../data/app_config_repository.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/sync/sync_refresh_hub.dart';
 import '../../data/venda_repository.dart';
+import '../../domain/fiscal/fiscal_erro_dica_helper.dart';
 import '../../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import '../../domain/item_venda_produto_orfao.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
@@ -23,6 +24,7 @@ import '../widgets/lan_api_feedback.dart';
 import 'nfce_emissao_pendente_flow.dart';
 import 'nfe_gerenciamento_page.dart';
 import 'revincular_produto_item_venda_flow.dart';
+import 'widgets/fiscal_rejeicao_detalhe_dialog.dart';
 
 /// Central de pendencias NFC-e (reconsulta) e atalho para NF-e 55.
 /// Terminal Leve: listagem/emissao/reconsulta 100% via API :8788.
@@ -299,7 +301,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
         produtoRepository: produtoRepo,
       );
-      if (ok && mounted) await _recarregar(silencioso: true);
+      if (mounted) await _recarregar(silencioso: true);
     } catch (e) {
       if (mounted) {
         LanApiFeedback.snackErro(context, e, prefixo: 'Falha ao emitir');
@@ -395,6 +397,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(erro)),
       );
+      await _recarregar(silencioso: true);
       return;
     }
   }
@@ -408,6 +411,164 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
           appConfigRepository: widget.appConfigRepository,
           usuarioLogado: widget.usuarioLogado,
           abaInicial: 1,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _mostrarDetalhesErro(Venda venda) async {
+    final erro = VendaNfceObrigatoriaHelper.mensagemErroExibicao(venda);
+    if (erro.isEmpty) return;
+    await FiscalRejeicaoDetalheDialog.show(
+      context,
+      titulo: 'Detalhes da Rejeicao Fiscal',
+      numeroControle: VendaDocumentoRotuloHelper.rotuloControleInterno(venda),
+      statusFiscal: VendaNfceObrigatoriaHelper.rotuloStatusFiscal(venda),
+      mensagemErro: erro,
+    );
+  }
+
+  Widget _cardPendenciaEmissao(Venda v, ThemeData theme, ColorScheme scheme) {
+    final motivo = VendaNfceObrigatoriaHelper.motivoPendenciaEmissao(v);
+    final erro = VendaNfceObrigatoriaHelper.mensagemErroExibicao(v);
+    final resumoErro =
+        erro.isNotEmpty ? FiscalErroDicaHelper.rotuloResumoLista(erro) : '';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Icon(
+                Icons.receipt_long_outlined,
+                color: scheme.error,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    VendaDocumentoRotuloHelper.rotuloControleInterno(v),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_dataExibicao(v)} · '
+                    'R\$ ${_moeda.format(v.total)} · '
+                    '${VendaNfceObrigatoriaHelper.rotuloFormaPagamento(v)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    motivo,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (resumoErro.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      resumoErro,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.error,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (erro.isNotEmpty)
+              IconButton(
+                tooltip: 'Ver detalhes do erro',
+                onPressed: () => unawaited(_mostrarDetalhesErro(v)),
+                icon: Icon(Icons.info_outline, color: scheme.error),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, top: 4),
+              child: FilledButton(
+                onPressed: _emitindo ? null : () => unawaited(_emitirNfce(v)),
+                child: const Text('Emitir'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _cardPendenciaSefaz(Venda v, ThemeData theme, ColorScheme scheme) {
+    final erro = VendaNfceObrigatoriaHelper.mensagemErroExibicao(v);
+    final resumoErro =
+        erro.isNotEmpty ? FiscalErroDicaHelper.rotuloResumoLista(erro) : '';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Icon(
+                Icons.hourglass_top_outlined,
+                color: scheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    VendaDocumentoRotuloHelper.rotuloControleInterno(v),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_dataExibicao(v)} · R\$ ${_moeda.format(v.total)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  Text(
+                    VendaNfceObrigatoriaHelper.rotuloStatusFiscal(v),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (resumoErro.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      resumoErro,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.error,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (erro.isNotEmpty)
+              IconButton(
+                tooltip: 'Ver detalhes do erro',
+                onPressed: () => unawaited(_mostrarDetalhesErro(v)),
+                icon: Icon(Icons.info_outline, color: scheme.error),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, top: 4),
+              child: OutlinedButton(
+                onPressed: _reconsultando
+                    ? null
+                    : () => unawaited(_reconsultarUma(v)),
+                child: const Text('Reconsultar'),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -531,33 +692,9 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
                 ),
               )
             else
-              ..._pendentesEmissao.map((v) {
-                final motivo =
-                    VendaNfceObrigatoriaHelper.motivoPendenciaEmissao(v);
-                return Card(
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.receipt_long_outlined,
-                      color: scheme.error,
-                    ),
-                    title: Text(
-                      VendaDocumentoRotuloHelper.rotuloControleInterno(v),
-                    ),
-                    subtitle: Text(
-                      '${_dataExibicao(v)} · '
-                      'R\$ ${_moeda.format(v.total)} · '
-                      '${VendaNfceObrigatoriaHelper.rotuloFormaPagamento(v)}\n'
-                      '$motivo',
-                    ),
-                    isThreeLine: true,
-                    trailing: FilledButton(
-                      onPressed:
-                          _emitindo ? null : () => unawaited(_emitirNfce(v)),
-                      child: const Text('Emitir'),
-                    ),
-                  ),
-                );
-              }),
+              ..._pendentesEmissao.map(
+                (v) => _cardPendenciaEmissao(v, theme, scheme),
+              ),
             const SizedBox(height: 20),
             Card(
               child: Padding(
@@ -605,28 +742,9 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
                 ),
               )
             else if (!_carregando)
-              ..._pendentesSefaz.map((v) {
-                return Card(
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.hourglass_top_outlined,
-                      color: scheme.primary,
-                    ),
-                    title: Text(
-                      VendaDocumentoRotuloHelper.rotuloControleInterno(v),
-                    ),
-                    subtitle: Text(
-                      '${_dataExibicao(v)} · R\$ ${_moeda.format(v.total)}',
-                    ),
-                    trailing: OutlinedButton(
-                      onPressed: _reconsultando
-                          ? null
-                          : () => unawaited(_reconsultarUma(v)),
-                      child: const Text('Reconsultar'),
-                    ),
-                  ),
-                );
-              }),
+              ..._pendentesSefaz.map(
+                (v) => _cardPendenciaSefaz(v, theme, scheme),
+              ),
             const SizedBox(height: 16),
             Card(
               child: ListTile(

@@ -176,6 +176,10 @@ abstract final class NfceEmissaoPendenteFlow {
       if (!context.mounted) return _EmissaoPendenteResultado.falhaDefinitiva;
       final msg = '$e';
       _ultimaMensagemErro = msg;
+      vendaRepository.registrarNfceErroEmissao(
+        vendaId: vendaAtual.id,
+        mensagem: msg,
+      );
       if (ItemVendaProdutoOrfaoHelper.pareceErroSemProdutoVinculado(msg)) {
         return _EmissaoPendenteResultado.orfaosProduto;
       }
@@ -260,6 +264,13 @@ abstract final class NfceEmissaoPendenteFlow {
         ? 'A SEFAZ rejeitou a NFC-e.'
         : resultado.mensagem;
     _ultimaMensagemErro = msg;
+    vendaRepository.registrarNfceErroEmissao(
+      vendaId: vendaAtual.id,
+      mensagem: msg,
+      statusFocus: resultado.statusFocus.isNotEmpty
+          ? resultado.statusFocus
+          : 'erro_autorizacao',
+    );
     if (ItemVendaProdutoOrfaoHelper.pareceErroSemProdutoVinculado(msg)) {
       return _EmissaoPendenteResultado.orfaosProduto;
     }

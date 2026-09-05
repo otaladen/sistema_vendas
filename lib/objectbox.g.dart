@@ -537,7 +537,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(67, 5378506698038242135),
+    lastPropertyId: const obx_int.IdUid(68, 2971576588614774501),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -944,6 +944,12 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(67, 5378506698038242135),
         name: 'lojaOrigemMercadoria',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(68, 2971576588614774501),
+        name: 'nfceUltimoErro',
         type: 9,
         flags: 0,
       ),
@@ -5035,7 +5041,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final lojaOrigemMercadoriaOffset = fbb.writeString(
           object.lojaOrigemMercadoria,
         );
-        fbb.startTable(68);
+        final nfceUltimoErroOffset = fbb.writeString(object.nfceUltimoErro);
+        fbb.startTable(69);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -5105,6 +5112,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addInt64(64, object.finalizadaEm?.millisecondsSinceEpoch);
         fbb.addOffset(65, uuidLocalOffset);
         fbb.addOffset(66, lojaOrigemMercadoriaOffset);
+        fbb.addOffset(67, nfceUltimoErroOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -5328,6 +5336,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final nfceUrlXmlCancelamentoParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 100, '');
+        final nfceUltimoErroParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 138, '');
         final nfceEmitidaEmParam = nfceEmitidaEmValue == null
             ? null
             : DateTime.fromMillisecondsSinceEpoch(
@@ -5447,6 +5458,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           nfceUrlXml: nfceUrlXmlParam,
           nfceStatusFocus: nfceStatusFocusParam,
           nfceUrlXmlCancelamento: nfceUrlXmlCancelamentoParam,
+          nfceUltimoErro: nfceUltimoErroParam,
           nfceEmitidaEm: nfceEmitidaEmParam,
           nfeReferenciaFocus: nfeReferenciaFocusParam,
           nfeChaveAcesso: nfeChaveAcessoParam,
@@ -10491,6 +10503,11 @@ class Venda_ {
   /// See [Venda.lojaOrigemMercadoria].
   static final lojaOrigemMercadoria = obx.QueryStringProperty<Venda>(
     _entities[2].properties[65],
+  );
+
+  /// See [Venda.nfceUltimoErro].
+  static final nfceUltimoErro = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[66],
   );
 
   /// see [Venda.itens]
