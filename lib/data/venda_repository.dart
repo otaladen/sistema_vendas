@@ -677,7 +677,7 @@ class VendaRepository {
     }
   }
 
-  /// Corrige registros em que [Venda.finalizadaEm] foi copiado da data do orcamento.
+  /// Corrige vendas em que a data do checkout ficou igual a criacao do orcamento.
   void corrigirFinalizadaEmCopiadaDaDataOrcamento() {
     _db.store.runInTransaction(TxMode.write, () {
       final query = _db.vendaBox
@@ -689,12 +689,34 @@ class VendaRepository {
           .build();
       try {
         for (final venda in query.find()) {
-          if (!VendaFinalizacaoCaixaHelper.ehFinalizadaEmCopiaDaDataOrcamento(
-            venda,
-          )) {
+          final checkoutInferido = venda.cupomNaoFiscalEmitidoEm ??
+              venda.nfceEmitidaEm ??
+              (VendaFinalizacaoCaixaHelper.ehFinalizadaEmCopiaDaDataOrcamento(
+                    venda,
+                  )
+                  ? null
+                  : venda.finalizadaEm);
+          if (checkoutInferido == null) {
+            if (VendaFinalizacaoCaixaHelper.ehFinalizadaEmCopiaDaDataOrcamento(
+              venda,
+            )) {
+              venda.finalizadaEm = null;
+              _db.vendaBox.put(venda);
+            }
             continue;
           }
-          venda.finalizadaEm = null;
+          final checkoutUtc = checkoutInferido.toUtc();
+          final dataUtc = venda.data.toUtc();
+          final precisaAtualizarData =
+              checkoutUtc.millisecondsSinceEpoch != dataUtc.millisecondsSinceEpoch;
+          final finalizadaInvalida =
+              venda.finalizadaEm == null ||
+              VendaFinalizacaoCaixaHelper.ehFinalizadaEmCopiaDaDataOrcamento(
+                venda,
+              );
+          if (!precisaAtualizarData && !finalizadaInvalida) continue;
+          venda.data = checkoutUtc;
+          venda.finalizadaEm = checkoutUtc;
           _db.vendaBox.put(venda);
         }
       } finally {
@@ -2956,8 +2978,11 @@ class VendaRepository {
       if (venda.numeroControle <= 0) {
         venda.numeroControle = _proximoNumeroControle();
       }
+      // Data da venda = momento do checkout no caixa (nao a criacao do orcamento).
+      final agoraCheckout = DateTime.now().toUtc();
       venda.status = 'finalizada';
-      venda.finalizadaEm = DateTime.now().toUtc();
+      venda.data = agoraCheckout;
+      venda.finalizadaEm = agoraCheckout;
       venda.cancelada = false;
       venda.motivoCancelamento = '';
       venda.canceladaPor = '';

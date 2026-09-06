@@ -65,9 +65,13 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
   final bool selecionado;
   final num quantidadeNoOrcamento;
 
-  static const double alturaLinha = 48;
-  static const double alturaLinhaComBadges = 58;
-  static const double alturaLinhaExpandida = 68;
+  static const double alturaLinha = 34;
+  static const double alturaLinhaComBadges = 42;
+  static const double alturaLinhaExpandida = 42;
+
+  static const double _fonteNome = 13;
+  static const double _fontePrecoAtivo = 12;
+  static const double _fontePrecoInativo = 11;
 
   static const _tiposPreco = ['preco1', 'preco2', 'preco3'];
 
@@ -88,8 +92,9 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final estiloNome =
-        Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
+    final estiloNome = (Theme.of(context).textTheme.bodyMedium ??
+            const TextStyle())
+        .copyWith(fontSize: _fonteNome, height: 1.15);
     final detalhe = selecionado
         ? PdvConsultaDetalheLinhaUtil.montar(
             produto,
@@ -102,7 +107,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
     final emPromocaoAtiva = ativo == 'preco1' && precos.preco1EmPromocao;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -147,6 +152,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                        height: 1.0,
                         color: scheme.onSecondaryContainer,
                       ),
                 ),
@@ -180,8 +187,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 36, minHeight: 36),
-                  icon: const Icon(Icons.add_shopping_cart_outlined, size: 20),
+                      const BoxConstraints(minWidth: 28, minHeight: 28),
+                  icon: const Icon(Icons.add_shopping_cart_outlined, size: 18),
                   onPressed: onAdicionar,
                 ),
               ),
@@ -189,12 +196,12 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
           ),
           if (badgesCompactos)
             Padding(
-              padding: const EdgeInsets.only(top: 1, left: 2, right: 4),
+              padding: const EdgeInsets.only(top: 0, left: 2, right: 4),
               child: _BadgesCompactosLinha(produto: produto),
             ),
           if (detalhe.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 2, right: 4),
+              padding: const EdgeInsets.only(top: 0, right: 4),
               child: Text(
                 detalhe,
                 maxLines: 1,
@@ -202,6 +209,8 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                      height: 1.0,
                     ),
               ),
             ),
@@ -250,7 +259,10 @@ class _CelulaPreco extends StatelessWidget {
             valor,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: ativo ? FontWeight.w800 : FontWeight.w600,
-                  fontSize: ativo ? 13 : 12,
+                  fontSize: ativo
+                      ? PdvConsultaLinhaProduto._fontePrecoAtivo
+                      : PdvConsultaLinhaProduto._fontePrecoInativo,
+                  height: 1.0,
                   color: ativo
                       ? corAtiva
                       : scheme.onSurfaceVariant,

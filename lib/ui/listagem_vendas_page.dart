@@ -18,6 +18,7 @@ import 'shell/main_menu_deps.dart';
 import '../domain/cancelada_por_rotulo.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
+import '../domain/venda_finalizacao_caixa_helper.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../model/cliente.dart';
 import '../model/historico_entrega.dart';
@@ -1004,7 +1005,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         totalRecebido: infer.recebido,
         troco: infer.troco,
         segundaVia: true,
-        dataCabecalhoVenda: v.data,
+        dataCabecalhoVenda:
+            VendaFinalizacaoCaixaHelper.momentoFinalizacao(v).toLocal(),
         itens: itens,
       ),
       dadosEscPos: CupomBalcaoDados(
@@ -1290,7 +1292,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
               status: v.cancelada ? 'Cancelada' : 'Finalizada',
               statusDetalhe: null,
               statusCor: v.cancelada ? scheme.error : scheme.primary,
-              dataHora: _dataHora.format(v.data.toLocal()),
+              dataHora: _dataHora.format(
+                VendaFinalizacaoCaixaHelper.momentoFinalizacao(v).toLocal(),
+              ),
               cliente: 'Sem cliente',
               vendedor: 'Sem vendedor',
               pagamento: v.formaPagamento,
@@ -1363,7 +1367,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       statusCor: v.cancelada
           ? scheme.error
           : _corStatusOperacionalLista(v, scheme),
-      dataHora: _dataHora.format(v.data.toLocal()),
+      dataHora: _dataHora.format(
+        VendaFinalizacaoCaixaHelper.momentoFinalizacao(v).toLocal(),
+      ),
       cliente: cliente?.nomeRazao ?? 'Sem cliente',
       vendedor: _rotuloVendedorUmLinha(v),
       pagamento: _rotuloPagamentoLinhaLista(v),

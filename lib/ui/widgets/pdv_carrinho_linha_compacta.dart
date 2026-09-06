@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 
 import 'pdv_botao_tabela_preco_item.dart';
 import 'pdv_carrinho_campo_quantidade.dart';
+import 'pdv_carrinho_linha_colunas.dart';
 import 'pdv_mobile_ui.dart';
 import 'pdv_tipo_entrega_item.dart';
 import 'promocao_badge.dart';
 
-/// Linha compacta do carrinho do PDV (~52px no desktop; densa no celular).
+/// Linha compacta do carrinho do PDV (~36px no desktop; densa no celular).
 class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   const PdvCarrinhoLinhaCompacta({
     super.key,
     required this.nomeProduto,
+    this.codigoProduto = '',
     required this.rotuloPreco,
     required this.precoUnitarioFormatado,
     required this.subtotalFormatado,
@@ -31,7 +33,6 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     required this.onRemover,
     this.emPromocao = false,
     this.botaFora = false,
-    this.estoqueInsuficiente = false,
     this.precoManual = false,
     this.alvosTouchAmplos = false,
     this.editandoQuantidade = false,
@@ -39,12 +40,13 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     this.quantidadeController,
     this.quantidadeFocus,
     this.onConfirmarQuantidade,
+    this.exibirColunaUnitario = false,
   });
 
   final String nomeProduto;
+  final String codigoProduto;
   final bool emPromocao;
   final bool botaFora;
-  final bool estoqueInsuficiente;
   final bool precoManual;
   final String rotuloPreco;
   final String precoUnitarioFormatado;
@@ -70,12 +72,13 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final TextEditingController? quantidadeController;
   final FocusNode? quantidadeFocus;
   final VoidCallback? onConfirmarQuantidade;
+  final bool exibirColunaUnitario;
 
-  static const double alturaLinha = 52;
-  static const double alturaLinhaTouch = 56;
+  static const double alturaLinha = 36;
+  static const double alturaLinhaTouch = 40;
 
-  /// Duas faixas densas: nome+total / controles (~6 itens na tela tipica).
-  static const double alturaLinhaCelular = 72;
+  /// Duas faixas densas: nome+total / controles (~8 itens na tela tipica).
+  static const double alturaLinhaCelular = 58;
 
   static double alturaParaLista({required bool alvosTouchAmplos}) {
     if (pdvPlataformaCelular) return alturaLinhaCelular;
@@ -98,7 +101,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
         ? scheme.primary.withValues(alpha: 0.45)
         : bordaTipo.withValues(alpha: 0.85);
     final celular = pdvPlataformaCelular;
-    final minAcao = celular ? 36.0 : (alvosTouchAmplos ? 44.0 : 40.0);
+    final minAcao = celular ? 32.0 : (alvosTouchAmplos ? 36.0 : 32.0);
     final altura = alturaParaLista(alvosTouchAmplos: alvosTouchAmplos);
 
     return Material(
@@ -119,8 +122,8 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
             height: altura,
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: celular ? 6 : 2,
-                vertical: celular ? 4 : 0,
+                horizontal: PdvCarrinhoLinhaColunas.paddingHorizontal,
+                vertical: celular ? 3 : 4,
               ),
               child: celular
                   ? _buildLeiauteCelular(theme, scheme, minAcao)
@@ -129,6 +132,63 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  String get _codigoExibicao => codigoProduto.trim();
+
+  Widget _buildBotaoEntrega() {
+    return PdvBotaoTipoEntregaItem(
+      compacto: true,
+      tipoEntregaItem: tipoEntregaItem,
+      onPressed: onAlternarTipoEntrega,
+    );
+  }
+
+  Widget _buildColunaCodigo(ThemeData theme, ColorScheme scheme) {
+    final codigo = _codigoExibicao;
+    if (codigo.isEmpty) return const SizedBox.shrink();
+
+    return Text(
+      '#$codigo',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: theme.textTheme.bodySmall?.copyWith(
+        fontWeight: FontWeight.w500,
+        fontSize: 12,
+        height: 1.1,
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.82),
+      ),
+    );
+  }
+
+  Widget _buildNomeProduto(ThemeData theme, {required double fontSize}) {
+    return Text(
+      nomeProduto,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w700,
+        fontSize: fontSize,
+        height: 1.1,
+      ),
+    );
+  }
+
+  /// [badges status] + [nome].
+  Widget _buildLinhaIdentificacaoProduto(
+    ThemeData theme,
+    ColorScheme scheme, {
+    required double fontSizeNome,
+    bool incluirEntrega = false,
+  }) {
+    return Row(
+      children: [
+        if (incluirEntrega) _buildBotaoEntrega(),
+        _buildBadges(scheme),
+        Expanded(child: _buildNomeProduto(theme, fontSize: fontSizeNome)),
+      ],
     );
   }
 
@@ -161,18 +221,6 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           ),
           const SizedBox(width: 4),
         ],
-        if (estoqueInsuficiente) ...[
-          Tooltip(
-            message:
-                'Quantidade no orcamento acima do estoque disponivel',
-            child: Icon(
-              Icons.warning_amber_rounded,
-              size: 16,
-              color: scheme.error,
-            ),
-          ),
-          const SizedBox(width: 4),
-        ],
         if (precoManual) ...[
           Tooltip(
             message: 'Preco negociado manualmente',
@@ -199,16 +247,16 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
       children: [
         Row(
           children: [
-            _buildBadges(scheme),
+            _buildBotaoEntrega(),
+            SizedBox(
+              width: PdvCarrinhoLinhaColunas.larguraCodigo,
+              child: Center(child: _buildColunaCodigo(theme, scheme)),
+            ),
             Expanded(
-              child: Text(
-                nomeProduto,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  height: 1.15,
-                ),
+              child: _buildLinhaIdentificacaoProduto(
+                theme,
+                scheme,
+                fontSizeNome: 13,
               ),
             ),
             const SizedBox(width: 6),
@@ -221,6 +269,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                   subtotalFormatado,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w800,
+                    fontSize: 13,
                     color: precoManual ? scheme.tertiary : null,
                     height: 1.0,
                   ),
@@ -232,25 +281,16 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
         const Spacer(),
         Row(
           children: [
-            PdvBotaoTipoEntregaItem(
-              compacto: true,
-              tipoEntregaItem: tipoEntregaItem,
-              onPressed: onAlternarTipoEntrega,
-            ),
-            PdvBotaoTabelaPrecoItem(
-              compacto: true,
-              precoTipo: precoTipo,
-              onPressed: onAlternarTabelaPreco,
-            ),
             Expanded(
               child: Text(
-                '$rotuloQuantidadeLinha · $precoUnitarioFormatado/$rotuloPreco',
+                precoUnitarioFormatado,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color:
                       precoManual ? scheme.tertiary : scheme.onSurfaceVariant,
                   fontWeight: precoManual ? FontWeight.w700 : FontWeight.w500,
+                  fontSize: 11,
                   height: 1.0,
                 ),
               ),
@@ -271,6 +311,8 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
               focusNode: quantidadeFocus,
               textStyle: theme.textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w800,
+                fontSize: 13,
+                height: 1.0,
               ),
             ),
             _AcaoIcone(
@@ -278,6 +320,11 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
               icon: Icons.add,
               onPressed: editandoQuantidade ? null : onAumentar,
               tamanhoMinimo: minAcao,
+            ),
+            PdvBotaoTabelaPrecoItem(
+              compacto: true,
+              precoTipo: precoTipo,
+              onPressed: onAlternarTabelaPreco,
             ),
             PopupMenuButton<String>(
               tooltip: 'Mais',
@@ -330,77 +377,84 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     ColorScheme scheme,
     double minAcao,
   ) {
-    return Row(
-      children: [
-        PdvBotaoTipoEntregaItem(
-          compacto: true,
-          tipoEntregaItem: tipoEntregaItem,
-          onPressed: onAlternarTipoEntrega,
-        ),
-        PdvBotaoTabelaPrecoItem(
-          compacto: true,
-          precoTipo: precoTipo,
-          onPressed: onAlternarTabelaPreco,
-        ),
-        Expanded(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  _buildBadges(scheme),
-                  Expanded(
-                    child: Text(
-                      nomeProduto,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              Text(
-                '$rotuloQuantidadeLinha · $precoUnitarioFormatado/$rotuloPreco',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: precoManual
-                      ? scheme.tertiary
-                      : scheme.onSurfaceVariant,
-                  fontWeight:
-                      precoManual ? FontWeight.w700 : FontWeight.normal,
-                ),
-              ),
-            ],
+    return PdvCarrinhoLinhaColunas.linha(
+      entrega: _buildBotaoEntrega(),
+      codigo: _buildColunaCodigo(theme, scheme),
+      produto: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildLinhaIdentificacaoProduto(
+            theme,
+            scheme,
+            fontSizeNome: 13,
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: InkWell(
-            onTap: onAlterarPreco,
-            borderRadius: BorderRadius.circular(4),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-              child: Text(
-                subtotalFormatado,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: precoManual ? scheme.tertiary : null,
+          if (!exibirColunaUnitario)
+            Text(
+              precoUnitarioFormatado,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: precoManual
+                    ? scheme.tertiary
+                    : scheme.onSurfaceVariant,
+                fontWeight:
+                    precoManual ? FontWeight.w700 : FontWeight.normal,
+                fontSize: 11,
+                height: 1.0,
+              ),
+            ),
+        ],
+      ),
+      unitario: exibirColunaUnitario
+          ? InkWell(
+              onTap: onAlterarPreco,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                child: Text(
+                  precoUnitarioFormatado,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                    height: 1.0,
+                    color: precoManual
+                        ? scheme.tertiary
+                        : scheme.onSurfaceVariant,
+                  ),
                 ),
               ),
+            )
+          : null,
+      subtotal: InkWell(
+        onTap: onAlterarPreco,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+          child: Text(
+            subtotalFormatado,
+            textAlign: TextAlign.right,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+              height: 1.0,
+              color: precoManual ? scheme.tertiary : null,
             ),
           ),
         ),
-        _AcaoIcone(
+      ),
+      grupoQuantidade: PdvCarrinhoLinhaColunas.grupoQuantidadeDe(
+        alvosTouchAmplos: alvosTouchAmplos,
+        diminuir: _AcaoIcone(
           tooltip: 'Diminuir',
           icon: Icons.remove,
           onPressed: editandoQuantidade ? null : onDiminuir,
           tamanhoMinimo: minAcao,
         ),
-        PdvCarrinhoCampoQuantidade(
+        quantidade: PdvCarrinhoCampoQuantidade(
           quantidadeExibicao: quantidadeExibicao,
           editando: editandoQuantidade,
           fracionada: quantidadeFracionada,
@@ -410,15 +464,25 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           focusNode: quantidadeFocus,
           textStyle: theme.textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w700,
+            fontSize: 13,
+            height: 1.0,
           ),
         ),
-        _AcaoIcone(
+        aumentar: _AcaoIcone(
           tooltip: 'Aumentar',
           icon: Icons.add,
           onPressed: editandoQuantidade ? null : onAumentar,
           tamanhoMinimo: minAcao,
         ),
-        _AcaoIcone(
+      ),
+      tabelaPreco: PdvBotaoTabelaPrecoItem(
+        compacto: true,
+        precoTipo: precoTipo,
+        onPressed: onAlternarTabelaPreco,
+      ),
+      acoes: PdvCarrinhoLinhaColunas.acoesDe(
+        alvosTouchAmplos: alvosTouchAmplos,
+        dividir: _AcaoIcone(
           tooltip: quantidadeArmazenada > 1
               ? 'Dividir item (Ctrl+D)'
               : 'Dividir item (min. 2 un.)',
@@ -426,14 +490,14 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           onPressed: quantidadeArmazenada > 1 ? onDividir : null,
           tamanhoMinimo: minAcao,
         ),
-        _AcaoIcone(
+        remover: _AcaoIcone(
           tooltip: 'Remover item',
           icon: Icons.delete_outline,
           cor: scheme.error,
           onPressed: onRemover,
           tamanhoMinimo: minAcao,
         ),
-      ],
+      ),
     );
   }
 }
@@ -444,7 +508,7 @@ class _AcaoIcone extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.cor,
-    this.tamanhoMinimo = 40,
+    this.tamanhoMinimo = 32,
   });
 
   final String tooltip;
@@ -463,7 +527,7 @@ class _AcaoIcone extends StatelessWidget {
         minWidth: tamanhoMinimo,
         minHeight: tamanhoMinimo,
       ),
-      icon: Icon(icon, size: tamanhoMinimo >= 40 ? 20 : 18, color: cor),
+      icon: Icon(icon, size: tamanhoMinimo >= 36 ? 18 : 16, color: cor),
       onPressed: onPressed,
     );
   }

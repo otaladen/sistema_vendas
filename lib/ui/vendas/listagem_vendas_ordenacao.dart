@@ -1,4 +1,5 @@
 import '../../domain/venda_documento_rotulo_helper.dart';
+import '../../domain/venda_finalizacao_caixa_helper.dart';
 import 'listagem_venda_item_ui.dart';
 
 enum ListagemVendasColuna {
@@ -49,7 +50,10 @@ List<ListagemVendaItemUi> ordenarItensListagemVendas(
         cmpNum(numeroControle(a), numeroControle(b)),
       ListagemVendasColuna.documento => cmpStr(a.titulo, b.titulo),
       ListagemVendasColuna.status => cmpStr(a.status, b.status),
-      ListagemVendasColuna.data => a.venda.data.compareTo(b.venda.data),
+      ListagemVendasColuna.data =>
+        VendaFinalizacaoCaixaHelper.momentoFinalizacao(a.venda).compareTo(
+          VendaFinalizacaoCaixaHelper.momentoFinalizacao(b.venda),
+        ),
       ListagemVendasColuna.cliente => cmpStr(a.cliente, b.cliente),
       ListagemVendasColuna.vendedor => cmpStr(a.vendedor, b.vendedor),
       ListagemVendasColuna.pagamento => cmpStr(a.pagamento, b.pagamento),

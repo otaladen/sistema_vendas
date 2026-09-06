@@ -659,17 +659,24 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     }
   }
 
-  static const double _alturaLinhaConsulta =
-      PdvConsultaLinhaProduto.alturaLinhaExpandida;
-
   double _alturaItemLista(int index) {
-    // Altura fixa para itemExtent / scroll O(1).
-    return _alturaLinhaConsulta;
+    if (index < 0 || index >= _linhasVm.length) {
+      return PdvConsultaLinhaProduto.alturaLinha;
+    }
+    final vm = _linhasVm[index];
+    return PdvConsultaLinhaProduto.alturaPara(
+      expandido: _indiceSelecionado == index,
+      produto: vm.produto,
+    );
   }
 
   double _offsetAcumuladoItemLista(int index) {
     if (index <= 0) return 0;
-    return index * _alturaLinhaConsulta;
+    var offset = 0.0;
+    for (var i = 0; i < index; i++) {
+      offset += _alturaItemLista(i);
+    }
+    return offset;
   }
 
   Future<void> _puxarProdutosDaRede() async {
@@ -1706,7 +1713,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                 key: const ValueKey<String>('pdv-consulta-lista'),
                 controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(),
-                itemExtent: _alturaLinhaConsulta,
                 cacheExtent: 280,
                 itemCount: _linhasVm.length,
                 itemBuilder: (context, index) {
@@ -1716,38 +1722,44 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                   final qtdOrcamento =
                       widget.quantidadeNoOrcamentoDe?.call(item.id) ?? 0;
                   final scheme = Theme.of(context).colorScheme;
-                  return Material(
-                    key: ValueKey<int>(item.id),
-                    color: selecionado
-                        ? scheme.primaryContainer.withValues(alpha: 0.55)
-                        : (index.isOdd
-                              ? scheme.surfaceContainerLow
-                              : scheme.surface),
-                    child: InkWell(
-                      onTap: () => _confirmarProduto(item, adicionarDireto: true),
-                      onDoubleTap: () => _confirmarProduto(item, adicionarDireto: true),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: scheme.outlineVariant.withValues(
-                                alpha: 0.55,
+                  final alturaLinha = _alturaItemLista(index);
+                  return SizedBox(
+                    height: alturaLinha,
+                    child: Material(
+                      key: ValueKey<int>(item.id),
+                      color: selecionado
+                          ? scheme.primaryContainer.withValues(alpha: 0.55)
+                          : (index.isOdd
+                                ? scheme.surfaceContainerLow
+                                : scheme.surface),
+                      child: InkWell(
+                        onTap: () =>
+                            _confirmarProduto(item, adicionarDireto: true),
+                        onDoubleTap: () =>
+                            _confirmarProduto(item, adicionarDireto: true),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(
+                                color: scheme.outlineVariant.withValues(
+                                  alpha: 0.55,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        child: PdvConsultaLinhaProduto(
-                          produto: item,
-                          termoBusca: _termoBuscaAtual,
-                          precos: vm.precos,
-                          precoListaAtivo: _precoListaAtivo,
-                          estoqueNivel: vm.estoqueNivel,
-                          selecionado: selecionado,
-                          quantidadeNoOrcamento: qtdOrcamento,
-                          tooltipAdicionar:
-                              'Adicionar (${widget.rotuloPreco(_precoListaAtivo)})',
-                          onAdicionar: () =>
-                              _confirmarProduto(item, adicionarDireto: true),
+                          child: PdvConsultaLinhaProduto(
+                            produto: item,
+                            termoBusca: _termoBuscaAtual,
+                            precos: vm.precos,
+                            precoListaAtivo: _precoListaAtivo,
+                            estoqueNivel: vm.estoqueNivel,
+                            selecionado: selecionado,
+                            quantidadeNoOrcamento: qtdOrcamento,
+                            tooltipAdicionar:
+                                'Adicionar (${widget.rotuloPreco(_precoListaAtivo)})',
+                            onAdicionar: () =>
+                                _confirmarProduto(item, adicionarDireto: true),
+                          ),
                         ),
                       ),
                     ),

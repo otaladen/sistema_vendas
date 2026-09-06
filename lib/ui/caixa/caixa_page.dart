@@ -42,6 +42,7 @@ import '../../domain/fiscal/caixa_fiscal_acao_helper.dart';
 import '../../domain/fiscal/cliente_fiscal_helper.dart';
 import '../../domain/venda_documento_pos_caixa.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
+import '../../domain/venda_finalizacao_caixa_helper.dart';
 import '../../config/focus_nfe_runtime.dart';
 import '../../data/kit_orcamento_repository.dart';
 import '../../data/produto_sugestao_venda_repository.dart';
@@ -77,6 +78,7 @@ import '../../services/esc_pos_cupom_builder.dart';
 import '../segunda_via_cupom_autorizacao.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
 import '../widgets/lan_api_feedback.dart';
+import '../widgets/cadastro_rapido_cliente_dialog.dart';
 import '../widgets/pdv_tipo_entrega_item.dart';
 import '../widgets/quantidade_pdv_input_formatter.dart';
 import '../widgets/receber_fiado_panel.dart';
@@ -261,6 +263,21 @@ class _CaixaPageState extends State<CaixaPage> {
     } catch (_) {
       return const [];
     }
+  }
+
+  /// Carrega itens da venda (remoto no terminal leve quando o cache esta vazio).
+  Future<List<ItemVenda>> _itensDaVendaAsync(Venda v) async {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        final cached = repo.itensDaVendaSafe(v);
+        if (cached.isNotEmpty) return cached;
+        return await repo.carregarItensRemoto(v.id);
+      } catch (_) {
+        return _itensVenda(v);
+      }
+    }
+    return _itensVenda(v);
   }
 
   double _subtotalLinhaItem(ItemVenda item) {
@@ -671,6 +688,13 @@ class _CaixaPageState extends State<CaixaPage> {
                   tooltip: 'Vincular cliente (F4)',
                   onPressed: _vincularClienteAgora,
                   destacar: semCliente,
+                ),
+                _acaoIconeCaixa(
+                  context,
+                  icon: Icons.flash_on_outlined,
+                  tooltip: 'Cadastro rapido (Ctrl+N)',
+                  onPressed: () =>
+                      unawaited(_abrirCadastroRapidoClienteConferencia()),
                 ),
                 if (semVendedor)
                   _acaoIconeCaixa(
@@ -1272,6 +1296,13 @@ class _CaixaPageState extends State<CaixaPage> {
     if (key == LogicalKeyboardKey.f4) {
       if (_conferenciaAtivaComOrcamento()) {
         _vincularClienteAgora();
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.keyN &&
+        HardwareKeyboard.instance.isControlPressed) {
+      if (_conferenciaAtivaComOrcamento()) {
+        unawaited(_abrirCadastroRapidoClienteConferencia());
       }
       return true;
     }
@@ -6081,7 +6112,7 @@ class _CaixaPageState extends State<CaixaPage> {
     if (_correcaoFinalizadaEmDisparada) return;
     _correcaoFinalizadaEmDisparada = true;
     final prefs = await SharedPreferences.getInstance();
-    const chave = 'caixa_finalizada_em_corrigido_v2';
+    const chave = 'caixa_finalizada_em_corrigido_v3';
     if (prefs.getBool(chave) != true) {
       widget.vendaRepository.corrigirFinalizadaEmCopiadaDaDataOrcamento();
       await prefs.setBool(chave, true);
@@ -6156,6 +6187,8 @@ class _CaixaPageState extends State<CaixaPage> {
     final bloqueiaNovaNfce = VendaDocumentoFiscalMutex.bloqueiaNovaNfce(v);
     final temDanfe = v.nfceUrlDanfe.trim().isNotEmpty;
     final temDanfeNfe55 = v.nfeUrlDanfe.trim().isNotEmpty;
+    final itens = await _itensDaVendaAsync(v);
+    if (!mounted) return;
 
     final acao = await showDialog<String>(
       context: context,
@@ -6164,101 +6197,154 @@ class _CaixaPageState extends State<CaixaPage> {
         return AlertDialog(
           title: Text('Venda $numCupom'),
           content: SizedBox(
-            width: 440,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Total: ${_formatarMoeda(v.total)}'),
-                Text(
-                  'Cliente: ${cliente?.nomeRazao ?? 'Consumidor / sem cadastro'}',
-                ),
-                const SizedBox(height: 12),
-                Row(
+            width: 480,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 520),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      nfceEmitida
-                          ? Icons.check_circle_outline
-                          : Icons.receipt_long_outlined,
-                      size: 20,
-                      color: nfceEmitida
-                          ? Colors.green.shade700
-                          : Theme.of(ctx).colorScheme.outline,
+                    Text('Total: ${_formatarMoeda(v.total)}'),
+                    Text(
+                      'Cliente: ${cliente?.nomeRazao ?? 'Consumidor / sem cadastro'}',
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        nfceEmitida
-                            ? 'NFC-e ja emitida para esta venda.'
-                            : 'NFC-e ainda nao emitida.',
-                        style: Theme.of(ctx).textTheme.titleSmall,
+                    const SizedBox(height: 12),
+                    Text(
+                      'Produtos (${itens.length})',
+                      style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 6),
+                    if (itens.isEmpty)
+                      Text(
+                        'Nenhum item registrado nesta venda.',
+                        style: Theme.of(ctx).textTheme.bodySmall,
+                      )
+                    else
+                      ...itens.map(
+                        (item) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 44,
+                                child: Text(
+                                  EntregaVendaHelper.abreviacaoTipoItem(
+                                    item.tipoEntregaItem,
+                                  ),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: Theme.of(ctx).colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  '${item.quantidadeExibicaoVenda} x ${item.nomeProduto}',
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _formatarMoeda(item.subtotal),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
+                    const Divider(height: 24),
+                    Row(
+                      children: [
+                        Icon(
+                          nfceEmitida
+                              ? Icons.check_circle_outline
+                              : Icons.receipt_long_outlined,
+                          size: 20,
+                          color: nfceEmitida
+                              ? Colors.green.shade700
+                              : Theme.of(ctx).colorScheme.outline,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            nfceEmitida
+                                ? 'NFC-e ja emitida para esta venda.'
+                                : 'NFC-e ainda nao emitida.',
+                            style: Theme.of(ctx).textTheme.titleSmall,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                if (nfceEmitida) ...[
-                  const SizedBox(height: 8),
-                  if (v.nfceNumero.isNotEmpty)
-                    Text('Numero NFC-e: ${v.nfceNumero}'),
-                  if (v.nfceSerie.isNotEmpty) Text('Serie: ${v.nfceSerie}'),
-                  if (v.nfceChaveAcesso.isNotEmpty)
-                    Text(
-                      'Chave: ${v.nfceChaveAcesso}',
-                      style: Theme.of(ctx).textTheme.bodySmall,
-                    ),
-                  if (v.nfceEmitidaEm != null)
-                    Text(
-                      'Emitida em: ${DateFormat('dd/MM/yyyy HH:mm').format(v.nfceEmitidaEm!.toLocal())}',
-                      style: Theme.of(ctx).textTheme.bodySmall,
-                    ),
-                  if (!temDanfe)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        'Link do DANFE nao foi salvo nesta venda.',
+                    if (nfceEmitida) ...[
+                      const SizedBox(height: 8),
+                      if (v.nfceNumero.isNotEmpty)
+                        Text('Numero NFC-e: ${v.nfceNumero}'),
+                      if (v.nfceSerie.isNotEmpty) Text('Serie: ${v.nfceSerie}'),
+                      if (v.nfceChaveAcesso.isNotEmpty)
+                        Text(
+                          'Chave: ${v.nfceChaveAcesso}',
+                          style: Theme.of(ctx).textTheme.bodySmall,
+                        ),
+                      if (v.nfceEmitidaEm != null)
+                        Text(
+                          'Emitida em: ${DateFormat('dd/MM/yyyy HH:mm').format(v.nfceEmitidaEm!.toLocal())}',
+                          style: Theme.of(ctx).textTheme.bodySmall,
+                        ),
+                      if (!temDanfe)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Link do DANFE nao foi salvo nesta venda.',
+                            style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                  color: Colors.orange.shade800,
+                                ),
+                          ),
+                        ),
+                    ],
+                    if (nfe55Autorizada) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 20,
+                            color: Colors.green.shade700,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'NF-e modelo 55 ja emitida para esta venda.',
+                              style: Theme.of(ctx).textTheme.titleSmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (v.nfeNumero.isNotEmpty)
+                        Text('Numero NF-e: ${v.nfeNumero}'),
+                      if (v.nfeChaveAcesso.isNotEmpty)
+                        Text(
+                          'Chave: ${v.nfeChaveAcesso}',
+                          style: Theme.of(ctx).textTheme.bodySmall,
+                        ),
+                    ],
+                    if (!nfceEmitida && nfe55Autorizada) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'NFC-e nao pode ser emitida: esta venda ja possui NF-e.',
                         style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
                               color: Colors.orange.shade800,
+                              fontWeight: FontWeight.w600,
                             ),
                       ),
-                    ),
-                ],
-                if (nfe55Autorizada) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle_outline,
-                        size: 20,
-                        color: Colors.green.shade700,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'NF-e modelo 55 ja emitida para esta venda.',
-                          style: Theme.of(ctx).textTheme.titleSmall,
-                        ),
-                      ),
                     ],
-                  ),
-                  if (v.nfeNumero.isNotEmpty)
-                    Text('Numero NF-e: ${v.nfeNumero}'),
-                  if (v.nfeChaveAcesso.isNotEmpty)
-                    Text(
-                      'Chave: ${v.nfeChaveAcesso}',
-                      style: Theme.of(ctx).textTheme.bodySmall,
-                    ),
-                ],
-                if (!nfceEmitida && nfe55Autorizada) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'NFC-e nao pode ser emitida: esta venda ja possui NF-e.',
-                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                          color: Colors.orange.shade800,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ],
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
           actions: [
@@ -6371,7 +6457,9 @@ class _CaixaPageState extends State<CaixaPage> {
         totalRecebido: infer.recebido,
         troco: infer.troco,
         segundaVia: true,
-        dataCabecalhoVenda: vendaAtualizada.data,
+        dataCabecalhoVenda: VendaFinalizacaoCaixaHelper.momentoFinalizacao(
+          vendaAtualizada,
+        ).toLocal(),
         itens: itensCupom,
       ),
       dadosEscPos: CupomBalcaoDados(
@@ -6535,6 +6623,58 @@ class _CaixaPageState extends State<CaixaPage> {
     return cliente.id;
   }
 
+  Future<void> _vincularClienteIdAoOrcamento(
+    int? clienteId, {
+    String? mensagemSucesso,
+  }) async {
+    final venda = _selecionado;
+    if (venda == null) return;
+    try {
+      if (widget.vendaRepository is VendaApiRepository) {
+        await (widget.vendaRepository as VendaApiRepository)
+            .vincularClienteNoOrcamentoRemoto(
+          venda.id,
+          clienteId,
+        );
+      } else {
+        widget.vendaRepository.vincularClienteNoOrcamento(
+          venda.id,
+          clienteId,
+        );
+      }
+      _carregarOrcamentos();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            mensagemSucesso ?? 'Cliente atualizado no orcamento.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      LanApiFeedback.snackErro(
+        context,
+        e,
+        prefixo: 'Nao foi possivel vincular cliente',
+      );
+    }
+  }
+
+  Future<void> _abrirCadastroRapidoClienteConferencia() async {
+    if (!_conferenciaAtivaComOrcamento()) return;
+    final salvo = await mostrarCadastroRapidoClienteDialog(
+      context,
+      clienteRepository: widget.clienteRepository,
+    );
+    if (!mounted || salvo == null) return;
+    await _vincularClienteIdAoOrcamento(
+      salvo.id,
+      mensagemSucesso:
+          'Cliente "${salvo.nomeRazao}" cadastrado e vinculado ao orcamento.',
+    );
+  }
+
   Future<void> _vincularClienteAgora() async {
     final venda = _selecionado;
     if (venda == null) return;
@@ -6676,32 +6816,7 @@ class _CaixaPageState extends State<CaixaPage> {
     );
     pesquisaClienteController.dispose();
     if (confirmar != true) return;
-    try {
-      if (widget.vendaRepository is VendaApiRepository) {
-        await (widget.vendaRepository as VendaApiRepository)
-            .vincularClienteNoOrcamentoRemoto(
-          venda.id,
-          clienteSelecionadoId,
-        );
-      } else {
-        widget.vendaRepository.vincularClienteNoOrcamento(
-          venda.id,
-          clienteSelecionadoId,
-        );
-      }
-      _carregarOrcamentos();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cliente atualizado no orcamento.')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      LanApiFeedback.snackErro(
-        context,
-        e,
-        prefixo: 'Nao foi possivel vincular cliente',
-      );
-    }
+    await _vincularClienteIdAoOrcamento(clienteSelecionadoId);
   }
 
   Future<void> _vincularVendedorAgora() async {

@@ -254,6 +254,22 @@ void main() {
     expect(produto.estoqueExibicao, closeTo(144.62, 0.001));
   });
 
+  test('formatarEstoque sinaliza saldo armazenado absurdo', () {
+    final produto = pisoCx()..estoqueReal = -10002010000;
+    expect(
+      ProdutoEmbalagem.formatarEstoque(produto, produto.estoqueReal),
+      'Saldo invalido',
+    );
+    expect(
+      ProdutoEmbalagem.formatarEstoque(
+        produto,
+        produto.estoqueReal,
+        comUnidade: true,
+      ),
+      'Saldo invalido M2',
+    );
+  });
+
   test('estoque legado inteiro migra na leitura para escala', () {
     final produto = pisoCx()..estoqueReal = 145;
     expect(produto.estoqueExibicao, 145);

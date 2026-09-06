@@ -76,7 +76,7 @@ import 'clientes_page.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_consulta_produtos_page.dart';
 import 'pdv/agenda_carreto_pdv_dialog.dart';
-import 'widgets/mascaras_cadastro_input.dart';
+import 'widgets/cadastro_rapido_cliente_dialog.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'pdv_pesquisa_comando.dart';
 import 'produto_detalhe_venda_page.dart';
@@ -95,6 +95,8 @@ import 'widgets/pdv_obra_calculadora_panel.dart';
 import 'widgets/pdv_barcode_scanner_page.dart';
 import 'widgets/pdv_barcode_scanner_support.dart';
 import 'widgets/pdv_mobile_ui.dart';
+import 'widgets/pdv_carrinho_lista_cabecalho.dart';
+import 'widgets/pdv_carrinho_linha_colunas.dart';
 import 'widgets/pdv_carrinho_linha_compacta.dart';
 import 'widgets/quantidade_pdv_input_formatter.dart';
 import 'widgets/pdv_tipo_entrega_item.dart';
@@ -671,11 +673,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     });
   }
 
-  bool _produtoExcedeEstoqueNoCarrinho(Produto produto) {
-    final disp = _estoqueDisponivelExibicao(produto);
-    return _quantidadeUnidadeVendaNoCarrinho(produto.id) > disp;
-  }
-
   double _estoqueDisponivelExibicao(Produto produto) {
     final armazenado = _estoqueDisponivelArmazenadoSync(produto);
     return ProdutoEmbalagem.valorEstoqueExibicao(produto, armazenado);
@@ -889,8 +886,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   void _onFocoClientePdvChanged() {
     if (!_focusClientePdV.hasFocus) {
       _fecharOverlaySugestoesClientePdv();
+      if (mounted) setState(_sincronizarTextoBuscaClientePdv);
       return;
     }
+    if (mounted) setState(() {});
     if (_pdvClientesSugeridos.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _atualizarOverlaySugestoesClientePdv();
@@ -2700,7 +2699,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   static const double _larguraSeletorVendedorAppBarPdv = 148;
-  static const double _larguraSeletorClienteAppBarPdv = 156;
+  static const double _larguraSeletorClienteAppBarPdv = 196;
   static const double _larguraSeletorEntregaAppBarPdv = 124;
 
   Vendedor? _vendedorSelecionadoPdv() {
@@ -3473,198 +3472,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   Future<void> _abrirCadastroRapidoClientePdv() async {
-    final nomeController = TextEditingController();
-    final documentoController = TextEditingController();
-    final cpfFormatter = CpfInputFormatter();
-    final cnpjFormatter = CnpjInputFormatter();
-    final nomeFocus = FocusNode();
-    var tipoPessoa = 'fisica';
-
-    TextInputFormatter documentoFormatterAtual() =>
-        tipoPessoa == 'juridica' ? cnpjFormatter : cpfFormatter;
-
-    void aplicarMascaraDocumento() {
-      final fmt = documentoFormatterAtual();
-      final d = somenteDigitos(documentoController.text);
-      documentoController.value = fmt.formatEditUpdate(
-        TextEditingValue.empty,
-        TextEditingValue(text: d),
-      );
-    }
-
-    final salvar = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            final juridica = tipoPessoa == 'juridica';
-            return CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.escape): () {
-                  Navigator.pop(ctx, false);
-                },
-                const SingleActivator(LogicalKeyboardKey.enter): () {
-                  Navigator.pop(ctx, true);
-                },
-              },
-              child: AlertDialog(
-                title: const Text('Cadastro rapido de cliente'),
-                content: SizedBox(
-                  width: 400,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(
-                            value: 'fisica',
-                            label: Text('Pessoa Fisica'),
-                          ),
-                          ButtonSegment(
-                            value: 'juridica',
-                            label: Text('Pessoa Juridica'),
-                          ),
-                        ],
-                        selected: {tipoPessoa},
-                        onSelectionChanged: (sel) {
-                          setDialogState(() {
-                            tipoPessoa = sel.first;
-                            aplicarMascaraDocumento();
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: documentoController,
-                        autofocus: true,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [documentoFormatterAtual()],
-                        decoration: InputDecoration(
-                          labelText: juridica ? 'CNPJ *' : 'CPF *',
-                        ),
-                        onSubmitted: (_) => Navigator.pop(ctx, true),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: nomeController,
-                        focusNode: nomeFocus,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: InputDecoration(
-                          labelText: juridica
-                              ? 'Razao Social *'
-                              : 'Nome completo *',
-                        ),
-                        onSubmitted: (_) => Navigator.pop(ctx, true),
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancelar'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Salvar (Enter)'),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+    final salvo = await mostrarCadastroRapidoClienteDialog(
+      context,
+      clienteRepository: widget.clienteRepository,
     );
+    if (!mounted || salvo == null) return;
 
-    if (!mounted || salvar != true) {
-      nomeFocus.dispose();
-      nomeController.dispose();
-      documentoController.dispose();
-      return;
-    }
-
-    final nome = nomeController.text.trim();
-    final documento = somenteDigitos(documentoController.text);
-    nomeFocus.dispose();
-    nomeController.dispose();
-    documentoController.dispose();
-
-    if (nome.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            tipoPessoa == 'juridica'
-                ? 'Informe a razao social do cliente.'
-                : 'Informe o nome do cliente.',
-          ),
-        ),
-      );
-      return;
-    }
-    if (documento.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            tipoPessoa == 'juridica'
-                ? 'Informe o CNPJ do cliente.'
-                : 'Informe o CPF do cliente.',
-          ),
-        ),
-      );
-      return;
-    }
-    if (!documentoCpfCnpjValidoOuVazio(
-      documento,
-      tipoPessoa: tipoPessoa,
-    )) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            tipoPessoa == 'juridica' ? 'CNPJ invalido.' : 'CPF invalido.',
-          ),
-        ),
-      );
-      return;
-    }
-    final agora = DateTime.now().toUtc();
-    final cliente = Cliente(
-      tipoPessoa: tipoPessoa,
-      nomeRazao: nome,
-      documento: documento,
-      segmento: 'consumidor',
-      origemCadastro: 'balcao',
-      ativo: true,
-      criadoEm: agora,
-      atualizadoEm: agora,
+    await _aplicarClientePdv(salvo);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Cliente "${salvo.nomeRazao}" cadastrado.')),
     );
-    try {
-      final int id;
-      final repo = widget.clienteRepository;
-      if (repo is ClienteApiRepository) {
-        id = await repo.salvarRemoto(cliente);
-      } else {
-        id = repo.salvar(cliente) as int;
-      }
-      final salvo = widget.clienteRepository.obterPorId(id);
-      if (salvo == null) return;
-
-      await _aplicarClientePdv(salvo);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cliente "${salvo.nomeRazao}" cadastrado.')),
-      );
-    } on LanApiException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel cadastrar cliente: $e')),
-      );
-    }
   }
 
   void _focarDescontoCheckoutDialogoAberto() {
@@ -3809,12 +3627,30 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final clienteAtual = _clienteSelecionado();
+    final editandoCliente = _focusClientePdV.hasFocus;
     final faltaClienteFiado =
         _precisaPlanoFiadoPdV() &&
         (_clienteSelecionadoId == null || _clienteSelecionadoId! <= 0);
     final tooltip = clienteAtual == null
-        ? 'Cliente da venda (opcional) · Shift+F2 · Shift+F4 cadastro · Ctrl+N cadastro rapido'
+        ? 'Consumidor final · Shift+F2 para buscar · Shift+F4 cadastro · Ctrl+N cadastro rapido'
         : clienteAtual.nomeRazao;
+
+    Color fundo;
+    Color borda;
+    Color corTexto;
+    if (faltaClienteFiado) {
+      fundo = scheme.errorContainer.withValues(alpha: 0.35);
+      borda = scheme.error;
+      corTexto = scheme.onErrorContainer;
+    } else if (clienteAtual != null) {
+      fundo = scheme.primaryContainer.withValues(alpha: 0.72);
+      borda = scheme.primary.withValues(alpha: 0.55);
+      corTexto = scheme.onPrimaryContainer;
+    } else {
+      fundo = scheme.surfaceContainerHighest.withValues(alpha: 0.65);
+      borda = scheme.outlineVariant.withValues(alpha: 0.55);
+      corTexto = scheme.onSurfaceVariant;
+    }
 
     return FocusTraversalOrder(
       order: const NumericFocusOrder(3),
@@ -3827,56 +3663,90 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             SizedBox(
               key: _keySeletorClienteAppBarPdv,
               width: _larguraSeletorClienteAppBarPdv,
-              height: 30,
+              height: 34,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: scheme.surface.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(6),
+                  color: fundo,
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: faltaClienteFiado
-                        ? scheme.error
-                        : scheme.outlineVariant.withValues(alpha: 0.45),
+                    color: borda,
                     width: faltaClienteFiado ? 1.5 : 1,
                   ),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Focus(
-                      onKeyEvent: _onKeyClientePdv,
-                      child: TextField(
-                        controller: _pdvClienteBuscaController,
-                        focusNode: _focusClientePdV,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                        textCapitalization: TextCapitalization.words,
-                        cursorHeight: 14,
-                        // Sem borda propria: o tema global (radius 12) deixava
-                        // este campo "pílula", diferente dos dropdowns (radius 6).
-                        decoration: InputDecoration(
-                          isCollapsed: true,
-                          isDense: true,
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          disabledBorder: InputBorder.none,
-                          errorBorder: InputBorder.none,
-                          focusedErrorBorder: InputBorder.none,
-                          filled: false,
-                          contentPadding: EdgeInsets.zero,
-                          hintText: 'Cliente',
-                          hintStyle: theme.textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        onChanged: _atualizarSugestoesClientePdv,
-                        onSubmitted: (_) =>
-                            unawaited(_confirmarBuscaClientePdv()),
-                        onTapOutside: (_) =>
-                            _fecharOverlaySugestoesClientePdv(),
-                      ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      if (!editandoCliente) {
+                        _focusClientePdV.requestFocus();
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: editandoCliente
+                          ? Align(
+                              alignment: Alignment.centerLeft,
+                              child: Focus(
+                                onKeyEvent: _onKeyClientePdv,
+                                child: TextField(
+                                  controller: _pdvClienteBuscaController,
+                                  focusNode: _focusClientePdV,
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: corTexto,
+                                  ),
+                                  textCapitalization:
+                                      TextCapitalization.words,
+                                  cursorHeight: 16,
+                                  decoration: const InputDecoration(
+                                    isCollapsed: true,
+                                    isDense: true,
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    disabledBorder: InputBorder.none,
+                                    errorBorder: InputBorder.none,
+                                    focusedErrorBorder: InputBorder.none,
+                                    filled: false,
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                  onChanged: _atualizarSugestoesClientePdv,
+                                  onSubmitted: (_) =>
+                                      unawaited(_confirmarBuscaClientePdv()),
+                                  onTapOutside: (_) =>
+                                      _fecharOverlaySugestoesClientePdv(),
+                                ),
+                              ),
+                            )
+                          : Row(
+                              children: [
+                                Icon(
+                                  clienteAtual == null
+                                      ? Icons.person_outline
+                                      : Icons.person,
+                                  size: 16,
+                                  color: clienteAtual == null
+                                      ? corTexto
+                                      : scheme.primary,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    clienteAtual == null
+                                        ? 'Consumidor Final (Shift+F2)'
+                                        : _rotuloCurtoClientePdV(clienteAtual),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      color: corTexto,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                     ),
                   ),
                 ),
@@ -4364,7 +4234,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         onDividirLinha: _dividirLinhaCarrinho,
         onAlterarPrecoLinha: _alterarPrecoLinhaCarrinho,
         onIrPesquisaQuandoVazio: () => unawaited(_abrirConsultaProdutos()),
-        produtoExcedeEstoque: _produtoExcedeEstoqueNoCarrinho,
         alvosTouchAmplos: _pdvAlvosTouchAmplos,
       ),
       subtotalProdutos: _totalOrcamento,
@@ -8705,7 +8574,6 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
     required this.onDividirLinha,
     required this.onAlterarPrecoLinha,
     required this.onIrPesquisaQuandoVazio,
-    required this.produtoExcedeEstoque,
     this.alvosTouchAmplos = false,
   });
 
@@ -8730,7 +8598,6 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
   final Future<void> Function(int index) onDividirLinha;
   final Future<void> Function(int index) onAlterarPrecoLinha;
   final VoidCallback onIrPesquisaQuandoVazio;
-  final bool Function(Produto produto) produtoExcedeEstoque;
   final bool alvosTouchAmplos;
 
   @override
@@ -8828,56 +8695,90 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
     return Focus(
       focusNode: widget.carrinhoFocus,
       onKeyEvent: widget.onKeyCarrinho,
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: EdgeInsets.zero,
-        itemExtent: alturaLinha,
-        itemCount: widget.itens.length,
-        itemBuilder: (context, index) {
-          final item = widget.itens[index];
-          final selecionado = widget.indiceLinhaSelecionada == index;
-          final editandoQuantidade =
-              widget.indiceLinhaEdicaoQuantidade == index;
-          final passo = widget.passoQuantidadeCarrinho(item);
-          return Semantics(
-            container: true,
-            label:
-                '${item.produto.nome}, ${widget.rotuloPreco(item.precoTipo)}, '
-                'quantidade ${item.quantidadeExibicaoTexto}',
-            child: PdvCarrinhoLinhaCompacta(
-              nomeProduto: item.produto.nome,
-              emPromocao: item.promocaoId > 0,
-              botaFora: item.botaForaAplicado,
-              estoqueInsuficiente: widget.produtoExcedeEstoque(item.produto),
-              precoManual: item.precoUnitarioManual,
-              rotuloPreco: widget.rotuloPreco(item.precoTipo),
-              precoUnitarioFormatado: widget.formatarMoeda(item.precoUnitario),
-              subtotalFormatado: widget.formatarMoeda(item.subtotal),
-              quantidadeExibicao: item.quantidadeExibicaoTexto,
-              quantidadeArmazenada: item.quantidade,
-              rotuloQuantidadeLinha: item.rotuloQuantidadeCarrinho,
-              tipoEntregaItem: item.tipoEntregaItem,
-              precoTipo: item.precoTipo,
-              selecionado: selecionado,
-              alvosTouchAmplos: widget.alvosTouchAmplos,
-              editandoQuantidade: editandoQuantidade,
-              quantidadeFracionada: widget.quantidadeFracionadaDe(item),
-              quantidadeController: editandoQuantidade
-                  ? widget.quantidadeInlineController
-                  : null,
-              quantidadeFocus:
-                  editandoQuantidade ? widget.quantidadeInlineFocus : null,
-              onConfirmarQuantidade: widget.onConfirmarQuantidadeInline,
-              onTap: () => widget.onSelecionarLinha(index),
-              onAlternarTipoEntrega: () => widget.onAlternarTipoEntrega(index),
-              onAlternarTabelaPreco: () => widget.onAlternarTabelaPreco(index),
-              onDiminuir: () => widget.onAlterarQuantidade(index, -passo),
-              onAumentar: () => widget.onAlterarQuantidade(index, passo),
-              onEditarQuantidade: () => widget.onEditarQuantidade(index),
-              onDividir: () => widget.onDividirLinha(index),
-              onAlterarPreco: () => widget.onAlterarPrecoLinha(index),
-              onRemover: () => widget.onRemoverItem(index),
-            ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final exibirColunaUnitario = !pdvPlataformaCelular &&
+              PdvCarrinhoLinhaColunas.cabeColunaUnitario(
+                larguraDisponivel: constraints.maxWidth,
+                alvosTouchAmplos: widget.alvosTouchAmplos,
+              );
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!pdvPlataformaCelular)
+                PdvCarrinhoListaCabecalho(
+                  alvosTouchAmplos: widget.alvosTouchAmplos,
+                  exibirColunaUnitario: exibirColunaUnitario,
+                ),
+              Expanded(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: EdgeInsets.zero,
+                  itemExtent: alturaLinha,
+                  itemCount: widget.itens.length,
+                  itemBuilder: (context, index) {
+                    final item = widget.itens[index];
+                    final selecionado = widget.indiceLinhaSelecionada == index;
+                    final editandoQuantidade =
+                        widget.indiceLinhaEdicaoQuantidade == index;
+                    final passo = widget.passoQuantidadeCarrinho(item);
+                    return Semantics(
+                      container: true,
+                      label:
+                          '${item.produto.codigoInterno.trim().isNotEmpty ? '${item.produto.codigoInterno.trim()}, ' : ''}'
+                          '${item.produto.nome}, ${widget.rotuloPreco(item.precoTipo)}, '
+                          'quantidade ${item.quantidadeExibicaoTexto}',
+                      child: PdvCarrinhoLinhaCompacta(
+                        nomeProduto: item.produto.nome,
+                        codigoProduto: item.produto.codigoInterno,
+                        emPromocao: item.promocaoId > 0,
+                        botaFora: item.botaForaAplicado,
+                        precoManual: item.precoUnitarioManual,
+                        rotuloPreco: widget.rotuloPreco(item.precoTipo),
+                        precoUnitarioFormatado:
+                            widget.formatarMoeda(item.precoUnitario),
+                        subtotalFormatado: widget.formatarMoeda(item.subtotal),
+                        quantidadeExibicao: item.quantidadeExibicaoTexto,
+                        quantidadeArmazenada: item.quantidade,
+                        rotuloQuantidadeLinha: item.rotuloQuantidadeCarrinho,
+                        tipoEntregaItem: item.tipoEntregaItem,
+                        precoTipo: item.precoTipo,
+                        selecionado: selecionado,
+                        alvosTouchAmplos: widget.alvosTouchAmplos,
+                        exibirColunaUnitario: exibirColunaUnitario,
+                        editandoQuantidade: editandoQuantidade,
+                        quantidadeFracionada:
+                            widget.quantidadeFracionadaDe(item),
+                        quantidadeController: editandoQuantidade
+                            ? widget.quantidadeInlineController
+                            : null,
+                        quantidadeFocus: editandoQuantidade
+                            ? widget.quantidadeInlineFocus
+                            : null,
+                        onConfirmarQuantidade:
+                            widget.onConfirmarQuantidadeInline,
+                        onTap: () => widget.onSelecionarLinha(index),
+                        onAlternarTipoEntrega: () =>
+                            widget.onAlternarTipoEntrega(index),
+                        onAlternarTabelaPreco: () =>
+                            widget.onAlternarTabelaPreco(index),
+                        onDiminuir: () =>
+                            widget.onAlterarQuantidade(index, -passo),
+                        onAumentar: () =>
+                            widget.onAlterarQuantidade(index, passo),
+                        onEditarQuantidade: () =>
+                            widget.onEditarQuantidade(index),
+                        onDividir: () => widget.onDividirLinha(index),
+                        onAlterarPreco: () =>
+                            widget.onAlterarPrecoLinha(index),
+                        onRemover: () => widget.onRemoverItem(index),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -8946,7 +8847,8 @@ class _PdvPainelCheckout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final efetivamenteRecolhido = painelCheckoutRecolhido && !leiauteEmpilhado;
     return AnimatedContainer(
       key: keyPainel,
@@ -9131,38 +9033,18 @@ class _PdvPainelCheckout extends StatelessWidget {
                         ),
                       const SizedBox(height: 2),
                       Expanded(child: carrinhoBody),
-                      const SizedBox(height: 6),
-                      _PdvCheckoutTotaisBase(
+                      const SizedBox(height: 8),
+                      _PdvCheckoutRodape(
                         scheme: scheme,
-                        subtotal: subtotalProdutos,
-                        frete: valorFrete,
-                        desconto: valorDesconto,
+                        theme: theme,
+                        carrinhoCount: carrinhoCount,
                         descontoConfigAtivo: descontoConfigAtivo,
                         totalDestaque: totalDestaqueValor,
                         formatarMoeda: formatarMoeda,
-                      ),
-                      const SizedBox(height: 6),
-                      SizedBox(
-                        width: double.infinity,
-                        child: Focus(
-                          focusNode: focusSalvarOrcamento,
-                          child: FilledButton.icon(
-                            onPressed: onContinuarFechamento,
-                            style: FilledButton.styleFrom(
-                              visualDensity: modoCelular
-                                  ? VisualDensity.standard
-                                  : VisualDensity.compact,
-                              minimumSize: modoCelular
-                                  ? const Size.fromHeight(48)
-                                  : null,
-                              padding: EdgeInsets.symmetric(
-                                vertical: modoCelular ? 14 : 10,
-                              ),
-                            ),
-                            icon: const Icon(Icons.arrow_forward, size: 20),
-                            label: Text(labelBotaoContinuar),
-                          ),
-                        ),
+                        focusSalvarOrcamento: focusSalvarOrcamento,
+                        onContinuarFechamento: onContinuarFechamento,
+                        labelBotaoContinuar: labelBotaoContinuar,
+                        modoCelular: modoCelular,
                       ),
                     ],
                   ),
@@ -9173,85 +9055,120 @@ class _PdvPainelCheckout extends StatelessWidget {
   }
 }
 
-class _PdvCheckoutTotaisBase extends StatelessWidget {
-  const _PdvCheckoutTotaisBase({
+class _PdvCheckoutRodape extends StatelessWidget {
+  const _PdvCheckoutRodape({
     required this.scheme,
-    required this.subtotal,
-    required this.frete,
-    required this.desconto,
+    required this.theme,
+    required this.carrinhoCount,
     required this.descontoConfigAtivo,
     required this.totalDestaque,
     required this.formatarMoeda,
+    required this.focusSalvarOrcamento,
+    required this.onContinuarFechamento,
+    required this.labelBotaoContinuar,
+    this.modoCelular = false,
   });
 
   final ColorScheme scheme;
-  final double subtotal;
-  final double frete;
-  final double desconto;
+  final ThemeData theme;
+  final int carrinhoCount;
   final bool descontoConfigAtivo;
   final double totalDestaque;
   final String Function(double) formatarMoeda;
+  final FocusNode focusSalvarOrcamento;
+  final VoidCallback onContinuarFechamento;
+  final String labelBotaoContinuar;
+  final bool modoCelular;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final mostrarDesconto = descontoConfigAtivo && desconto > 0.004;
-    final mostrarFrete = frete > 0.004;
-    final partes = <String>[
-      'Sub ${formatarMoeda(subtotal)}',
-      if (mostrarFrete) 'Frete ${formatarMoeda(frete)}',
-      if (mostrarDesconto) 'Desc -${formatarMoeda(desconto)}',
-    ];
-    final rotuloTotal = descontoConfigAtivo ? 'Total a pagar' : 'Total geral';
+    final rotuloTotal =
+        descontoConfigAtivo ? 'TOTAL A PAGAR' : 'TOTAL GERAL';
+    final fundoTotal = Color.lerp(scheme.primary, Colors.black, 0.18)!;
+    final corTexto = scheme.onPrimary;
+    final itensRotulo = carrinhoCount == 1 ? '1 item' : '$carrinhoCount itens';
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.4)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              partes.join(' · '),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: fundoTotal,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+            boxShadow: [
+              BoxShadow(
+                color: fundoTotal.withValues(alpha: 0.35),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
                   child: Text(
-                    rotuloTotal,
-                    maxLines: 1,
+                    '$rotuloTotal ($itensRotulo)',
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurfaceVariant,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      height: 1.15,
+                      letterSpacing: 0.2,
+                      color: corTexto.withValues(alpha: 0.92),
                     ),
                   ),
                 ),
-                Text(
-                  formatarMoeda(totalDestaque),
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: scheme.primary,
+                const SizedBox(width: 10),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    formatarMoeda(totalDestaque),
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                      height: 1.0,
+                      letterSpacing: -0.4,
+                      color: corTexto,
+                    ),
                   ),
                 ),
               ],
             ),
-          ],
+          ),
         ),
-      ),
+        Focus(
+          focusNode: focusSalvarOrcamento,
+          child: FilledButton.icon(
+            onPressed: onContinuarFechamento,
+            style: FilledButton.styleFrom(
+              backgroundColor: scheme.primary,
+              foregroundColor: scheme.onPrimary,
+              elevation: 0,
+              visualDensity: VisualDensity.standard,
+              minimumSize: Size.fromHeight(modoCelular ? 50 : 46),
+              padding: EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: modoCelular ? 13 : 11,
+              ),
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(bottom: Radius.circular(10)),
+              ),
+              textStyle: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.15,
+              ),
+            ),
+            icon: const Icon(Icons.arrow_forward_rounded, size: 21),
+            label: Text(labelBotaoContinuar),
+          ),
+        ),
+      ],
     );
   }
 }

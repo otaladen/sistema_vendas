@@ -93,11 +93,28 @@ abstract final class PdvEstoqueSemaforoUtil {
   }
 
   /// Texto fixo na coluna Est. da lista (m² fracionado ou inteiro).
+  ///
+  /// Sempre compacto: a coluna tem ~56 px e valores corrompidos/grandes
+  /// nao podem estourar o layout (FlutterError + SnackBar global).
   static String rotuloQuantidadeLista(Produto produto, int estoqueArmazenado) {
-    if (ProdutoEmbalagem.estoqueUsaEscalaFracionada(produto)) {
-      return ProdutoEmbalagem.formatarEstoque(produto, estoqueArmazenado);
+    if (ProdutoEmbalagem.estoqueArmazenadoAbsurdo(estoqueArmazenado)) {
+      return '!';
     }
-    final quantidade = estoqueArmazenado;
+    if (ProdutoEmbalagem.estoqueUsaEscalaFracionada(produto)) {
+      final exib = ProdutoEmbalagem.valorEstoqueExibicao(
+        produto,
+        estoqueArmazenado,
+      );
+      if (exib == exib.roundToDouble()) {
+        return _compactarInteiroLista(exib.round());
+      }
+      final txt = ProdutoEmbalagem.formatarEstoque(produto, estoqueArmazenado);
+      return txt.length <= 7 ? txt : _compactarInteiroLista(exib.round());
+    }
+    return _compactarInteiroLista(estoqueArmazenado);
+  }
+
+  static String _compactarInteiroLista(int quantidade) {
     final abs = quantidade.abs();
     if (abs < 10000) return '$quantidade';
     if (abs < 1000000) {

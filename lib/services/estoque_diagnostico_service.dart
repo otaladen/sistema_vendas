@@ -2,6 +2,7 @@ import '../data/movimento_estoque_repository.dart';
 import '../data/objectbox.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/estoque/estoque_diagnostico_models.dart';
+import '../domain/produto_embalagem.dart';
 import '../domain/entregas/carreto_checklist_estoque_helper.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../model/produto.dart';
@@ -132,6 +133,22 @@ class EstoqueDiagnosticoService {
           detalhe:
               'Reservado: ${produto.estoqueReservado}. '
               'Corrija com ajuste manual ou libere reservas orfas.',
+          produtoId: produto.id,
+        ),
+      );
+    }
+
+    if (ProdutoEmbalagem.estoqueArmazenadoAbsurdo(produto.estoqueReal) ||
+        ProdutoEmbalagem.estoqueArmazenadoAbsurdo(produto.estoqueReservado)) {
+      achados.add(
+        EstoqueDiagnosticoAchado(
+          codigo: EstoqueDiagnosticoCodigo.saldoAbsurdo,
+          severidade: EstoqueDiagnosticoSeveridade.critico,
+          titulo: '$nome com saldo de estoque invalido',
+          detalhe:
+              'Fisico: ${produto.estoqueReal} · Reservado: '
+              '${produto.estoqueReservado}. Ajuste manual em Estoque ou '
+              'reconcilie com o kardex.',
           produtoId: produto.id,
         ),
       );

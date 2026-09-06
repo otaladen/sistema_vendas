@@ -38,14 +38,14 @@ class PdvBotaoTabelaPrecoItem extends StatelessWidget {
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.all(compacto ? 2 : 4),
       constraints: BoxConstraints(
-        minWidth: compacto ? 32 : 38,
-        minHeight: compacto ? 30 : 36,
+        minWidth: compacto ? 28 : 34,
+        minHeight: compacto ? 24 : 30,
       ),
       icon: Text(
         rotulo,
         style: TextStyle(
           fontWeight: FontWeight.w800,
-          fontSize: compacto ? 11 : 12,
+          fontSize: compacto ? 10 : 11,
           color: cor,
         ),
       ),

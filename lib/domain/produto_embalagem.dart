@@ -306,6 +306,13 @@ class ProdutoEmbalagem {
     );
   }
 
+  /// Limite operacional: acima disso o saldo armazenado e considerado corrompido.
+  static const int limiteEstoqueArmazenadoAbsurdo = 100000000;
+
+  static bool estoqueArmazenadoAbsurdo(int estoqueArmazenado) {
+    return estoqueArmazenado.abs() > limiteEstoqueArmazenadoAbsurdo;
+  }
+
   /// Estoque fisico usa milésimos (ex.: 144,62 m² → 144620) para pisos CX/m².
   static bool estoqueUsaEscalaFracionada(Produto produto) {
     if (produto.permiteQuantidadeFracionada) return true;
@@ -381,6 +388,11 @@ class ProdutoEmbalagem {
     int estoqueArmazenado, {
     bool comUnidade = false,
   }) {
+    if (estoqueArmazenadoAbsurdo(estoqueArmazenado)) {
+      const base = 'Saldo invalido';
+      if (!comUnidade) return base;
+      return '$base ${normalizarUnidade(produto.unidade)}';
+    }
     final v = valorEstoqueExibicao(produto, estoqueArmazenado);
     final txt = formatarQuantidadeUnidadeVenda(produto, v);
     if (!comUnidade) return txt;

@@ -110,7 +110,7 @@ class _PdvCarrinhoCampoQuantidadeState extends State<PdvCarrinhoCampoQuantidade>
           onTap: widget.onTapEditar,
           borderRadius: BorderRadius.circular(4),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
             child: Text(widget.quantidadeExibicao, style: baseStyle),
           ),
         ),
@@ -128,19 +128,19 @@ class _PdvCarrinhoCampoQuantidadeState extends State<PdvCarrinhoCampoQuantidade>
               scheme.primaryContainer.withValues(alpha: 0.55),
               pulso,
             ),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(4),
             border: Border.all(
               color: Color.lerp(
                 scheme.primary.withValues(alpha: 0.5),
                 scheme.primary,
                 pulso,
               )!,
-              width: 2,
+              width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: scheme.primary.withValues(alpha: 0.2 * pulso),
-                blurRadius: 8,
+                color: scheme.primary.withValues(alpha: 0.18 * pulso),
+                blurRadius: 4,
               ),
             ],
           ),
@@ -148,15 +148,19 @@ class _PdvCarrinhoCampoQuantidadeState extends State<PdvCarrinhoCampoQuantidade>
         );
       },
       child: SizedBox(
-        width: 56,
+        width: 48,
         child: TextField(
           controller: widget.controller,
           focusNode: widget.focusNode,
           textAlign: TextAlign.center,
-          style: baseStyle?.copyWith(color: scheme.primary),
+          style: baseStyle?.copyWith(
+            color: scheme.primary,
+            fontSize: 13,
+            height: 1.0,
+          ),
           decoration: const InputDecoration(
             isDense: true,
-            contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            contentPadding: EdgeInsets.symmetric(horizontal: 3, vertical: 2),
             border: InputBorder.none,
           ),
           keyboardType: widget.fracionada

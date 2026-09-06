@@ -58,10 +58,25 @@ void configurarTratamentoErrosGlobais() {
 
 /// Entrada unica para erros de zona / background (SnackBar, sem crash).
 void reportarErroGlobal(Object erro, [StackTrace? stack]) {
+  if (_ehErroLayoutIgnoravel(erro)) {
+    if (kDebugMode) {
+      debugPrint('Layout (sem SnackBar): $erro');
+      if (stack != null) debugPrint('$stack');
+    }
+    return;
+  }
   if (kDebugMode && stack != null) {
     debugPrint('Erro global: $erro\n$stack');
   }
   _agendarSnackErroAmigavel(erro);
+}
+
+/// Overflow de layout e ruido de debug — nao assusta o operador com SnackBar.
+bool _ehErroLayoutIgnoravel(Object erro) {
+  final raw = erro.toString().toLowerCase();
+  return raw.contains('overflowed') ||
+      raw.contains('renderflex') ||
+      (raw.contains('renderbox') && raw.contains('size'));
 }
 
 void _agendarSnackErroAmigavel(Object erro) {

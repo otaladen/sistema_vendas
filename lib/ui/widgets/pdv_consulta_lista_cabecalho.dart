@@ -10,7 +10,7 @@ class PdvConsultaListaCabecalho extends StatelessWidget {
     required this.precoListaAtivo,
   });
 
-  static const double altura = 28;
+  static const double altura = 22;
 
   final String Function(String precoTipo) rotuloPreco;
   final String precoListaAtivo;
@@ -23,6 +23,8 @@ class PdvConsultaListaCabecalho extends StatelessWidget {
     final scheme = theme.colorScheme;
     final estilo = theme.textTheme.labelSmall?.copyWith(
       fontWeight: FontWeight.w800,
+      fontSize: 11,
+      height: 1.0,
       color: scheme.onSurfaceVariant,
       letterSpacing: 0.2,
     );
@@ -40,7 +42,7 @@ class PdvConsultaListaCabecalho extends StatelessWidget {
       child: SizedBox(
         height: altura,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Row(
             children: [
               Expanded(
@@ -88,7 +90,7 @@ abstract final class PdvConsultaColunas {
   static const double larguraEstoque = 56;
   /// Cada coluna de preco (Preco 1 / Preco 2 / Preco 3).
   static const double larguraPrecoColuna = 76;
-  static const double larguraAcao = 40;
+  static const double larguraAcao = 32;
 
   /// Soma das tres colunas de preco (compat / layout).
   static const double larguraPrecos = larguraPrecoColuna * 3;

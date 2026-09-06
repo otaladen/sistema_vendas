@@ -72,5 +72,9 @@ void main() {
       PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(p, 99746991),
       '99,7M',
     );
+    expect(
+      PdvEstoqueSemaforoUtil.rotuloQuantidadeLista(p, -10002010000),
+      '!',
+    );
   });
 }

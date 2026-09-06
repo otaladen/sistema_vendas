@@ -72,17 +72,33 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
       final linhaOrcamento = noOrcamento > 0
           ? ' · Orc. $noOrcTxt · Rest. $restanteTxt'
           : '';
+      final acimaDisponivel = restanteAposOrcamento < 0;
       return Tooltip(
         message: PdvEstoqueSemaforoUtil.tooltipDe(
           produto,
           quantidadeNoOrcamento: noOrcamento,
         ),
-        child: Text(
-          'Disp. $dispTxt · Fis. $fisTxt · Res. $resTxt$linhaCd$linhaOrcamento',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: corDisponivel,
-            fontWeight: FontWeight.w700,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Disp. $dispTxt · Fis. $fisTxt · Res. $resTxt$linhaCd$linhaOrcamento',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: corDisponivel,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (acimaDisponivel) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Quantidade no orcamento acima do estoque disponivel',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
         ),
       );
     }
@@ -178,6 +194,29 @@ class PdvEstoqueResumoPanel extends StatelessWidget {
                     : scheme.onSurfaceVariant,
                 fontWeight: FontWeight.w600,
               ),
+            ),
+          ],
+          if (restanteAposOrcamento < 0) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 16,
+                  color: scheme.error,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Quantidade no orcamento acima do estoque disponivel',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ],

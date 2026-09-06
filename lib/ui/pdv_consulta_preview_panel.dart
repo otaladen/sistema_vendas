@@ -223,6 +223,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
     ColorScheme scheme,
   ) {
     final alturaFoto = compacto ? 140.0 : 200.0;
+    final temFotoCadastrada = produto.fotoPath.trim().isNotEmpty;
 
     return [
       Text(
@@ -233,13 +234,15 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
             ),
       ),
       const SizedBox(height: 8),
-      _FotoPreview(
-        key: ValueKey<String>('pdv-consulta-foto-${produto.id}'),
-        fotoPath: produto.fotoPath,
-        imagesDirectoryPath: imagesDirectoryPath,
-        altura: alturaFoto,
-      ),
-      const SizedBox(height: 10),
+      if (temFotoCadastrada) ...[
+        _FotoPreview(
+          key: ValueKey<String>('pdv-consulta-foto-${produto.id}'),
+          fotoPath: produto.fotoPath,
+          imagesDirectoryPath: imagesDirectoryPath,
+          altura: alturaFoto,
+        ),
+        const SizedBox(height: 10),
+      ],
       Text(
         produto.nome,
         maxLines: compacto ? 2 : 4,
@@ -338,13 +341,15 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
               ),
         ),
       ],
-      const SizedBox(height: 4),
-      Text(
-        'Quantidade decimal liberada no PDV (ex.: 4,50)',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-      ),
+      if (produto.permiteQuantidadeFracionada) ...[
+        const SizedBox(height: 4),
+        Text(
+          'Quantidade decimal liberada no PDV (ex.: 4,50)',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+        ),
+      ],
       const SizedBox(height: 8),
       PdvEstoqueResumoPanel(
         produto: produto,

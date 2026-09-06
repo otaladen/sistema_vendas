@@ -38,8 +38,9 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
     );
     final estiloNumero = Theme.of(context).textTheme.labelSmall?.copyWith(
           fontWeight: FontWeight.w600,
+          fontSize: 11,
           color: scheme.onSurface,
-          height: 1.1,
+          height: 1.0,
         );
 
     return Tooltip(
@@ -52,8 +53,8 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             Container(
-              width: 7,
-              height: 7,
+              width: 6,
+              height: 6,
               decoration: BoxDecoration(
                 color: cor,
                 shape: BoxShape.circle,
@@ -61,10 +62,17 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
             ),
             if (mostrarNumero) ...[
               const SizedBox(width: 5),
-              Text(
-                rotulo,
-                maxLines: 1,
-                style: estiloNumero,
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    rotulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                    style: estiloNumero,
+                  ),
+                ),
               ),
             ],
           ],

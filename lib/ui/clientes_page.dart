@@ -2168,9 +2168,9 @@ class _ClientesPageState extends State<ClientesPage>
                             const SizedBox(height: 10),
                             _buildAbaContato(denseTheme),
                             const SizedBox(height: 10),
-                            _buildCardComercialComLimiteDestaque(),
-                            const SizedBox(height: 10),
                             _buildSecaoEnderecos(denseTheme),
+                            const SizedBox(height: 10),
+                            _buildCardComercialComLimiteDestaque(),
                           ],
                         ),
                       );

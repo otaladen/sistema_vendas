@@ -86,23 +86,23 @@ class PdvBotaoTipoEntregaItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           child: Padding(
             padding: EdgeInsets.symmetric(
-              horizontal: compacto ? 4 : 6,
-              vertical: compacto ? 4 : 6,
+              horizontal: compacto ? 3 : 5,
+              vertical: compacto ? 2 : 4,
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   iconePara(tipo),
-                  size: compacto ? 16 : 20,
+                  size: compacto ? 14 : 18,
                   color: cor,
                 ),
-                SizedBox(width: compacto ? 3 : 4),
+                SizedBox(width: compacto ? 2 : 4),
                 Text(
                   rotuloCurto,
                   style: theme.textTheme.labelSmall?.copyWith(
                     fontWeight: FontWeight.w700,
-                    fontSize: compacto ? 11 : 12,
+                    fontSize: compacto ? 10 : 11,
                     color: cor,
                     height: 1.0,
                   ),
