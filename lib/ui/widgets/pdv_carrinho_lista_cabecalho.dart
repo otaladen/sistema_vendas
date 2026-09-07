@@ -60,6 +60,11 @@ class PdvCarrinhoListaCabecalho extends StatelessWidget {
               style: estilo,
               textAlign: TextAlign.center,
             ),
+            unidadeMedida: Text(
+              'UNID.',
+              style: estilo,
+              textAlign: TextAlign.center,
+            ),
             produto: Text('PRODUTO', style: estilo),
             unitario: exibirColunaUnitario
                 ? Text(

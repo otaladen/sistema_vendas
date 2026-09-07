@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../domain/autorizacao_pdv_chat.dart';
 import '../domain/chat_interno_parser.dart';
 import '../model/mensagem_interna.dart';
 
@@ -129,6 +130,9 @@ class MensagemInternaRepository {
     required String vendedor,
     required String texto,
     String clientId = '',
+    String tipo = kMensagemInternaTipoTexto,
+    Map<String, dynamic>? payload,
+    List<String>? mencoes,
   }) {
     return _serial(() async {
       await _garantirCarregado(forcarDisco: true);
@@ -150,6 +154,14 @@ class MensagemInternaRepository {
         }
       }
       final parsed = ChatInternoParser.parse(msg);
+      final mencoesFinais = <String>{
+        ...parsed.mencoes,
+        if (mencoes != null) ...mencoes.map((e) => e.trim()).where((e) => e.isNotEmpty),
+      };
+      final tipoNorm = tipo.trim().isEmpty ? kMensagemInternaTipoTexto : tipo.trim();
+      final payloadMap = payload == null || payload.isEmpty
+          ? const <String, dynamic>{}
+          : Map<String, dynamic>.from(payload);
       final item = MensagemInterna(
         id: _proxId++,
         vendedor: autor,
@@ -157,11 +169,53 @@ class MensagemInternaRepository {
         dataHora: DateTime.now().toUtc(),
         clientId: cid,
         pedidoNumero: parsed.pedidoNumero ?? 0,
-        mencoes: parsed.mencoes.toList(),
+        mencoes: List<String>.unmodifiable(mencoesFinais),
+        tipo: tipoNorm,
+        payload: payloadMap,
       );
       _cache.add(item);
       await _persistir();
       return item;
+    });
+  }
+
+  /// Localiza card de autorizacao PDV pelo [solicitacaoId] do payload.
+  Future<MensagemInterna?> buscarAutorizacaoPdv(String solicitacaoId) {
+    final id = solicitacaoId.trim();
+    if (id.isEmpty) return Future.value(null);
+    return _serial(() async {
+      await _garantirCarregado(forcarDisco: true);
+      for (final m in _cache.reversed) {
+        if (!m.ehAutorizacaoPdv) continue;
+        final p = m.autorizacaoPdv;
+        if (p != null && p.solicitacaoId == id) return m;
+      }
+      return null;
+    });
+  }
+
+  /// Atualiza status/payload de uma solicitacao de autorizacao PDV.
+  Future<MensagemInterna> atualizarAutorizacaoPdv({
+    required String solicitacaoId,
+    required AutorizacaoPdvChatPayload payload,
+  }) {
+    return _serial(() async {
+      await _garantirCarregado(forcarDisco: true);
+      final id = solicitacaoId.trim();
+      if (id.isEmpty) {
+        throw ArgumentError('solicitacaoId obrigatorio.');
+      }
+      final idx = _cache.indexWhere((m) {
+        final p = m.autorizacaoPdv;
+        return p != null && p.solicitacaoId == id;
+      });
+      if (idx < 0) {
+        throw StateError('Solicitacao de autorizacao nao encontrada.');
+      }
+      final atual = _cache[idx].copyWith(payload: payload.toMap());
+      _cache[idx] = atual;
+      await _persistir();
+      return atual;
     });
   }
 }

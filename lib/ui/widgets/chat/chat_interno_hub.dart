@@ -10,9 +10,13 @@ import '../../../data/api/lan_api_event_hub.dart';
 import '../../../data/chat_interno_leitura_storage.dart';
 import '../../../data/chat_interno_outbox.dart';
 import '../../../data/mensagem_interna_repository.dart';
+import '../../../data/usuario_repository.dart';
+import '../../../domain/autorizacao_pdv_chat.dart';
+import '../../../domain/autorizacao_pdv_chat_servico.dart';
 import '../../../domain/chat_interno_parser.dart';
 import '../../../model/mensagem_interna.dart';
 import '../../../services/lan_api_server.dart';
+import 'autorizacao_pdv_chat_hub.dart';
 
 /// Estado global do chat/mural interno (badge + lista + som + fila).
 class ChatInternoHub extends ChangeNotifier {
@@ -21,8 +25,10 @@ class ChatInternoHub extends ChangeNotifier {
 
   MensagemInternaRepository? _localRepo;
   ChatApiRepository? _apiRepo;
+  UsuarioRepository? _usuarioRepo;
   String _autorPadrao = '';
   String _perfilUsuario = '';
+  String _loginUsuario = '';
   bool _painelAberto = false;
   int _naoLidos = 0;
   int _ultimoIdVisto = 0;
@@ -40,6 +46,8 @@ class ChatInternoHub extends ChangeNotifier {
   List<MensagemInterna> get mensagens => _listaExibicao();
   String get autorPadrao => _autorPadrao;
   String get perfilUsuario => _perfilUsuario;
+  String get loginUsuario => _loginUsuario;
+  bool get configurado => _localRepo != null || _apiRepo != null;
   bool get painelAberto => _painelAberto;
   int get ultimoIdVisto => _ultimoIdVisto;
   bool get temPendentes => _pendentes.isNotEmpty;
@@ -47,13 +55,18 @@ class ChatInternoHub extends ChangeNotifier {
   void configurar({
     MensagemInternaRepository? localRepo,
     ChatApiRepository? apiRepo,
+    UsuarioRepository? usuarioRepo,
     required String autorPadrao,
     String perfilUsuario = '',
+    String loginUsuario = '',
   }) {
     _localRepo = localRepo;
     _apiRepo = apiRepo;
+    _usuarioRepo = usuarioRepo;
     _autorPadrao = autorPadrao.trim();
     _perfilUsuario = perfilUsuario.trim();
+    _loginUsuario = loginUsuario.trim();
+    AutorizacaoPdvChatHub.instance.garantirOuvintes();
     _garantirOuvinteWs();
     if (localRepo != null) {
       _garantirOuvinteServidorLocal();
@@ -89,16 +102,18 @@ class ChatInternoHub extends ChangeNotifier {
   }
 
   void _onEventoServidorLocal(String type, Map<String, dynamic> payload) {
-    if (type != 'novo_recado_chat') return;
-    final itemRaw = payload['item'];
-    if (itemRaw is Map) {
-      final msg = MensagemInterna.fromMap(
-        Map<String, dynamic>.from(itemRaw),
-      );
-      _aplicarMensagem(msg, tocarSom: !_painelAberto);
-    } else {
-      unawaited(carregarHistorico(tocarSomSeNovo: !_painelAberto));
+    if (type == kEventoAutorizacaoPdvResposta || type == 'novo_recado_chat') {
+      final itemRaw = payload['item'];
+      if (itemRaw is Map) {
+        final msg = MensagemInterna.fromMap(
+          Map<String, dynamic>.from(itemRaw),
+        );
+        _aplicarMensagem(msg, tocarSom: !_painelAberto);
+        return;
+      }
     }
+    if (type != 'novo_recado_chat') return;
+    unawaited(carregarHistorico(tocarSomSeNovo: !_painelAberto));
   }
 
   void _onWs() {
@@ -110,7 +125,7 @@ class ChatInternoHub extends ChangeNotifier {
     _onlineAntes = online;
 
     final tipo = LanApiEventHub.instance.ultimoEventoTipo;
-    if (tipo == 'novo_recado_chat') {
+    if (tipo == 'novo_recado_chat' || tipo == kEventoAutorizacaoPdvResposta) {
       final payload = LanApiEventHub.instance.ultimoEventoPayload;
       final itemRaw = payload?['item'];
       if (itemRaw is Map) {
@@ -118,7 +133,7 @@ class ChatInternoHub extends ChangeNotifier {
           Map<String, dynamic>.from(itemRaw),
         );
         _aplicarMensagem(msg, tocarSom: !_painelAberto);
-      } else {
+      } else if (tipo == 'novo_recado_chat') {
         unawaited(carregarHistorico(tocarSomSeNovo: !_painelAberto));
       }
       return;
@@ -174,6 +189,9 @@ class ChatInternoHub extends ChangeNotifier {
 
   MensagemInterna _pendenteComoMensagem(ChatInternoPendente p) {
     final parsed = ChatInternoParser.parse(p.texto);
+    final mencoes = p.mencoes.isNotEmpty
+        ? p.mencoes
+        : parsed.mencoes.toList();
     return MensagemInterna(
       id: 0,
       vendedor: p.vendedor,
@@ -181,8 +199,10 @@ class ChatInternoHub extends ChangeNotifier {
       dataHora: p.criadoEm,
       clientId: p.clientId,
       pedidoNumero: parsed.pedidoNumero ?? 0,
-      mencoes: parsed.mencoes.toList(),
+      mencoes: mencoes,
       pendenteLocal: true,
+      tipo: p.tipo.isEmpty ? kMensagemInternaTipoTexto : p.tipo,
+      payload: p.payload,
     );
   }
 
@@ -211,6 +231,17 @@ class ChatInternoHub extends ChangeNotifier {
     }
     _retirarPendentesConfirmados(clientId: msg.clientId);
     if (eraNova && tocarSom && msg.id > _ultimoIdVisto) _bipe();
+    final auth = msg.autorizacaoPdv;
+    if (auth != null && AutorizacaoPdvChatStatus.ehFinal(auth.status)) {
+      AutorizacaoPdvChatHub.instance.aplicarResposta(
+        AutorizacaoPdvChatResposta(
+          solicitacaoId: auth.solicitacaoId,
+          status: auth.status,
+          respondidoPor: auth.respondidoPor,
+          motivo: auth.motivo,
+        ),
+      );
+    }
     _recalcularNaoLidos();
     notifyListeners();
   }
@@ -310,6 +341,108 @@ class ChatInternoHub extends ChangeNotifier {
     await flushOutbox();
   }
 
+  Future<void> enviarAutorizacaoPdv(AutorizacaoPdvChatPayload payload) async {
+    if (!configurado) {
+      throw StateError('Chat interno nao configurado.');
+    }
+    final autor = _autorPadrao.isEmpty ? payload.operadorNome : _autorPadrao;
+    final pendente = ChatInternoPendente(
+      clientId: payload.solicitacaoId.isEmpty
+          ? _novoClientId()
+          : 'auth-${payload.solicitacaoId}',
+      vendedor: autor,
+      texto: payload.textoResumoChat(),
+      criadoEm: payload.timestamp.toUtc(),
+      tipo: kMensagemInternaTipoAutorizacaoPdv,
+      payload: payload.toMap(),
+      mencoes: const ['gerente', 'dono'],
+    );
+    _pendentes = [..._pendentes, pendente];
+    await ChatInternoOutbox.salvar(_pendentes);
+    notifyListeners();
+    await flushOutbox();
+    final aindaPendente =
+        _pendentes.any((p) => p.clientId == pendente.clientId);
+    if (aindaPendente) {
+      _pendentes =
+          _pendentes.where((p) => p.clientId != pendente.clientId).toList();
+      await ChatInternoOutbox.salvar(_pendentes);
+      notifyListeners();
+      throw StateError(
+        'Nao foi possivel enviar a solicitacao. Verifique a conexao com o servidor.',
+      );
+    }
+  }
+
+  Future<void> responderAutorizacaoPdv({
+    required String solicitacaoId,
+    required String acao,
+    required String login,
+    String motivo = '',
+  }) async {
+    final api = _apiRepo;
+    final local = _localRepo;
+    MensagemInterna atualizada;
+    if (local != null && !LanApiEventHub.instance.modoTerminal) {
+      atualizada = await AutorizacaoPdvChatServico.responder(
+        repo: local,
+        usuarios: _exigirUsuarioRepo(),
+        solicitacaoId: solicitacaoId,
+        acao: acao,
+        login: login,
+        motivo: motivo,
+      );
+      _notificarRespostaAutorizacao(atualizada);
+    } else if (api != null) {
+      atualizada = await api.responderAutorizacaoPdv(
+        solicitacaoId: solicitacaoId,
+        acao: acao,
+        login: login,
+        motivo: motivo,
+      );
+    } else if (local != null) {
+      atualizada = await AutorizacaoPdvChatServico.responder(
+        repo: local,
+        usuarios: _exigirUsuarioRepo(),
+        solicitacaoId: solicitacaoId,
+        acao: acao,
+        login: login,
+        motivo: motivo,
+      );
+      _notificarRespostaAutorizacao(atualizada);
+    } else {
+      throw StateError('Chat interno nao configurado.');
+    }
+    _aplicarMensagem(atualizada, tocarSom: false);
+  }
+
+  UsuarioRepository _exigirUsuarioRepo() {
+    final u = _usuarioRepo;
+    if (u == null) {
+      throw StateError('Repositorio de usuarios nao configurado.');
+    }
+    return u;
+  }
+
+  void _notificarRespostaAutorizacao(MensagemInterna atualizada) {
+    LanApiServerHub.instance.notificarEvento('novo_recado_chat', {
+      'item': atualizada.toMap(),
+      'id': atualizada.id,
+    });
+    LanApiServerHub.instance.notificar('chat_interno', ids: [atualizada.id]);
+    final auth = atualizada.autorizacaoPdv;
+    if (auth != null) {
+      LanApiServerHub.instance.notificarEvento(kEventoAutorizacaoPdvResposta, {
+        'solicitacaoId': auth.solicitacaoId,
+        'status': auth.status,
+        'respondidoPor': auth.respondidoPor,
+        'motivo': auth.motivo,
+        'stationId': auth.stationId,
+        'item': atualizada.toMap(),
+      });
+    }
+  }
+
   Future<void> flushOutbox() async {
     if (_flushing) return;
     if (_pendentes.isEmpty) {
@@ -342,6 +475,9 @@ class ChatInternoHub extends ChangeNotifier {
         vendedor: p.vendedor,
         texto: p.texto,
         clientId: p.clientId,
+        tipo: p.tipo.isEmpty ? kMensagemInternaTipoTexto : p.tipo,
+        payload: p.payload.isEmpty ? null : p.payload,
+        mencoes: p.mencoes.isEmpty ? null : p.mencoes,
       );
       LanApiServerHub.instance.notificarEvento('novo_recado_chat', {
         'item': criada.toMap(),
@@ -355,6 +491,9 @@ class ChatInternoHub extends ChangeNotifier {
         vendedor: p.vendedor,
         texto: p.texto,
         clientId: p.clientId,
+        tipo: p.tipo,
+        payload: p.payload.isEmpty ? null : p.payload,
+        mencoes: p.mencoes.isEmpty ? null : p.mencoes,
       );
     }
     if (local != null) {
@@ -362,6 +501,9 @@ class ChatInternoHub extends ChangeNotifier {
         vendedor: p.vendedor,
         texto: p.texto,
         clientId: p.clientId,
+        tipo: p.tipo.isEmpty ? kMensagemInternaTipoTexto : p.tipo,
+        payload: p.payload.isEmpty ? null : p.payload,
+        mencoes: p.mencoes.isEmpty ? null : p.mencoes,
       );
       LanApiServerHub.instance.notificarEvento('novo_recado_chat', {
         'item': criada.toMap(),

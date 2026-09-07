@@ -8,8 +8,10 @@ import '../../../domain/chat_interno_parser.dart';
 import '../../../domain/main_menu_destino.dart';
 import '../../../domain/usuario_permissao_helper.dart';
 import '../../../model/mensagem_interna.dart';
+import '../../../model/usuario_sistema.dart';
 import '../../shell/app_shell_scope.dart';
 import '../../shell/main_menu_deps.dart';
+import 'autorizacao_pdv_chat_card.dart';
 import 'chat_interno_hub.dart';
 
 /// Botao da TopBar com badge de recados novos.
@@ -72,6 +74,7 @@ class ChatInternoDrawer {
               width: MediaQuery.sizeOf(ctx).width.clamp(320, 420),
               height: MediaQuery.sizeOf(ctx).height,
               child: _ChatInternoPainel(
+                usuarioLogado: usuario,
                 onAbrirEntregas: abrirEntregas == null
                     ? null
                     : () {
@@ -104,9 +107,10 @@ class ChatInternoDrawer {
 }
 
 class _ChatInternoPainel extends StatefulWidget {
-  const _ChatInternoPainel({this.onAbrirEntregas});
+  const _ChatInternoPainel({this.onAbrirEntregas, this.usuarioLogado});
 
   final VoidCallback? onAbrirEntregas;
+  final UsuarioSistema? usuarioLogado;
 
   @override
   State<_ChatInternoPainel> createState() => _ChatInternoPainelState();
@@ -384,8 +388,15 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                 ],
               ),
               const SizedBox(height: 4),
-              Text(m.texto, style: theme.textTheme.bodyMedium),
-              if (m.mencoes.isNotEmpty || m.pedidoNumero > 0) ...[
+              if (m.ehAutorizacaoPdv)
+                AutorizacaoPdvChatCard(
+                  mensagem: m,
+                  usuarioLogado: widget.usuarioLogado,
+                )
+              else
+                Text(m.texto, style: theme.textTheme.bodyMedium),
+              if (!m.ehAutorizacaoPdv &&
+                  (m.mencoes.isNotEmpty || m.pedidoNumero > 0)) ...[
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,

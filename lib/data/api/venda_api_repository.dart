@@ -2193,6 +2193,7 @@ class VendaApiRepository extends ChangeNotifier {
     String? gerenteLogin,
     String? gerenteSenha,
     bool exigeGerente = false,
+    String? autorizacaoChatId,
   }) async {
     _exigirServidorOnline();
     await _client.aplicarDescontoOrcamento(
@@ -2202,6 +2203,7 @@ class VendaApiRepository extends ChangeNotifier {
       gerenteLogin: gerenteLogin,
       gerenteSenha: gerenteSenha,
       exigeGerente: exigeGerente,
+      autorizacaoChatId: autorizacaoChatId,
     );
     await _atualizarCacheAposMutacaoOrcamento(vendaId);
   }

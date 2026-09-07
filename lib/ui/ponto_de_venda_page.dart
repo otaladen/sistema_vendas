@@ -30,6 +30,7 @@ import '../model/usuario_sistema.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_limite_desconto_pdv.dart';
 import '../domain/produto_nome_exibicao.dart';
+import '../domain/produto_unidade_exibicao.dart';
 import '../domain/sessao_operacional_guard.dart';
 import '../data/app_config_repository.dart';
 import '../data/api/cliente_api_repository.dart';
@@ -741,6 +742,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   final _descontoPdVController = TextEditingController();
   bool _descontoAcimaTetoAutorizadoPdv = false;
   String? _descontoAutorizadoPorPdV;
+  String _carrinhoSessaoId = '';
   int? _orcamentoEmEdicaoId;
   int? _orcamentoEmEdicaoNumero;
 
@@ -6525,6 +6527,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         _ultimoOrcamentoSalvoTotal = totalOrcamentoSalvo;
       }
       _carrinho.clear();
+      _carrinhoSessaoId = '';
       _indiceLinhaCarrinho = null;
       _sugestoesCarrinhoVisiveis = const [];
       _sugestoesCarrinhoOrigemNome = '';
@@ -7928,6 +7931,23 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return _parseValorMonetario(_descontoPdVController.text).clamp(0.0, sub);
   }
 
+  String _idCarrinhoSessaoPdv() {
+    if (_carrinhoSessaoId.isEmpty) {
+      _carrinhoSessaoId = gerarUuidV4();
+    }
+    return _carrinhoSessaoId;
+  }
+
+  String _descricaoAcaoDescontoPdv() {
+    if (_tipoDescontoPdV == 'percentual') {
+      final pct = _percentualDigitadoBrutoSemLimitePdV();
+      if (pct != null) {
+        return 'Desconto de ${pct.toStringAsFixed(1).replaceAll('.', ',')}%';
+      }
+    }
+    return 'Desconto de ${_formatarMoeda(_descontoSolicitadoReaisBrutoPdV())}';
+  }
+
   Future<bool> _solicitarAutorizacaoDescontoAcimaTetoPdV() async {
     if (!_descontoPdVDigitadoUltrapassaTeto()) {
       _descontoAcimaTetoAutorizadoPdv = false;
@@ -7943,6 +7963,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       maximoPermitidoReais: _valorMaximoDescontoReaisPdV(),
       descontoSolicitadoReais: _descontoSolicitadoReaisBrutoPdV(),
       formatarMoeda: _formatarMoeda,
+      vendaId: _orcamentoEmEdicaoId ?? 0,
+      carrinhoId: _idCarrinhoSessaoPdv(),
+      descricaoAcao: _descricaoAcaoDescontoPdv(),
+      valorOriginal: _subtotalElegivelDescontoPdV,
     );
     if (autorizadoPor == null) return false;
     _descontoAcimaTetoAutorizadoPdv = true;
@@ -8732,6 +8756,7 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
                       child: PdvCarrinhoLinhaCompacta(
                         nomeProduto: item.produto.nome,
                         codigoProduto: item.produto.codigoInterno,
+                        unidadeMedida: item.unidadeMedidaExibicao,
                         emPromocao: item.promocaoId > 0,
                         botaFora: item.botaForaAplicado,
                         precoManual: item.precoUnitarioManual,
@@ -10051,6 +10076,13 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
         quantidadeDigitada: quantidade,
         emUnidadeCompra: quantidadeEmUnidadeCompra,
       );
+
+  String get unidadeMedidaExibicao {
+    final raw = quantidadeEmUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra
+        ? produto.unidadeCompraEfetiva
+        : produto.unidade;
+    return rotuloUnidadeProdutoExibicao(raw);
+  }
 
   double get subtotal => quantidadeVendaEfetiva * precoUnitario;
 }

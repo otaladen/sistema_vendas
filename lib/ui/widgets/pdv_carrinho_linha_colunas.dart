@@ -10,6 +10,7 @@ abstract final class PdvCarrinhoLinhaColunas {
   static const double paddingSubtotalDireita = 4;
   static const double larguraEntrega = 56;
   static const double larguraCodigo = 60;
+  static const double larguraUnidadeMedida = 48;
   static const double larguraUnitario = 68;
   static const double larguraSubtotal = 76;
   static const double larguraBotaoTabela = 28;
@@ -29,6 +30,7 @@ abstract final class PdvCarrinhoLinhaColunas {
     return paddingHorizontal * 2 +
         larguraEntrega +
         larguraCodigo +
+        larguraUnidadeMedida +
         larguraUnitario +
         larguraFixaDireita(alvosTouchAmplos: alvosTouchAmplos) +
         larguraProdutoMinimaConfortavel;
@@ -60,6 +62,7 @@ abstract final class PdvCarrinhoLinhaColunas {
   static Widget linha({
     required Widget entrega,
     required Widget codigo,
+    required Widget unidadeMedida,
     required Widget produto,
     required Widget subtotal,
     required Widget grupoQuantidade,
@@ -82,6 +85,13 @@ abstract final class PdvCarrinhoLinhaColunas {
           child: Align(
             alignment: Alignment.center,
             child: codigo,
+          ),
+        ),
+        SizedBox(
+          width: larguraUnidadeMedida,
+          child: Align(
+            alignment: Alignment.center,
+            child: unidadeMedida,
           ),
         ),
         Expanded(child: produto),

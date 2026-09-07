@@ -239,3 +239,136 @@ DateTime? parseDataDdMmYyyy(String texto, {DateTime? naoDepoisDe}) {
   return dt;
 }
 
+/// Mascara NCM fiscal: 8 digitos no formato `9999.99.99`.
+class NcmInputFormatter extends TextInputFormatter {
+  static const int maxDigitos = 8;
+
+  /// Formata [digitos] (com ou sem mascara) para exibicao.
+  static String formatar(String digitos) {
+    final d = somenteDigitos(digitos);
+    if (d.isEmpty) return '';
+    if (d.length <= 4) return d;
+    if (d.length <= 6) {
+      return '${d.substring(0, 4)}.${d.substring(4)}';
+    }
+    final t = d.length > maxDigitos ? d.substring(0, maxDigitos) : d;
+    return '${t.substring(0, 4)}.${t.substring(4, 6)}.${t.substring(6)}';
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = somenteDigitos(newValue.text);
+    final truncated =
+        digits.length > maxDigitos ? digits.substring(0, maxDigitos) : digits;
+    final masked = formatar(truncated);
+    return TextEditingValue(
+      text: masked,
+      selection: TextSelection.collapsed(offset: masked.length),
+    );
+  }
+}
+
+/// Mascara CEST: 7 digitos no formato `99.999.99`.
+class CestInputFormatter extends TextInputFormatter {
+  static const int maxDigitos = 7;
+
+  static String formatar(String digitos) {
+    final d = somenteDigitos(digitos);
+    if (d.isEmpty) return '';
+    if (d.length <= 2) return d;
+    if (d.length <= 5) {
+      return '${d.substring(0, 2)}.${d.substring(2)}';
+    }
+    final t = d.length > maxDigitos ? d.substring(0, maxDigitos) : d;
+    return '${t.substring(0, 2)}.${t.substring(2, 5)}.${t.substring(5)}';
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = somenteDigitos(newValue.text);
+    final truncated =
+        digits.length > maxDigitos ? digits.substring(0, maxDigitos) : digits;
+    final masked = formatar(truncated);
+    return TextEditingValue(
+      text: masked,
+      selection: TextSelection.collapsed(offset: masked.length),
+    );
+  }
+}
+
+/// GTIN/EAN: somente digitos (ate 14, tamanho usual de codigo de barras).
+class GtinInputFormatter extends TextInputFormatter {
+  static const int maxDigitos = 14;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = somenteDigitos(newValue.text);
+    final truncated =
+        digits.length > maxDigitos ? digits.substring(0, maxDigitos) : digits;
+    return TextEditingValue(
+      text: truncated,
+      selection: TextSelection.collapsed(offset: truncated.length),
+    );
+  }
+}
+
+/// CFOP de venda: somente digitos (ate 4).
+class CfopInputFormatter extends TextInputFormatter {
+  static const int maxDigitos = 4;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = somenteDigitos(newValue.text);
+    final truncated =
+        digits.length > maxDigitos ? digits.substring(0, maxDigitos) : digits;
+    return TextEditingValue(
+      text: truncated,
+      selection: TextSelection.collapsed(offset: truncated.length),
+    );
+  }
+}
+
+void aplicarMascaraNcm(TextEditingController c, NcmInputFormatter fmt) {
+  final d = somenteDigitos(c.text);
+  c.value = fmt.formatEditUpdate(
+    TextEditingValue.empty,
+    TextEditingValue(text: d),
+  );
+}
+
+void aplicarMascaraCest(TextEditingController c, CestInputFormatter fmt) {
+  final d = somenteDigitos(c.text);
+  c.value = fmt.formatEditUpdate(
+    TextEditingValue.empty,
+    TextEditingValue(text: d),
+  );
+}
+
+void aplicarMascaraCfop(TextEditingController c, CfopInputFormatter fmt) {
+  final d = somenteDigitos(c.text);
+  c.value = fmt.formatEditUpdate(
+    TextEditingValue.empty,
+    TextEditingValue(text: d),
+  );
+}
+
+void aplicarMascaraGtin(TextEditingController c, GtinInputFormatter fmt) {
+  final d = somenteDigitos(c.text);
+  c.value = fmt.formatEditUpdate(
+    TextEditingValue.empty,
+    TextEditingValue(text: d),
+  );
+}
+

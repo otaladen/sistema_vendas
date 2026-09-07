@@ -31,6 +31,7 @@ import '../widgets/chat/chat_interno_drawer.dart';
 import '../widgets/chat/chat_interno_hub.dart';
 import '../../data/api/chat_api_repository.dart';
 import '../../data/mensagem_interna_repository.dart';
+import '../../data/usuario_repository.dart';
 import 'app_menu_drawer.dart';
 import 'app_menu_lateral.dart';
 import 'app_shell_aba_visibilidade.dart';
@@ -157,6 +158,10 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
           : null,
       autorPadrao: autor,
       perfilUsuario: widget.usuarioLogado.perfil,
+      loginUsuario: widget.usuarioLogado.login,
+      usuarioRepo: widget.usuarioRepository is UsuarioRepository
+          ? widget.usuarioRepository as UsuarioRepository
+          : null,
     );
   }
 

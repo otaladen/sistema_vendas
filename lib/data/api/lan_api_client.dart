@@ -1625,6 +1625,7 @@ class LanApiClient {
     String? gerenteLogin,
     String? gerenteSenha,
     bool? exigeGerente,
+    String? autorizacaoChatId,
   }) =>
       {
         if (terminalId != null && terminalId.trim().isNotEmpty)
@@ -1634,6 +1635,8 @@ class LanApiClient {
         if (gerenteSenha != null && gerenteSenha.isNotEmpty)
           'gerenteSenha': gerenteSenha,
         if (exigeGerente == true) 'exigeGerente': true,
+        if (autorizacaoChatId != null && autorizacaoChatId.trim().isNotEmpty)
+          'autorizacaoChatId': autorizacaoChatId.trim(),
       };
 
   Future<void> aplicarDescontoOrcamento(
@@ -1643,6 +1646,7 @@ class LanApiClient {
     String? gerenteLogin,
     String? gerenteSenha,
     bool exigeGerente = false,
+    String? autorizacaoChatId,
   }) =>
       _postJson('/api/orcamentos/$id/desconto', {
         'valor': valor,
@@ -1651,6 +1655,7 @@ class LanApiClient {
           gerenteLogin: gerenteLogin,
           gerenteSenha: gerenteSenha,
           exigeGerente: exigeGerente,
+          autorizacaoChatId: autorizacaoChatId,
         ),
       });
 
@@ -2377,17 +2382,42 @@ class LanApiClient {
     required String vendedor,
     required String texto,
     String clientId = '',
+    String tipo = '',
+    Map<String, dynamic>? payload,
+    List<String>? mencoes,
   }) async {
     final m = await _postJson('/api/chat/enviar', {
       'vendedor': vendedor,
       'texto': texto,
       if (clientId.trim().isNotEmpty) 'clientId': clientId.trim(),
+      if (tipo.trim().isNotEmpty) 'tipo': tipo.trim(),
+      if (payload != null && payload.isNotEmpty) 'payload': payload,
+      if (mencoes != null && mencoes.isNotEmpty) 'mencoes': mencoes,
     });
     final item = m['item'];
     if (item is Map) {
       return MensagemInterna.fromMap(Map<String, dynamic>.from(item));
     }
     throw LanApiException('Resposta invalida ao enviar recado do chat.');
+  }
+
+  Future<MensagemInterna> chatAutorizacaoResponder({
+    required String solicitacaoId,
+    required String acao,
+    required String login,
+    String motivo = '',
+  }) async {
+    final m = await _postJson('/api/chat/autorizacao/responder', {
+      'solicitacaoId': solicitacaoId,
+      'acao': acao,
+      'login': login,
+      if (motivo.trim().isNotEmpty) 'motivo': motivo.trim(),
+    });
+    final item = m['item'];
+    if (item is Map) {
+      return MensagemInterna.fromMap(Map<String, dynamic>.from(item));
+    }
+    throw LanApiException('Resposta invalida ao responder autorizacao do PDV.');
   }
 
   Future<Map<String, dynamic>> apagarRecadosArquivados() =>

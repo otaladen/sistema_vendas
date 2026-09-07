@@ -49,6 +49,7 @@ class LanApiEventHub extends ChangeNotifier {
   bool get online => _online;
   bool get modoTerminal => _modoTerminal;
   bool get emStandby => _standby;
+  String get stationId => _stationId;
 
   /// Terminais/celular com WS na API (mesmo [activeCount] do rodape do PC1).
   int? get activeCount => _activeCount;
@@ -109,6 +110,7 @@ class LanApiEventHub extends ChangeNotifier {
           if (type == 'hello' ||
               type == 'entityChanged' ||
               type == 'novo_recado_chat' ||
+              type == 'autorizacao_pdv_resposta' ||
               type == 'presence') {
             _wsAtivo = true;
             _setOnline(true);
@@ -123,6 +125,13 @@ class LanApiEventHub extends ChangeNotifier {
           }
           if (type == 'novo_recado_chat') {
             _ultimoEventoTipo = 'novo_recado_chat';
+            _ultimoEventoPayload = Map<String, dynamic>.from(map);
+            _ultimaEntidade = 'chat_interno';
+            notifyListeners();
+            return;
+          }
+          if (type == 'autorizacao_pdv_resposta') {
+            _ultimoEventoTipo = 'autorizacao_pdv_resposta';
             _ultimoEventoPayload = Map<String, dynamic>.from(map);
             _ultimaEntidade = 'chat_interno';
             notifyListeners();

@@ -1,3 +1,5 @@
+import '../domain/autorizacao_pdv_chat.dart';
+
 /// Recado leve do mural/chat interno da loja.
 class MensagemInterna {
   MensagemInterna({
@@ -9,6 +11,8 @@ class MensagemInterna {
     this.pedidoNumero = 0,
     this.mencoes = const [],
     this.pendenteLocal = false,
+    this.tipo = kMensagemInternaTipoTexto,
+    this.payload = const {},
   });
 
   final int id;
@@ -21,6 +25,20 @@ class MensagemInterna {
   final List<String> mencoes;
   /// Ainda na fila local; ainda nao confirmado no servidor.
   final bool pendenteLocal;
+  /// `texto` (padrao) ou [kMensagemInternaTipoAutorizacaoPdv].
+  final String tipo;
+  final Map<String, dynamic> payload;
+
+  bool get ehAutorizacaoPdv => tipo == kMensagemInternaTipoAutorizacaoPdv;
+
+  AutorizacaoPdvChatPayload? get autorizacaoPdv {
+    if (!ehAutorizacaoPdv || payload.isEmpty) return null;
+    try {
+      return AutorizacaoPdvChatPayload.fromMap(payload);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -30,6 +48,8 @@ class MensagemInterna {
         if (clientId.isNotEmpty) 'clientId': clientId,
         if (pedidoNumero > 0) 'pedidoNumero': pedidoNumero,
         if (mencoes.isNotEmpty) 'mencoes': mencoes,
+        if (tipo.isNotEmpty && tipo != kMensagemInternaTipoTexto) 'tipo': tipo,
+        if (payload.isNotEmpty) 'payload': payload,
       };
 
   factory MensagemInterna.fromMap(Map<String, dynamic> map) {
@@ -56,6 +76,12 @@ class MensagemInterna {
         if (s.isNotEmpty) mencoes.add(s);
       }
     }
+    final payloadRaw = map['payload'];
+    final payload = <String, dynamic>{};
+    if (payloadRaw is Map) {
+      payload.addAll(Map<String, dynamic>.from(payloadRaw));
+    }
+    final tipo = (map['tipo'] ?? kMensagemInternaTipoTexto).toString().trim();
     return MensagemInterna(
       id: id,
       vendedor: (map['vendedor'] ?? '').toString().trim(),
@@ -65,22 +91,30 @@ class MensagemInterna {
       pedidoNumero: pedido,
       mencoes: List<String>.unmodifiable(mencoes),
       pendenteLocal: map['pendenteLocal'] == true,
+      tipo: tipo.isEmpty ? kMensagemInternaTipoTexto : tipo,
+      payload: Map<String, dynamic>.unmodifiable(payload),
     );
   }
 
   MensagemInterna copyWith({
     int? id,
     bool? pendenteLocal,
+    String? tipo,
+    Map<String, dynamic>? payload,
+    String? texto,
+    List<String>? mencoes,
   }) {
     return MensagemInterna(
       id: id ?? this.id,
       vendedor: vendedor,
-      texto: texto,
+      texto: texto ?? this.texto,
       dataHora: dataHora,
       clientId: clientId,
       pedidoNumero: pedidoNumero,
-      mencoes: mencoes,
+      mencoes: mencoes ?? this.mencoes,
       pendenteLocal: pendenteLocal ?? this.pendenteLocal,
+      tipo: tipo ?? this.tipo,
+      payload: payload ?? this.payload,
     );
   }
 }

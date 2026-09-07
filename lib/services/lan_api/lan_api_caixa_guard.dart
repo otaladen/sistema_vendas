@@ -2,6 +2,7 @@ import 'package:shelf/shelf.dart';
 
 import '../../data/app_config_repository.dart';
 import '../../data/caixa_sessao_repository.dart';
+import '../../domain/autorizacao_pdv_chat.dart';
 import 'lan_api_deps.dart';
 import 'lan_api_json.dart';
 
@@ -41,12 +42,27 @@ Future<Response?> lanApiExigirCaixaAberto(
   return null;
 }
 
-/// Valida login/senha de gerente (admin ou financeiro).
+/// Valida login/senha de gerente (admin ou financeiro) ou grant do chat interno.
 Future<Response?> lanApiExigirGerente(
   LanApiDeps d,
   Map<String, dynamic> body, {
   String mensagem = 'Autorizacao de gerente obrigatoria.',
 }) async {
+  final grantId = (body['autorizacaoChatId'] ?? '').toString().trim();
+  if (grantId.isNotEmpty) {
+    final msg = await d.mensagemInternaRepository.buscarAutorizacaoPdv(grantId);
+    final payload = msg?.autorizacaoPdv;
+    if (payload != null && payload.status == AutorizacaoPdvChatStatus.aprovada) {
+      return null;
+    }
+    return lanApiJson(
+      {
+        'error': 'Liberacao do chat ausente ou nao aprovada.',
+        'code': 'autorizacao_chat_invalida',
+      },
+      status: 403,
+    );
+  }
   final login = (body['gerenteLogin'] ?? '').toString().trim();
   final senha = (body['gerenteSenha'] ?? '').toString();
   if (login.isEmpty || senha.isEmpty) {

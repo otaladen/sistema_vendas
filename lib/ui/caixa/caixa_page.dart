@@ -931,6 +931,10 @@ class _CaixaPageState extends State<CaixaPage> {
         maximoPermitidoReais: maxAdicional,
         descontoSolicitadoReais: valor,
         formatarMoeda: _formatarMoeda,
+        vendaId: v.id,
+        carrinhoId: 'caixa-${v.id}',
+        descricaoAcao: 'Desconto no caixa de ${_formatarMoeda(valor)}',
+        valorOriginal: v.total,
       );
       if (authDesconto == null || !mounted) return;
     }
@@ -947,6 +951,7 @@ class _CaixaPageState extends State<CaixaPage> {
           gerenteLogin: authDesconto?.login,
           gerenteSenha: authDesconto?.senha,
           exigeGerente: authDesconto != null,
+          autorizacaoChatId: authDesconto?.solicitacaoId,
         );
       } else {
         widget.vendaRepository.aplicarDescontoNoOrcamento(v.id, valor);

@@ -70,6 +70,7 @@ import 'widgets/lan_api_feedback.dart';
 import 'widgets/produto_foto_view.dart';
 import 'widgets/produto/produto_cadastro_header.dart';
 import 'widgets/produto/produto_cadastro_rodape.dart';
+import 'widgets/mascaras_cadastro_input.dart';
 
 class _CadastroProdutoSalvarIntent extends Intent {
   const _CadastroProdutoSalvarIntent();
@@ -77,6 +78,12 @@ class _CadastroProdutoSalvarIntent extends Intent {
 
 class _CadastroProdutoCancelarIntent extends Intent {
   const _CadastroProdutoCancelarIntent();
+}
+
+class _CadastroProdutoSubAbaIntent extends Intent {
+  const _CadastroProdutoSubAbaIntent(this.index);
+
+  final int index;
 }
 
 enum _BaseCalculoPrecoProduto { custoDigitado, custoMedio }
@@ -257,7 +264,12 @@ class _ProdutosPageState extends State<ProdutosPage>
   bool _mostrarNomeImpressao = false;
   bool _mostrarApelidos = false;
   final _formKey = GlobalKey<FormState>();
+  final _formFiscalKey = GlobalKey<FormState>();
   bool _tentouSalvar = false;
+  static final _fmtNcm = NcmInputFormatter();
+  static final _fmtCest = CestInputFormatter();
+  static final _fmtGtin = GtinInputFormatter();
+  static final _fmtCfop = CfopInputFormatter();
   late final ProdutoImagemService _produtoImagemService;
   ProdutoSugestaoVendaRepository? _sugestaoVendaRepo;
   String _fotoPathAtual = '';
@@ -268,6 +280,23 @@ class _ProdutosPageState extends State<ProdutosPage>
   final FocusNode _codigoBarrasFocus = FocusNode(
     debugLabel: 'produtoCadastroBarras',
   );
+  final FocusNode _nomeFocus = FocusNode(debugLabel: 'produtoCadastroNome');
+  final FocusNode _apelidosFocus = FocusNode(
+    debugLabel: 'produtoCadastroApelidos',
+  );
+  final FocusNode _precoCustoFocus = FocusNode(
+    debugLabel: 'produtoCadastroPrecoCusto',
+  );
+  final FocusNode _preco1Focus = FocusNode(debugLabel: 'produtoCadastroPreco1');
+  final FocusNode _estoqueFocus = FocusNode(
+    debugLabel: 'produtoCadastroEstoque',
+  );
+  final FocusNode _skuFocus = FocusNode(debugLabel: 'produtoCadastroSku');
+  final FocusNode _marcaFocus = FocusNode(debugLabel: 'produtoCadastroMarca');
+  final FocusNode _localizacaoFocus = FocusNode(
+    debugLabel: 'produtoCadastroLocalizacao',
+  );
+  final FocusNode _ncmFocus = FocusNode(debugLabel: 'produtoCadastroNcm');
   int _historicoVersao = 0;
   final FocusNode _cadastroKeyboardFocusNode = FocusNode(
     debugLabel: 'produtosCadastroTeclado',
@@ -275,7 +304,16 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   String _status = '';
   bool _statusEhErro = false;
-  final NumberFormat _moedaBrFormatter = NumberFormat('#,##0.00', 'pt_BR');
+
+  /// Controllers que alimentam o resumo superior (SKU, preco, estoque).
+  Listenable get _headerCadastroListenable => Listenable.merge([
+        _nomeController,
+        _codigoInternoController,
+        _preco1Controller,
+        _estoqueController,
+        _quantidadeEmbalagemController,
+        _unidadeCompraController,
+      ]);
 
   bool get _terminalLeveApi =>
       widget.produtoRepository is ProdutoApiRepository;
@@ -337,6 +375,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     _subAbaCadastroController.addListener(_onSubAbaCadastroChanged);
     _nomeController.addListener(_sincronizarNomeImpressaoSeVinculado);
     _nomeImpressaoController.addListener(_atualizarVinculoNomeImpressao);
+    HardwareKeyboard.instance.addHandler(_handlerTeclasHardwareCadastroProduto);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focarBarrasSeNovoCadastro();
@@ -457,6 +496,136 @@ class _ProdutosPageState extends State<ProdutosPage>
     _codigoBarrasFocus.requestFocus();
   }
 
+  bool _gtinValidoParaConsultaBrasilApi(String codigo) {
+    final dig = normalizarCodigoBarrasConsulta(codigo);
+    return dig.length == 8 ||
+        dig.length == 12 ||
+        dig.length == 13 ||
+        dig.length == 14;
+  }
+
+  /// Troca sub-aba / expande secao colapsavel e posiciona o foco apos rebuild.
+  void _solicitarFocoCampo(
+    FocusNode node, {
+    int? subAba,
+    bool expandirApelidos = false,
+  }) {
+    final precisaRebuild =
+        (subAba != null && _subAbaCadastroController.index != subAba) ||
+        (expandirApelidos && !_mostrarApelidos);
+    if (subAba != null && _subAbaCadastroController.index != subAba) {
+      _irParaSubAbaCadastro(subAba);
+    }
+    if (expandirApelidos && !_mostrarApelidos) {
+      setState(() => _mostrarApelidos = true);
+    }
+
+    var framesRestantes = precisaRebuild ? 2 : 1;
+    void agendar() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        framesRestantes--;
+        if (framesRestantes > 0) {
+          agendar();
+          return;
+        }
+        node.requestFocus();
+      });
+    }
+
+    agendar();
+  }
+
+  Future<void> _onCodigoBarrasSubmitted(String _) async {
+    final codigo = _codigoBarrasController.text.trim();
+    if (_gtinValidoParaConsultaBrasilApi(codigo) && !_consultandoGtin) {
+      await _consultarGtinBrasilApi();
+    }
+    if (!mounted) return;
+    _solicitarFocoCampo(_nomeFocus);
+  }
+
+  void _onNomeSubmitted(String _) {
+    _solicitarFocoCampo(_apelidosFocus, expandirApelidos: true);
+  }
+
+  void _onApelidosSubmitted(String _) {
+    _solicitarFocoCampo(_precoCustoFocus, subAba: 1);
+  }
+
+  void _onPrecoCustoSubmitted(String _) {
+    _solicitarFocoCampo(_preco1Focus, subAba: 1);
+  }
+
+  void _onPreco1Submitted(String _) {
+    _solicitarFocoCampo(_estoqueFocus, subAba: 2);
+  }
+
+  FocusNode _primeiroCampoEditavelSubAba(int index) {
+    switch (index) {
+      case 0:
+        return _gerarSkuAutomatico ? _marcaFocus : _skuFocus;
+      case 1:
+        return _precoCustoFocus;
+      case 2:
+        return _localizacaoFocus;
+      case 3:
+        return _ncmFocus;
+      default:
+        return _codigoBarrasFocus;
+    }
+  }
+
+  void _navegarSubAbaCadastroPorAtalho(int index) {
+    if (index < 0 || index >= _subAbasCadastro.length) return;
+    _solicitarFocoCampo(
+      _primeiroCampoEditavelSubAba(index),
+      subAba: index,
+    );
+  }
+
+  /// Ctrl+1..4 no Windows: Shortcuts nao disparam com foco em TextField.
+  bool _atalhoCadastroProdutoAtivo() {
+    if (!mounted) return false;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return false;
+    if (!AppShellAbaVisibilidade.estaAtiva(context)) return false;
+    final tc = DefaultTabController.maybeOf(context);
+    if (tc != null && tc.index != 0) return false;
+    return true;
+  }
+
+  int? _indiceSubAbaDeTeclaComControl(LogicalKeyboardKey key) {
+    switch (key) {
+      case LogicalKeyboardKey.digit1:
+      case LogicalKeyboardKey.numpad1:
+        return 0;
+      case LogicalKeyboardKey.digit2:
+      case LogicalKeyboardKey.numpad2:
+        return 1;
+      case LogicalKeyboardKey.digit3:
+      case LogicalKeyboardKey.numpad3:
+        return 2;
+      case LogicalKeyboardKey.digit4:
+      case LogicalKeyboardKey.numpad4:
+        return 3;
+      default:
+        return null;
+    }
+  }
+
+  bool _handlerTeclasHardwareCadastroProduto(KeyEvent event) {
+    if (!mounted || event is! KeyDownEvent) return false;
+    if (!_atalhoCadastroProdutoAtivo()) return false;
+    if (!HardwareKeyboard.instance.isControlPressed) return false;
+
+    final subAba = _indiceSubAbaDeTeclaComControl(event.logicalKey);
+    if (subAba == null) return false;
+
+    _navegarSubAbaCadastroPorAtalho(subAba);
+    return true;
+  }
+
   bool _bloquearSyncProdutos() =>
       _temDadosNoFormulario() || SafeSyncRefreshMixin.focoEmCampoDeTexto();
 
@@ -496,6 +665,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwareCadastroProduto);
     final apiRepo = widget.produtoRepository;
     if (apiRepo is ProdutoApiRepository) {
       apiRepo.removeListener(_onProdutoApiChanged);
@@ -540,6 +710,15 @@ class _ProdutosPageState extends State<ProdutosPage>
     _subAbaCadastroController.removeListener(_onSubAbaCadastroChanged);
     _subAbaCadastroController.dispose();
     _codigoBarrasFocus.dispose();
+    _nomeFocus.dispose();
+    _apelidosFocus.dispose();
+    _precoCustoFocus.dispose();
+    _preco1Focus.dispose();
+    _estoqueFocus.dispose();
+    _skuFocus.dispose();
+    _marcaFocus.dispose();
+    _localizacaoFocus.dispose();
+    _ncmFocus.dispose();
     _cadastroKeyboardFocusNode.dispose();
     super.dispose();
   }
@@ -1125,7 +1304,7 @@ class _ProdutosPageState extends State<ProdutosPage>
           fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
             return TextField(
               controller: controller,
-              focusNode: focusNode,
+              focusNode: _marcaFocus,
               textCapitalization: TextCapitalization.words,
               decoration: _erpInputDecoration(
                 context,
@@ -1256,7 +1435,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       return InkWell(
         borderRadius: BorderRadius.circular(10),
         onTap: () => _irParaSubAbaCadastro(index),
-        child: Container(
+        child: Tooltip(
+          message: 'Ctrl+${index + 1}',
+          child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           decoration: BoxDecoration(
             color: selecionada ? cor : cs.surface,
@@ -1286,6 +1467,7 @@ class _ProdutosPageState extends State<ProdutosPage>
               ),
             ],
           ),
+        ),
         ),
       );
     }
@@ -1356,6 +1538,13 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Widget _buildProdutoCadastroHeaderPanel(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _headerCadastroListenable,
+      builder: (context, _) => _buildProdutoCadastroHeaderContent(context),
+    );
+  }
+
+  Widget _buildProdutoCadastroHeaderContent(BuildContext context) {
     final preco1 = _parseValorMonetario(_preco1Controller.text);
     final estoque = _lerEstoqueDoFormulario();
     final embCtx = _produtoEmbalagemContexto();
@@ -1542,18 +1731,25 @@ class _ProdutosPageState extends State<ProdutosPage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _erpFieldLabel('Codigo de barras (EAN)', context),
-                  TextField(
-                    focusNode: _codigoBarrasFocus,
-                    controller: _codigoBarrasController,
-                    textInputAction: TextInputAction.next,
-                    decoration: _erpInputDecoration(
-                      context,
-                      hint: 'Leia ou digite o GTIN',
-                      suffixIcon: _suffixCodigoBarrasComCamera(
-                        carregandoGtin: _consultandoGtin,
-                        onConsultarGtin: _consultandoGtin
-                            ? null
-                            : _consultarGtinBrasilApi,
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(1),
+                    child: TextField(
+                      focusNode: _codigoBarrasFocus,
+                      controller: _codigoBarrasController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [_fmtGtin],
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: _onCodigoBarrasSubmitted,
+                      decoration: _erpInputDecoration(
+                        context,
+                        hint: 'Leia ou digite o GTIN',
+                        helper: 'Somente numeros (8 a 14 digitos)',
+                        suffixIcon: _suffixCodigoBarrasComCamera(
+                          carregandoGtin: _consultandoGtin,
+                          onConsultarGtin: _consultandoGtin
+                              ? null
+                              : _consultarGtinBrasilApi,
+                        ),
                       ),
                     ),
                   ),
@@ -1563,21 +1759,25 @@ class _ProdutosPageState extends State<ProdutosPage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _erpFieldLabel('Nome do produto', context),
-                  TextFormField(
-                    controller: _nomeController,
-                    validator: _validarNome,
-                    textInputAction: TextInputAction.next,
-                    onChanged: (_) => setState(() {}),
-                    decoration: _erpInputDecoration(
-                      context,
-                      hint: 'Nome + Marca + Volume',
-                      suffixIcon: _suffixAcaoCampo(
-                        carregando: _consultandoGemini,
-                        tooltip: 'Padronizar nome, categoria e unidade com IA',
-                        icon: Icons.auto_awesome_outlined,
-                        onPressed: _consultandoGemini
-                            ? null
-                            : _padronizarProdutoComGemini,
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(2),
+                    child: TextFormField(
+                      focusNode: _nomeFocus,
+                      controller: _nomeController,
+                      validator: _validarNome,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: _onNomeSubmitted,
+                      decoration: _erpInputDecoration(
+                        context,
+                        hint: 'Nome + Marca + Volume',
+                        suffixIcon: _suffixAcaoCampo(
+                          carregando: _consultandoGemini,
+                          tooltip: 'Padronizar nome, categoria e unidade com IA',
+                          icon: Icons.auto_awesome_outlined,
+                          onPressed: _consultandoGemini
+                              ? null
+                              : _padronizarProdutoComGemini,
+                        ),
                       ),
                     ),
                   ),
@@ -1631,14 +1831,19 @@ class _ProdutosPageState extends State<ProdutosPage>
             onToggle: (v) => setState(() => _mostrarApelidos = v),
             child: Padding(
               padding: const EdgeInsets.only(top: _erpGap8),
-              child: TextField(
-                controller: _apelidosBuscaController,
-                minLines: 1,
-                maxLines: 3,
-                textInputAction: TextInputAction.next,
-                decoration: _erpInputDecoration(
-                  context,
-                  hint: 'Ex.: bacia sabara; cod fornecedor 8821',
+              child: FocusTraversalOrder(
+                order: const NumericFocusOrder(3),
+                child: TextField(
+                  focusNode: _apelidosFocus,
+                  controller: _apelidosBuscaController,
+                  minLines: 1,
+                  maxLines: 3,
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: _onApelidosSubmitted,
+                  decoration: _erpInputDecoration(
+                    context,
+                    hint: 'Ex.: bacia sabara; cod fornecedor 8821',
+                  ),
                 ),
               ),
             ),
@@ -1664,9 +1869,10 @@ class _ProdutosPageState extends State<ProdutosPage>
               SizedBox(
                 width: _wNcm,
                 child: TextFormField(
+                  focusNode: _ncmFocus,
                   controller: _ncmController,
                   keyboardType: TextInputType.number,
-                  maxLength: 10,
+                  inputFormatters: [_fmtNcm],
                   validator: _validarNcm,
                   onChanged: (_) {
                     setState(() {
@@ -1675,10 +1881,11 @@ class _ProdutosPageState extends State<ProdutosPage>
                       }
                       _aplicarCestSugeridoDoNcmSeVazio(_ncmController.text);
                     });
+                    _formFiscalKey.currentState?.validate();
                   },
                   decoration: _erpInputDecoration(
                     context,
-                    helper: '8 digitos — obrigatorio p/ NFC-e',
+                    helper: 'Formato 9999.99.99 — obrigatorio p/ NFC-e',
                     suffixIcon: _suffixConsultaBrasilApi(
                       carregando: _consultandoNcm,
                       tooltip: 'Conferir descricao oficial do NCM',
@@ -1876,6 +2083,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   void _resetarFormulario() {
     _formKey.currentState?.reset();
+    _formFiscalKey.currentState?.reset();
     setState(() {
       _historicoVersao++;
       _codigoInternoController.clear();
@@ -2765,20 +2973,30 @@ class _ProdutosPageState extends State<ProdutosPage>
               ),
             ),
             const SizedBox(height: _erpGap8),
-            TextFormField(
-              controller: controller,
-              readOnly: !_podeEditarPrecoProduto,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
+            FocusTraversalOrder(
+              order: NumericFocusOrder(
+                precoIndice == 1 ? 5.0 : 100.0 + precoIndice,
               ),
-              inputFormatters: [RealInputFormatter()],
-              validator: _validarPrecoTabela,
-              decoration: _erpInputDecoration(context).copyWith(
-                helperText: !_podeEditarPrecoProduto
-                    ? 'Sem permissao para editar precos'
-                    : null,
+              child: TextFormField(
+                focusNode: precoIndice == 1 ? _preco1Focus : null,
+                controller: controller,
+                readOnly: !_podeEditarPrecoProduto,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [RealInputFormatter()],
+                validator: _validarPrecoTabela,
+                textInputAction: precoIndice == 1
+                    ? TextInputAction.next
+                    : TextInputAction.done,
+                onFieldSubmitted: precoIndice == 1 ? _onPreco1Submitted : null,
+                decoration: _erpInputDecoration(context).copyWith(
+                  helperText: !_podeEditarPrecoProduto
+                      ? 'Sem permissao para editar precos'
+                      : null,
+                ),
+                onChanged: (_) => setState(() {}),
               ),
-              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: _erpGap8),
             Wrap(
@@ -2898,15 +3116,21 @@ class _ProdutosPageState extends State<ProdutosPage>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _erpFieldLabel('Preco de custo', context),
-                  TextFormField(
-                    controller: _precoCustoController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(4),
+                    child: TextFormField(
+                      focusNode: _precoCustoFocus,
+                      controller: _precoCustoController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: [RealInputFormatter()],
+                      validator: _validarPrecoCusto,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: _onPrecoCustoSubmitted,
+                      decoration: _erpInputDecoration(context),
+                      onChanged: (_) => setState(() {}),
                     ),
-                    inputFormatters: [RealInputFormatter()],
-                    validator: _validarPrecoCusto,
-                    decoration: _erpInputDecoration(context),
-                    onChanged: (_) => setState(() {}),
                   ),
                 ],
               );
@@ -3171,16 +3395,26 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
-  Widget _buildCardEmbalagemUnidade(BuildContext context) {
+  String _textoPreviewEmbalagem() {
     final uVenda = _normalizarUnidade(_unidadeSelecionada);
     final fator = _lerQuantidadeEmbalagem();
     final uCompraCodigo = _unidadeCompraNoFormulario();
     final uCompra = uCompraCodigo.isEmpty ? uVenda : uCompraCodigo;
-    final preview = fator <= 1 || (fator - 1).abs() < 0.0001
-        ? 'Sem conversao (1:1).'
-        : (_embalagemMultiplica
-              ? '1 $uCompra = ${fator == fator.roundToDouble() ? fator.toInt() : fator} $uVenda no estoque.'
-              : '1 $uCompra entra como 1 $uVenda (estoque ÷ $fator).');
+    if (fator <= 1 || (fator - 1).abs() < 0.0001) {
+      return 'Sem conversao (1:1).';
+    }
+    if (_embalagemMultiplica) {
+      final fatorTxt = fator == fator.roundToDouble()
+          ? fator.toInt().toString()
+          : fator.toString();
+      return '1 $uCompra = $fatorTxt $uVenda no estoque.';
+    }
+    return '1 $uCompra entra como 1 $uVenda (estoque ÷ $fator).';
+  }
+
+  Widget _buildCardEmbalagemUnidade(BuildContext context) {
+    final uVenda = _normalizarUnidade(_unidadeSelecionada);
+    final uCompraCodigo = _unidadeCompraNoFormulario();
     final opcoesCompra = _opcoesDropdownUnidadeCompra(uVenda);
     final valorCompraDropdown = opcoesCompra.contains(uCompraCodigo)
         ? uCompraCodigo
@@ -3245,7 +3479,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                   context,
                   helper: helperEmbalagem,
                 ),
-                onChanged: (_) => setState(() {}),
               ),
             ],
           ),
@@ -3308,12 +3541,18 @@ class _ProdutosPageState extends State<ProdutosPage>
           },
         ),
         const SizedBox(height: 4),
-        Text(
-          preview,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            fontWeight: FontWeight.w600,
-            fontSize: 12,
-            height: 1.25,
+        ListenableBuilder(
+          listenable: Listenable.merge([
+            _quantidadeEmbalagemController,
+            _unidadeCompraController,
+          ]),
+          builder: (context, _) => Text(
+            _textoPreviewEmbalagem(),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+              height: 1.25,
+            ),
           ),
         ),
       ],
@@ -3419,20 +3658,32 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   String? _validarNcm(String? value) {
-    final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
+    final digits = somenteDigitos(value ?? '');
     if (digits.isEmpty) {
       return 'NCM obrigatorio para NFC-e (8 digitos).';
     }
-    if (digits.length != 8) {
+    if (digits.length < 8) {
+      return 'NCM incompleto (${digits.length}/8 digitos).';
+    }
+    if (digits.length > 8) {
       return 'NCM deve ter exatamente 8 digitos.';
     }
     return null;
   }
 
-  String _formatarNcmExibicao(String digitos) {
-    final d = digitos.replaceAll(RegExp(r'\D'), '');
-    if (d.length != 8) return digitos.trim();
-    return '${d.substring(0, 4)}.${d.substring(4, 6)}.${d.substring(6, 8)}';
+  String _formatarNcmExibicao(String digitos) => NcmInputFormatter.formatar(
+    digitos,
+  );
+
+  String _formatarCestExibicao(String digitos) => CestInputFormatter.formatar(
+    digitos,
+  );
+
+  void _aplicarMascarasFiscaisNosControllers() {
+    aplicarMascaraNcm(_ncmController, _fmtNcm);
+    aplicarMascaraCest(_cestController, _fmtCest);
+    aplicarMascaraCfop(_cfopVendaController, _fmtCfop);
+    aplicarMascaraGtin(_codigoBarrasController, _fmtGtin);
   }
 
   Widget? _suffixAcaoCampo({
@@ -3712,7 +3963,7 @@ class _ProdutosPageState extends State<ProdutosPage>
             ? 'NCM valido: ${_formatarNcmExibicao(ncm8)}'
             : 'NCM valido: ${dados.descricao.trim()}';
         if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
-          _cestController.text = dados.cest;
+          _cestController.text = _formatarCestExibicao(dados.cest);
         }
         _aplicarCestSugeridoDoNcmSeVazio(ncm8);
       });
@@ -3734,7 +3985,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
     final sugerido = NcmCestSugestao.sugerirCest(ncmDigitos);
     if (sugerido == null || sugerido.length != 7) return false;
-    _cestController.text = sugerido;
+    _cestController.text = _formatarCestExibicao(sugerido);
     // Itens com CEST tipico de materiais costumam ser ST no cadastro da loja.
     if (_grupoTributarioSelecionado ==
         GrupoTributarioProduto.tributado.codigo) {
@@ -3825,7 +4076,7 @@ class _ProdutosPageState extends State<ProdutosPage>
           _ncmController.text = _formatarNcmExibicao(model.ncm);
         }
         if (model.cest.length == 7) {
-          _cestController.text = model.cest;
+          _cestController.text = _formatarCestExibicao(model.cest);
         }
         _grupoTributarioSelecionado = model.grupoTributario;
         if (model.ncm.length == 8) {
@@ -3989,7 +4240,7 @@ class _ProdutosPageState extends State<ProdutosPage>
             ? 'NCM valido: $codigoFmt'
             : 'NCM valido: $descricaoOficial';
         if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
-          _cestController.text = dados.cest;
+          _cestController.text = _formatarCestExibicao(dados.cest);
         }
         _aplicarCestSugeridoDoNcmSeVazio(
           dados.codigoDigitos.isNotEmpty ? dados.codigoDigitos : digitos,
@@ -4016,7 +4267,10 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   String? _validarCest(String? value) {
-    final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
+    final digits = somenteDigitos(value ?? '');
+    if (digits.isNotEmpty && digits.length < 7) {
+      return 'CEST incompleto (${digits.length}/7 digitos).';
+    }
     return ProdutoFiscalCatalog.validarCestParaGrupo(
       cestDigitos: digits,
       grupoTributarioCodigo: _grupoTributarioSelecionado,
@@ -4024,12 +4278,30 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   String? _validarCfopVenda(String? value) {
-    final v = (value ?? '').trim();
-    if (v.isEmpty) return null;
-    if (!RegExp(r'^\d{4}$').hasMatch(v)) {
+    final digits = somenteDigitos(value ?? '');
+    if (digits.isEmpty) return null;
+    if (digits.length < 4) {
+      return 'CFOP incompleto (${digits.length}/4 digitos).';
+    }
+    if (digits.length > 4) {
       return 'CFOP deve ter 4 digitos ou deixe vazio (automatico).';
     }
     return null;
+  }
+
+  bool _validarCamposFiscaisParaSalvar() {
+    final ncmErr = _validarNcm(_ncmController.text);
+    final cestErr = _validarCest(_cestController.text);
+    final cfopErr = _validarCfopVenda(_cfopVendaController.text);
+    if (ncmErr == null && cestErr == null && cfopErr == null) {
+      return true;
+    }
+    _irParaSubAbaCadastro(3);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _formFiscalKey.currentState?.validate();
+    });
+    return false;
   }
 
   double? _parseValorMonetario(String texto) {
@@ -4299,7 +4571,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   String _formatarValorMonetario(double valor) {
-    return _moedaBrFormatter.format(valor);
+    return RealInputFormatter.moedaBr.format(valor);
   }
 
   Future<String> _resolverCodigoInternoAoSalvar() async {
@@ -4475,7 +4747,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
 
     final formValido = _formKey.currentState?.validate() ?? false;
-    if (!formValido) {
+    if (!formValido || !_validarCamposFiscaisParaSalvar()) {
       final sku = _codigoInternoController.text.trim();
       final conflito = !_gerarSkuAutomatico
           ? _outroProdutoComMesmoSku(sku)
@@ -4900,6 +5172,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _ncmController.text = produto.ncm;
       _cestController.text = produto.cest;
       _cfopVendaController.text = produto.cfopVenda;
+      _aplicarMascarasFiscaisNosControllers();
       _grupoTributarioSelecionado = grupoTributarioProdutoDeString(
         produto.grupoTributario,
       ).codigo;
@@ -5879,6 +6152,14 @@ class _ProdutosPageState extends State<ProdutosPage>
                     _CadastroProdutoSalvarIntent(),
                 SingleActivator(LogicalKeyboardKey.escape):
                     _CadastroProdutoCancelarIntent(),
+                SingleActivator(LogicalKeyboardKey.digit1, control: true):
+                    _CadastroProdutoSubAbaIntent(0),
+                SingleActivator(LogicalKeyboardKey.digit2, control: true):
+                    _CadastroProdutoSubAbaIntent(1),
+                SingleActivator(LogicalKeyboardKey.digit3, control: true):
+                    _CadastroProdutoSubAbaIntent(2),
+                SingleActivator(LogicalKeyboardKey.digit4, control: true):
+                    _CadastroProdutoSubAbaIntent(3),
               },
               child: Actions(
                 actions: <Type, Action<Intent>>{
@@ -5897,6 +6178,15 @@ class _ProdutosPageState extends State<ProdutosPage>
                           final tc = DefaultTabController.maybeOf(tabCtx);
                           if (tc != null && tc.index != 0) return null;
                           _limparFormularioComConfirmacao();
+                          return null;
+                        },
+                      ),
+                  _CadastroProdutoSubAbaIntent:
+                      CallbackAction<_CadastroProdutoSubAbaIntent>(
+                        onInvoke: (intent) {
+                          final tc = DefaultTabController.maybeOf(tabCtx);
+                          if (tc != null && tc.index != 0) return null;
+                          _navegarSubAbaCadastroPorAtalho(intent.index);
                           return null;
                         },
                       ),
@@ -5997,7 +6287,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                 right: _erpScrollbarGutter,
                                                 bottom: _erpGap16,
                                               ),
-                                              child: Column(
+                                              child: FocusTraversalGroup(
+                                                policy: OrderedTraversalPolicy(),
+                                                child: Column(
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment.stretch,
                                                 children: [
@@ -6048,6 +6340,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                         context,
                                                                       ),
                                                                       TextFormField(
+                                                                        focusNode:
+                                                                            _skuFocus,
                                                                         controller:
                                                                             _codigoInternoController,
                                                                         enabled:
@@ -6554,7 +6848,17 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                     ),
                                                   if (_subAbaCadastroController
                                                           .index ==
-                                                      3) ...[
+                                                      3)
+                                                    Form(
+                                                      key: _formFiscalKey,
+                                                      autovalidateMode:
+                                                          AutovalidateMode
+                                                              .onUserInteraction,
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
                                                     _erpSurfaceCard(
                                                       context: context,
                                                       title: 'NCM (NFC-e)',
@@ -6588,9 +6892,15 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                 keyboardType:
                                                                     TextInputType
                                                                         .number,
-                                                                maxLength: 9,
+                                                                inputFormatters: [
+                                                                  _fmtCest,
+                                                                ],
                                                                 validator:
                                                                     _validarCest,
+                                                                onChanged: (_) =>
+                                                                    _formFiscalKey
+                                                                        .currentState
+                                                                        ?.validate(),
                                                                 decoration: _erpInputDecoration(
                                                                   context,
                                                                   helper:
@@ -6599,8 +6909,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                           ) ==
                                                                           GrupoTributarioProduto
                                                                               .substituicaoTributaria
-                                                                      ? 'Obrigatorio para ST (7 digitos)'
-                                                                      : '7 digitos — ST / construcao',
+                                                                      ? 'Formato 99.999.99 — obrigatorio p/ ST'
+                                                                      : 'Formato 99.999.99 — ST / construcao',
                                                                 ),
                                                               ),
                                                             ],
@@ -6646,7 +6956,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                       _grupoTributarioSelecionado =
                                                                           value;
                                                                     });
-                                                                    _formKey
+                                                                    _formFiscalKey
                                                                         .currentState
                                                                         ?.validate();
                                                                   }
@@ -6825,14 +7135,20 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                 keyboardType:
                                                                     TextInputType
                                                                         .number,
-                                                                maxLength: 4,
+                                                                inputFormatters: [
+                                                                  _fmtCfop,
+                                                                ],
                                                                 validator:
                                                                     _validarCfopVenda,
+                                                                onChanged: (_) =>
+                                                                    _formFiscalKey
+                                                                        .currentState
+                                                                        ?.validate(),
                                                                 decoration:
                                                                     _erpInputDecoration(
                                                                       context,
                                                                       helper:
-                                                                          'Vazio = automatico (ex.: 5102 / 5405 na BA)',
+                                                                          '4 digitos ou vazio (automatico ex.: 5102 / 5405)',
                                                                     ),
                                                               ),
                                                             ],
@@ -6847,7 +7163,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                         ),
                                                       ],
                                                     ),
-                                                  ],
+                                                        ],
+                                                      ),
+                                                    ),
                                                   if (_subAbaCadastroController
                                                           .index ==
                                                       2) ...[
@@ -6868,6 +7186,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                               context,
                                                             ),
                                                             TextField(
+                                                              focusNode:
+                                                                  _localizacaoFocus,
                                                               controller:
                                                                   _localizacaoController,
                                                               decoration:
@@ -7068,22 +7388,33 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     'Estoque fisico',
                                                                     context,
                                                                   ),
-                                                                  TextField(
-                                                                    controller:
-                                                                        _estoqueController,
-                                                                    keyboardType:
-                                                                        TextInputType.numberWithOptions(
+                                                                  FocusTraversalOrder(
+                                                                    order: const NumericFocusOrder(
+                                                                      6,
+                                                                    ),
+                                                                    child: ListenableBuilder(
+                                                                      listenable:
+                                                                          _estoqueController,
+                                                                      builder: (context, _) =>
+                                                                          TextField(
+                                                                        focusNode:
+                                                                            _estoqueFocus,
+                                                                        controller:
+                                                                            _estoqueController,
+                                                                        keyboardType:
+                                                                            TextInputType.numberWithOptions(
                                                                           decimal:
                                                                               _estoqueFormularioAceitaDecimal,
                                                                         ),
-                                                                    onChanged: (_) =>
-                                                                        setState(
-                                                                          () {},
+                                                                        textInputAction:
+                                                                            TextInputAction
+                                                                                .done,
+                                                                        decoration: _erpInputDecoration(
+                                                                          context,
+                                                                          helper:
+                                                                              _helperEstoqueFisicoCadastro(),
                                                                         ),
-                                                                    decoration: _erpInputDecoration(
-                                                                      context,
-                                                                      helper:
-                                                                          _helperEstoqueFisicoCadastro(),
+                                                                      ),
                                                                     ),
                                                                   ),
                                                                 ],
@@ -7107,10 +7438,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     keyboardType:
                                                                         TextInputType
                                                                             .number,
-                                                                    onChanged: (_) =>
-                                                                        setState(
-                                                                          () {},
-                                                                        ),
                                                                     decoration:
                                                                         _erpInputDecoration(
                                                                           context,
@@ -7139,10 +7466,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     keyboardType:
                                                                         TextInputType
                                                                             .number,
-                                                                    onChanged: (_) =>
-                                                                        setState(
-                                                                          () {},
-                                                                        ),
                                                                     decoration:
                                                                         _erpInputDecoration(
                                                                           context,
@@ -7173,10 +7496,6 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     keyboardType:
                                                                         TextInputType
                                                                             .number,
-                                                                    onChanged: (_) =>
-                                                                        setState(
-                                                                          () {},
-                                                                        ),
                                                                     decoration:
                                                                         _erpInputDecoration(
                                                                           context,
@@ -7267,6 +7586,7 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                 ],
                                               ),
                                             ),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -7322,6 +7642,8 @@ class _ProdutosPageState extends State<ProdutosPage>
 }
 
 class RealInputFormatter extends TextInputFormatter {
+  static final NumberFormat moedaBr = NumberFormat('#,##0.00', 'pt_BR');
+
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
@@ -7334,8 +7656,7 @@ class RealInputFormatter extends TextInputFormatter {
 
     final valorCentavos = int.parse(apenasNumeros);
     final valor = valorCentavos / 100;
-    final formatador = NumberFormat('#,##0.00', 'pt_BR');
-    final textoFormatado = formatador.format(valor);
+    final textoFormatado = moedaBr.format(valor);
 
     return TextEditingValue(
       text: textoFormatado,

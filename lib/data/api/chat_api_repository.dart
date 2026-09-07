@@ -21,19 +21,36 @@ class ChatApiRepository {
     required String vendedor,
     required String texto,
     String clientId = '',
+    String tipo = '',
+    Map<String, dynamic>? payload,
+    List<String>? mencoes,
   }) async {
     final criada = await _client.chatEnviar(
       vendedor: vendedor,
       texto: texto,
       clientId: clientId,
+      tipo: tipo,
+      payload: payload,
+      mencoes: mencoes,
     );
-    final idx = _lista.indexWhere((m) => m.id == criada.id);
-    if (idx >= 0) {
-      _lista[idx] = criada;
-    } else {
-      _lista = [..._lista, criada];
-    }
+    aplicarEvento(criada);
     return criada;
+  }
+
+  Future<MensagemInterna> responderAutorizacaoPdv({
+    required String solicitacaoId,
+    required String acao,
+    required String login,
+    String motivo = '',
+  }) async {
+    final atualizada = await _client.chatAutorizacaoResponder(
+      solicitacaoId: solicitacaoId,
+      acao: acao,
+      login: login,
+      motivo: motivo,
+    );
+    aplicarEvento(atualizada);
+    return atualizada;
   }
 
   void aplicarEvento(MensagemInterna msg) {

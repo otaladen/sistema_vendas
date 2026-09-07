@@ -13,6 +13,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     super.key,
     required this.nomeProduto,
     this.codigoProduto = '',
+    this.unidadeMedida = '',
     required this.rotuloPreco,
     required this.precoUnitarioFormatado,
     required this.subtotalFormatado,
@@ -45,6 +46,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
 
   final String nomeProduto;
   final String codigoProduto;
+  final String unidadeMedida;
   final bool emPromocao;
   final bool botaFora;
   final bool precoManual;
@@ -163,6 +165,24 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     );
   }
 
+  Widget _buildColunaUnidadeMedida(ThemeData theme, ColorScheme scheme) {
+    final unidade = unidadeMedida.trim();
+    if (unidade.isEmpty) return const SizedBox.shrink();
+
+    return Text(
+      unidade,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: theme.textTheme.bodySmall?.copyWith(
+        fontWeight: FontWeight.w600,
+        fontSize: 12,
+        height: 1.1,
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.88),
+      ),
+    );
+  }
+
   Widget _buildNomeProduto(ThemeData theme, {required double fontSize}) {
     return Text(
       nomeProduto,
@@ -251,6 +271,10 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
             SizedBox(
               width: PdvCarrinhoLinhaColunas.larguraCodigo,
               child: Center(child: _buildColunaCodigo(theme, scheme)),
+            ),
+            SizedBox(
+              width: PdvCarrinhoLinhaColunas.larguraUnidadeMedida,
+              child: Center(child: _buildColunaUnidadeMedida(theme, scheme)),
             ),
             Expanded(
               child: _buildLinhaIdentificacaoProduto(
@@ -380,6 +404,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     return PdvCarrinhoLinhaColunas.linha(
       entrega: _buildBotaoEntrega(),
       codigo: _buildColunaCodigo(theme, scheme),
+      unidadeMedida: _buildColunaUnidadeMedida(theme, scheme),
       produto: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,

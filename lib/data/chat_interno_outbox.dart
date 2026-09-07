@@ -9,27 +9,52 @@ class ChatInternoPendente {
     required this.vendedor,
     required this.texto,
     required this.criadoEm,
+    this.tipo = '',
+    this.payload = const {},
+    this.mencoes = const [],
   });
 
   final String clientId;
   final String vendedor;
   final String texto;
   final DateTime criadoEm;
+  final String tipo;
+  final Map<String, dynamic> payload;
+  final List<String> mencoes;
 
   Map<String, dynamic> toMap() => {
         'clientId': clientId,
         'vendedor': vendedor,
         'texto': texto,
         'criadoEm': criadoEm.toUtc().toIso8601String(),
+        if (tipo.isNotEmpty) 'tipo': tipo,
+        if (payload.isNotEmpty) 'payload': payload,
+        if (mencoes.isNotEmpty) 'mencoes': mencoes,
       };
 
   factory ChatInternoPendente.fromMap(Map<String, dynamic> map) {
+    final payloadRaw = map['payload'];
+    final payload = <String, dynamic>{};
+    if (payloadRaw is Map) {
+      payload.addAll(Map<String, dynamic>.from(payloadRaw));
+    }
+    final mencoesRaw = map['mencoes'];
+    final mencoes = <String>[];
+    if (mencoesRaw is List) {
+      for (final e in mencoesRaw) {
+        final s = e.toString().trim();
+        if (s.isNotEmpty) mencoes.add(s);
+      }
+    }
     return ChatInternoPendente(
       clientId: (map['clientId'] ?? '').toString(),
       vendedor: (map['vendedor'] ?? '').toString(),
       texto: (map['texto'] ?? '').toString(),
       criadoEm: DateTime.tryParse('${map['criadoEm']}')?.toUtc() ??
           DateTime.now().toUtc(),
+      tipo: (map['tipo'] ?? '').toString().trim(),
+      payload: payload,
+      mencoes: mencoes,
     );
   }
 }
