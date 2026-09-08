@@ -29,10 +29,13 @@ class MensagemInterna {
   final String tipo;
   final Map<String, dynamic> payload;
 
-  bool get ehAutorizacaoPdv => tipo == kMensagemInternaTipoAutorizacaoPdv;
+  bool get ehAutorizacaoPdv =>
+      tipo == kMensagemInternaTipoAutorizacaoPdv ||
+      payload['solicitacaoId']?.toString().trim().isNotEmpty == true;
 
   AutorizacaoPdvChatPayload? get autorizacaoPdv {
-    if (!ehAutorizacaoPdv || payload.isEmpty) return null;
+    if (payload.isEmpty) return null;
+    if (!ehAutorizacaoPdv) return null;
     try {
       return AutorizacaoPdvChatPayload.fromMap(payload);
     } catch (_) {

@@ -155,11 +155,49 @@ class NfeDuplicataXml {
   /// Conteúdo de `nDup` (ex.: `001/003` ou `001`).
   final String numeroParcela;
 
-  /// Conteúdo de `dVenc` (apenas calendário, armazenado em UTC meia-noite).
+  /// Conteúdo de `dVenc` (data civil local, sem conversão de fuso).
   final DateTime dataVencimento;
 
   /// Conteúdo de `vDup`.
   final double valorParcela;
+
+  NfeDuplicataXml copyWith({
+    String? numeroParcela,
+    DateTime? dataVencimento,
+    double? valorParcela,
+  }) =>
+      NfeDuplicataXml(
+        numeroParcela: numeroParcela ?? this.numeroParcela,
+        dataVencimento: dataVencimento ?? this.dataVencimento,
+        valorParcela: valorParcela ?? this.valorParcela,
+      );
+
+  /// Interpreta `dVenc` (`YYYY-MM-DD`, prefixo ISO ou `dd/MM/yyyy`) como data civil local.
+  static DateTime parseDataVencimento(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) {
+      throw const FormatException('Data de vencimento da duplicata vazia.');
+    }
+    final ymd = RegExp(r'^(\d{4})-(\d{2})-(\d{2})');
+    final mYmd = ymd.firstMatch(t);
+    if (mYmd != null) {
+      return DateTime(
+        int.parse(mYmd.group(1)!),
+        int.parse(mYmd.group(2)!),
+        int.parse(mYmd.group(3)!),
+      );
+    }
+    final slash = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$');
+    final mSlash = slash.firstMatch(t);
+    if (mSlash != null) {
+      return DateTime(
+        int.parse(mSlash.group(3)!),
+        int.parse(mSlash.group(2)!),
+        int.parse(mSlash.group(1)!),
+      );
+    }
+    throw FormatException('Data de vencimento da duplicata invalida: "$raw"');
+  }
 }
 
 /// Resultado do parse da NF-e (antes da conferencia / persistencia).

@@ -15,6 +15,7 @@ import '../../../domain/autorizacao_pdv_chat.dart';
 import '../../../domain/autorizacao_pdv_chat_servico.dart';
 import '../../../domain/chat_interno_parser.dart';
 import '../../../model/mensagem_interna.dart';
+import '../../../model/usuario_sistema.dart';
 import '../../../services/lan_api_server.dart';
 import 'autorizacao_pdv_chat_hub.dart';
 
@@ -29,6 +30,7 @@ class ChatInternoHub extends ChangeNotifier {
   String _autorPadrao = '';
   String _perfilUsuario = '';
   String _loginUsuario = '';
+  UsuarioSistema? _usuarioLogado;
   bool _painelAberto = false;
   int _naoLidos = 0;
   int _ultimoIdVisto = 0;
@@ -47,6 +49,7 @@ class ChatInternoHub extends ChangeNotifier {
   String get autorPadrao => _autorPadrao;
   String get perfilUsuario => _perfilUsuario;
   String get loginUsuario => _loginUsuario;
+  UsuarioSistema? get usuarioLogado => _usuarioLogado;
   bool get configurado => _localRepo != null || _apiRepo != null;
   bool get painelAberto => _painelAberto;
   int get ultimoIdVisto => _ultimoIdVisto;
@@ -56,16 +59,23 @@ class ChatInternoHub extends ChangeNotifier {
     MensagemInternaRepository? localRepo,
     ChatApiRepository? apiRepo,
     UsuarioRepository? usuarioRepo,
+    UsuarioSistema? usuarioLogado,
     required String autorPadrao,
     String perfilUsuario = '',
     String loginUsuario = '',
   }) {
     _localRepo = localRepo;
     _apiRepo = apiRepo;
-    _usuarioRepo = usuarioRepo;
+    _usuarioRepo = usuarioRepo ??
+        (usuarioLogado != null && apiRepo == null ? UsuarioRepository() : null);
+    _usuarioLogado = usuarioLogado;
     _autorPadrao = autorPadrao.trim();
-    _perfilUsuario = perfilUsuario.trim();
-    _loginUsuario = loginUsuario.trim();
+    _perfilUsuario = perfilUsuario.trim().isNotEmpty
+        ? perfilUsuario.trim()
+        : (usuarioLogado?.perfil ?? '');
+    _loginUsuario = loginUsuario.trim().isNotEmpty
+        ? loginUsuario.trim()
+        : (usuarioLogado?.login ?? '');
     AutorizacaoPdvChatHub.instance.garantirOuvintes();
     _garantirOuvinteWs();
     if (localRepo != null) {
@@ -76,6 +86,33 @@ class ChatInternoHub extends ChangeNotifier {
       (_) => unawaited(flushOutbox()),
     );
     unawaited(_iniciar());
+  }
+
+  /// Logout: para timers/ouvintes da sessao sem derrubar o app.
+  void encerrarSessao() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    if (_ouvindoWs) {
+      LanApiEventHub.instance.removeListener(_onWs);
+      _ouvindoWs = false;
+    }
+    if (_ouvindoServidorLocal) {
+      LanApiServerHub.instance.removeEventoListener(_onEventoServidorLocal);
+      _ouvindoServidorLocal = false;
+    }
+    _localRepo = null;
+    _apiRepo = null;
+    _usuarioRepo = null;
+    _usuarioLogado = null;
+    _autorPadrao = '';
+    _perfilUsuario = '';
+    _loginUsuario = '';
+    _painelAberto = false;
+    _naoLidos = 0;
+    _mensagens = [];
+    try {
+      notifyListeners();
+    } catch (_) {}
   }
 
   Future<void> _iniciar() async {

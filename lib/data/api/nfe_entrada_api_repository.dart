@@ -294,10 +294,9 @@ class NfeEntradaApiRepository {
               final dm = Map<String, dynamic>.from(e);
               return NfeDuplicataXml(
                 numeroParcela: (dm['numeroParcela'] ?? '').toString(),
-                dataVencimento: DateTime.tryParse(
-                      (dm['dataVencimento'] ?? '').toString(),
-                    )?.toUtc() ??
-                    DateTime.now().toUtc(),
+                dataVencimento: NfeDuplicataXml.parseDataVencimento(
+                  (dm['dataVencimento'] ?? '').toString(),
+                ),
                 valorParcela: (dm['valorParcela'] as num?)?.toDouble() ?? 0,
               );
             }).toList()

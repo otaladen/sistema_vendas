@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/lan_api_event_hub.dart';
 import '../../domain/entregas/buscar_na_loja.dart';
+import '../../domain/entregas/carreto_saida_produto_orfao.dart';
 import '../../domain/entregas/romaneio_carga_merge.dart';
 import '../../model/item_venda.dart';
 import '../../model/venda.dart';
@@ -270,6 +271,14 @@ class _ConferenciaCargaConsolidadaListaState
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.green.shade800,
                           fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                if (l.produtoNaoEncontradoNoCadastro)
+                  Text(
+                    RomaneioProdutoOrfaoHelper.alertaProdutoNaoEncontrado,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.amber.shade900,
+                          fontStyle: FontStyle.italic,
                         ),
                   ),
               ],

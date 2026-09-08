@@ -1,6 +1,7 @@
 import 'package:objectbox/objectbox.dart';
 
 import '../domain/retirada_parcial_evento.dart';
+import '../domain/entregas/carreto_saida_produto_orfao.dart';
 import 'venda.dart';
 
 @Entity()
@@ -38,6 +39,7 @@ class HistoricoEntregaEventos {
   static const podEntrega = 'pod_entrega';
   static const naoEntregue = 'entrega_evento_nao_entregue';
   static const buscarNaLoja = 'entrega_evento_buscar_na_loja';
+  static const carretoSaidaProdutoOrfao = 'carreto_saida_produto_orfao';
 
   static bool ehEventoOcorrencia(String statusNovo) {
     switch (statusNovo) {
@@ -49,6 +51,7 @@ class HistoricoEntregaEventos {
       case podEntrega:
       case naoEntregue:
       case buscarNaLoja:
+      case carretoSaidaProdutoOrfao:
         return true;
       default:
         return false;
@@ -61,6 +64,10 @@ class HistoricoEntregaEventos {
 
   /// Texto humano do detalhe (JSON estruturado nas baixas de patio).
   static String textoDetalhe(String statusNovo, String statusAnterior) {
+    if (statusNovo == carretoSaidaProdutoOrfao) {
+      final ev = CarretoSaidaProdutoOrfaoEvento.tryParse(statusAnterior);
+      if (ev != null) return ev.textoHumano;
+    }
     if (ehEventoRetirada(statusNovo)) {
       final ev = RetiradaParcialEvento.tryParse(statusAnterior);
       if (ev != null) return ev.textoHumano;
@@ -96,6 +103,8 @@ class HistoricoEntregaEventos {
         return 'Nao entregue';
       case buscarNaLoja:
         return 'Buscar nesta loja';
+      case carretoSaidaProdutoOrfao:
+        return 'Saida carreto (produto excluido)';
       case 'pendente':
         return 'Pendente';
       case 'roteirizada':

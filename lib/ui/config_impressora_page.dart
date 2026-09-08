@@ -225,6 +225,31 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
                     if (v != null) setState(() => _modoImpressaoBalcao = v);
                   },
           ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.lightbulb_outline,
+                size: 18,
+                color: cs.primary.withValues(alpha: 0.85),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Para impressoras compartilhadas na rede (USB conectada a '
+                  'outro PC), utilize o Modo PDF / Windows Print Manager. '
+                  'O modo ESC/POS direto via spooler do Windows e bloqueado '
+                  'em conexoes de rede por seguranca do sistema operacional '
+                  '(CVE-2021-1678).',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurface.withValues(alpha: 0.72),
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

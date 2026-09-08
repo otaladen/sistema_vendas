@@ -4,8 +4,10 @@ import '../data/objectbox.dart';
 import '../data/produto_busca_util.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_venda_helper.dart';
-import '../domain/entregas/loja_origem_mercadoria.dart';
 import '../domain/entregas/buscar_na_loja.dart';
+import '../domain/entregas/carreto_saida_produto_orfao.dart';
+import '../domain/entregas/loja_origem_mercadoria.dart';
+import '../domain/item_venda_produto_orfao.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../domain/produto_estoque_sync.dart';
@@ -79,6 +81,13 @@ class GerenciadorEstoqueService {
     } catch (_) {
       return 0;
     }
+  }
+
+  bool _itemProdutoOrfao(ItemVenda item) {
+    return ItemVendaProdutoOrfaoHelper.itemSemProdutoVinculado(
+      item,
+      obterProduto: (id) => _db.produtoBox.get(id),
+    );
   }
 
   Produto? _produtoPorNomeSnapshot(String nome) {
@@ -665,7 +674,7 @@ class GerenciadorEstoqueService {
       armazenado = item.quantidadeAindaNoCarretoAntesSaida;
     }
     return ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
-      produto: item.produto.target,
+      produto: item.produtoOuNull,
       quantidadeArmazenada: armazenado,
     );
   }
@@ -687,7 +696,7 @@ class GerenciadorEstoqueService {
             LojaOrigemMercadoria.ehMisto(origem));
     if (recorteConfirmado) {
       final emEstoque = ProdutoEmbalagem.unidadeEstoqueDeQuantidadeArmazenada(
-        produto: item.produto.target,
+        produto: item.produtoOuNull,
         quantidadeArmazenada: qBuscar,
       );
       if (emEstoque < 0) return 0;
@@ -705,14 +714,10 @@ class GerenciadorEstoqueService {
     for (final item in venda.itens) {
       final q = quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
-      final produto = item.produto.target;
-      final pid = produto?.id ?? item.produto.targetId;
-      if (pid <= 0) {
-        throw StateError(
-          'Item "${item.nomeProduto}" sem produto vinculado — '
-          'nao e possivel despachar.',
-        );
-      }
+      if (_itemProdutoOrfao(item)) continue;
+      final produto = item.produtoOuNull;
+      final pid = produto?.id ?? _produtoIdDoItem(item);
+      if (pid <= 0) continue;
       final nome = produto?.nome ?? item.nomeProduto;
       final atual = porProduto[pid];
       porProduto[pid] = (
@@ -726,7 +731,7 @@ class GerenciadorEstoqueService {
     for (final item in venda.itens) {
       final qFisico = quantidadeFisicaDestaLojaCarreto(venda, item);
       if (qFisico <= 0) continue;
-      final pid = item.produto.target?.id ?? item.produto.targetId;
+      final pid = item.produtoOuNull?.id ?? _produtoIdDoItem(item);
       if (pid <= 0) continue;
       fisicoPorProduto[pid] = (fisicoPorProduto[pid] ?? 0) + qFisico;
     }
@@ -763,14 +768,26 @@ class GerenciadorEstoqueService {
     }
   }
 
-  void baixarEstoqueCarretoAoMarcarSaida(
+  List<CarretoSaidaProdutoOrfaoLinha> baixarEstoqueCarretoAoMarcarSaida(
     Venda venda, {
     bool permitirVendaSemEstoque = true,
   }) {
     final falhas = <String>[];
+    final orfaos = <CarretoSaidaProdutoOrfaoLinha>[];
     for (final item in venda.itens) {
       final q = quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
+      if (_itemProdutoOrfao(item)) {
+        orfaos.add(
+          CarretoSaidaProdutoOrfaoLinha(
+            itemVendaId: item.id,
+            nomeProduto: RomaneioProdutoOrfaoHelper.nomeSnapshot(item),
+            quantidade: q,
+            unidade: RomaneioProdutoOrfaoHelper.unidadeSnapshot(item),
+          ),
+        );
+        continue;
+      }
       final qFisico = quantidadeFisicaDestaLojaCarreto(venda, item);
       final origemKardex = qFisico <= 0
           ? LojaOrigemMercadoria.outraLoja
@@ -838,6 +855,7 @@ class GerenciadorEstoqueService {
         '${falhas.join('\n')}',
       );
     }
+    return orfaos;
   }
 
   /// Depois da saida (reserva ja liberada), baixa so o fisico dos itens

@@ -71,6 +71,7 @@ import 'ui/theme/app_menu_modo_scope.dart';
 import 'ui/theme/app_tema_id.dart';
 import 'ui/theme/app_tema_scope.dart';
 import 'ui/theme/app_theme_builder.dart';
+import 'ui/widgets/chat/chat_interno_hub.dart';
 
 export 'ui/theme/app_semantic_colors.dart';
 
@@ -368,9 +369,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _executarBackupAoFechar() async {
-    // Headless primeiro: terminais nao ficam offline esperando o backup.
-    await WindowsAppStartupHelper.agendarHeadlessAposSaida();
+  Future<void> _executarBackupAoFechar({bool agendarHeadless = true}) async {
+    // Headless so ao fechar a UI. Logout/troca de usuario deixa o app aberto.
+    if (agendarHeadless) {
+      await WindowsAppStartupHelper.agendarHeadlessAposSaida();
+    }
     if (widget.objectBox != null) {
       final nomeLoja = await _nomeLojaAtual();
       await BackupAoFecharService.tentarSeAtivo(
@@ -850,19 +853,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       );
     }
     AuditoriaRegistrar.limparUsuarioSessao();
-    if (widget.terminalLeve) {
-      _entrarStandbyTerminal();
-    } else {
-      LanApiEventHub.instance.removeListener(_onApiEvento);
-      LanApiEventHub.instance.desconectar();
-      widget.lanSyncScheduler?.parar();
-      await _executarBackupAoFechar();
-    }
-    final personalizacao = await Future.wait([
-      AppTemaRepository.carregar(),
-      AppMenuModoRepository.carregar(),
-      AppFundoRepository.carregar(),
-    ]);
+    try {
+      ChatInternoHub.instance.encerrarSessao();
+    } catch (_) {}
+
+    _debounceEventoApi?.cancel();
+    _debounceProdutoApi?.cancel();
+    LanApiEventHub.instance.removeListener(_onApiEvento);
+
     if (!mounted) return;
     setState(() {
       _usuarioLogado = null;
@@ -887,10 +885,30 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         _recadoLojaApi = null;
         _fornecedorApi = null;
       }
-      _temaAtual = personalizacao[0] as AppTemaId;
-      _menuModoAtual = personalizacao[1] as AppMenuModoId;
-      _fundoAtual = personalizacao[2] as AppFundoId;
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (widget.terminalLeve) {
+        try {
+          _entrarStandbyTerminal();
+        } catch (_) {}
+      } else {
+        try {
+          LanApiEventHub.instance.desconectar();
+        } catch (_) {}
+        unawaited(_posLogoutServidor());
+      }
+      unawaited(_carregarPersonalizacaoInicial());
+    });
+  }
+
+  Future<void> _posLogoutServidor() async {
+    try {
+      await widget.lanSyncScheduler?.parar();
+    } catch (_) {}
+    try {
+      await _executarBackupAoFechar(agendarHeadless: false);
+    } catch (_) {}
   }
 
   Widget _buildTerminalRoot() {

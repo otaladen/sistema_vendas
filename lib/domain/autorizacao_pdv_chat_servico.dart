@@ -72,12 +72,6 @@ class AutorizacaoPdvChatServico {
         'Sem permissao para autorizar no chat. Use um gerente ou administrador.',
       );
     }
-    if (aprovador.login.trim().toLowerCase() ==
-        atual.operadorLogin.toLowerCase()) {
-      throw StateError(
-        'O operador nao pode aprovar a propria solicitacao. Use outro gerente.',
-      );
-    }
 
     final aprovar = acaoNorm == 'aprovar';
     if (!aprovar && acaoNorm != 'recusar') {

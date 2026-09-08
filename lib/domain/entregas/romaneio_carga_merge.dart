@@ -1,9 +1,12 @@
 import '../../data/api/lan_api_client.dart';
 import '../../data/lote_produto_repository.dart';
 import '../../model/item_venda.dart';
+import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../services/lote_fefo_service.dart';
 import '../entrega_venda_helper.dart';
+import '../produto_embalagem.dart';
+import 'carreto_saida_produto_orfao.dart';
 
 /// Linha consolidada da carga no patio (romaneio / conferencia).
 class RomaneioCargaLinha {
@@ -15,6 +18,7 @@ class RomaneioCargaLinha {
     required this.quantidadeTotal,
     this.escalaFracionada = false,
     this.rotuloLote = '',
+    this.produtoNaoEncontradoNoCadastro = false,
   });
 
   final String chaveMerge;
@@ -30,6 +34,9 @@ class RomaneioCargaLinha {
 
   /// Texto FEFO para separacao (ex.: "Retirar do LOTE: ...").
   final String rotuloLote;
+
+  /// Item de venda aponta para produto excluido — exibir alerta e usar snapshot.
+  final bool produtoNaoEncontradoNoCadastro;
 
   /// Qtd para UI/PDF (2; 18,9) — nao o inteiro bruto 2000/18900.
   String get quantidadeTotalTexto =>
@@ -87,6 +94,7 @@ abstract final class RomaneioCargaMerge {
   static List<RomaneioCargaLinha> montarLinhas(
     List<Venda> vendasGrupo, {
     List<ItemVenda> Function(Venda venda)? itensDaVenda,
+    Produto? Function(int id)? obterProduto,
   }) {
     final acumulado = <String, RomaneioCargaLinha>{};
     for (final v in vendasGrupo) {
@@ -99,26 +107,38 @@ abstract final class RomaneioCargaMerge {
         );
         if (q <= 0) continue;
         final chave = chaveMergeDeItem(item);
+        final orfao = RomaneioProdutoOrfaoHelper.itemOrfao(
+          item,
+          obterProduto: obterProduto,
+        );
         // Nao ler produto.target em entidade detached (terminal leve).
-        dynamic p;
+        Produto? p;
         try {
           p = item.produto.target;
         } catch (_) {
           p = null;
         }
-        final nomeProdutoAlvo = (p?.nome as String?)?.trim() ?? '';
-        final nome = nomeProdutoAlvo.isNotEmpty
-            ? nomeProdutoAlvo
-            : item.nomeProduto.trim();
-        final skuAlvo = (p?.codigoInterno as String?)?.trim() ?? '';
+        if (orfao) {
+          p = null;
+        }
+        final nomeProdutoAlvo = p?.nome.trim() ?? '';
+        final nome = orfao
+            ? RomaneioProdutoOrfaoHelper.nomeSnapshot(item)
+            : (nomeProdutoAlvo.isNotEmpty
+                ? nomeProdutoAlvo
+                : item.nomeProduto.trim());
+        final skuAlvo = p?.codigoInterno.trim() ?? '';
         final sku = skuAlvo.isNotEmpty ? skuAlvo : '-';
-        var un = ((p?.unidade as String?) ?? 'UN').trim();
-        if (un.isEmpty) un = 'UN';
-        un = un.toUpperCase();
+        final un = orfao
+            ? RomaneioProdutoOrfaoHelper.unidadeSnapshot(
+                item,
+                obterProduto: obterProduto,
+              )
+            : ProdutoEmbalagem.normalizarUnidade(p?.unidade);
         final rotuloLote = _rotuloLoteItem(item);
-        final escala = EntregaVendaHelper.quantidadeRomaneioUsaEscalaFracionada(
-          item,
-        );
+        final escala = orfao
+            ? false
+            : EntregaVendaHelper.quantidadeRomaneioUsaEscalaFracionada(item);
         final prev = acumulado[chave];
         if (prev == null) {
           acumulado[chave] = RomaneioCargaLinha(
@@ -129,6 +149,7 @@ abstract final class RomaneioCargaMerge {
             quantidadeTotal: q,
             escalaFracionada: escala,
             rotuloLote: rotuloLote,
+            produtoNaoEncontradoNoCadastro: orfao,
           );
         } else {
           final rotulos = <String>{
@@ -143,6 +164,8 @@ abstract final class RomaneioCargaMerge {
             quantidadeTotal: prev.quantidadeTotal + q,
             escalaFracionada: prev.escalaFracionada || escala,
             rotuloLote: rotulos.join(' | '),
+            produtoNaoEncontradoNoCadastro:
+                prev.produtoNaoEncontradoNoCadastro || orfao,
           );
         }
       }

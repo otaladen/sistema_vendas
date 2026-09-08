@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../model/item_venda.dart';
+import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../../services/entrega_fluxo_service.dart';
 import 'conferencia_carga_consolidada_lista.dart';
@@ -31,6 +32,7 @@ class PainelMontagemEntregas extends StatefulWidget {
     required this.podeGerenciarStatus,
     required this.conferenciaRepository,
     required this.usuarioAtual,
+    this.obterProduto,
   });
 
   final List<Venda> entregas;
@@ -39,6 +41,7 @@ class PainelMontagemEntregas extends StatefulWidget {
   final bool podeGerenciarStatus;
   final dynamic conferenciaRepository;
   final String usuarioAtual;
+  final Produto? Function(int id)? obterProduto;
 
   @override
   State<PainelMontagemEntregas> createState() => _PainelMontagemEntregasState();
@@ -255,6 +258,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
         : romaneioMergeCargaGrupo(
             viagem.vendas,
             widget.quantidadeItemEntrega,
+            obterProduto: widget.obterProduto,
           );
     final paradasMotorista = motoristaLogisticaDefinido(motoristaAtual)
         ? _paradasMotoristaNoDia(motoristaAtual)

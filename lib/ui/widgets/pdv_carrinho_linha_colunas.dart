@@ -6,16 +6,17 @@ import 'pdv_mobile_ui.dart';
 abstract final class PdvCarrinhoLinhaColunas {
   PdvCarrinhoLinhaColunas._();
 
-  static const double paddingHorizontal = 8;
-  static const double paddingSubtotalDireita = 4;
+  static const double paddingHorizontal = 4;
+  static const double paddingSubtotalDireita = 2;
   static const double larguraEntrega = 56;
   static const double larguraCodigo = 60;
-  static const double larguraUnidadeMedida = 48;
-  static const double larguraUnitario = 68;
-  static const double larguraSubtotal = 76;
+  static const double larguraUnidadeMedida = 44;
+  static const double larguraUnitario = 86;
+  static const double larguraSubtotal = 90;
   static const double larguraBotaoTabela = 28;
-  static const double larguraCampoQuantidade = 36;
-  static const double larguraProdutoMinimaConfortavel = 200;
+  static const double larguraCampoQuantidade = 26;
+  static const int flexProduto = 4;
+  static const double larguraProdutoMinimaConfortavel = 140;
 
   static double larguraFixaDireita({required bool alvosTouchAmplos}) {
     return larguraSubtotal +
@@ -49,9 +50,35 @@ abstract final class PdvCarrinhoLinhaColunas {
     return alvosTouchAmplos ? 36 : 32;
   }
 
+  /// Alvos menores que [minAcaoDe] para caber o grupo QTD em ~70px.
+  static double minAcaoQuantidadeDe({required bool alvosTouchAmplos}) {
+    return alvosTouchAmplos ? 24 : 22;
+  }
+
   static double larguraGrupoQuantidade({required bool alvosTouchAmplos}) {
-    final minAcao = minAcaoDe(alvosTouchAmplos: alvosTouchAmplos);
+    final minAcao = minAcaoQuantidadeDe(alvosTouchAmplos: alvosTouchAmplos);
     return minAcao + larguraCampoQuantidade + minAcao;
+  }
+
+  static Widget celulaMonetaria({
+    required double largura,
+    required Widget child,
+    EdgeInsetsGeometry? padding,
+  }) {
+    return Padding(
+      padding: padding ?? EdgeInsets.zero,
+      child: SizedBox(
+        width: largura,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: child,
+          ),
+        ),
+      ),
+    );
   }
 
   static double larguraGrupoAcoes({required bool alvosTouchAmplos}) {
@@ -94,24 +121,13 @@ abstract final class PdvCarrinhoLinhaColunas {
             child: unidadeMedida,
           ),
         ),
-        Expanded(child: produto),
+        Expanded(flex: flexProduto, child: produto),
         if (unitario != null)
-          SizedBox(
-            width: larguraUnitario,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: unitario,
-            ),
-          ),
-        Padding(
+          celulaMonetaria(largura: larguraUnitario, child: unitario),
+        celulaMonetaria(
+          largura: larguraSubtotal,
           padding: const EdgeInsets.only(right: paddingSubtotalDireita),
-          child: SizedBox(
-            width: larguraSubtotal,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: subtotal,
-            ),
-          ),
+          child: subtotal,
         ),
         grupoQuantidade,
         SizedBox(
@@ -140,17 +156,21 @@ abstract final class PdvCarrinhoLinhaColunas {
     required Widget quantidade,
     required Widget aumentar,
   }) {
-    final minAcao = minAcaoDe(alvosTouchAmplos: alvosTouchAmplos);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        slotAcao(tamanhoMinimo: minAcao, child: diminuir),
-        SizedBox(
-          width: larguraCampoQuantidade,
-          child: Center(child: quantidade),
-        ),
-        slotAcao(tamanhoMinimo: minAcao, child: aumentar),
-      ],
+    final minAcao = minAcaoQuantidadeDe(alvosTouchAmplos: alvosTouchAmplos);
+    return SizedBox(
+      width: larguraGrupoQuantidade(alvosTouchAmplos: alvosTouchAmplos),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          slotAcao(tamanhoMinimo: minAcao, child: diminuir),
+          SizedBox(
+            width: larguraCampoQuantidade,
+            child: Center(child: quantidade),
+          ),
+          slotAcao(tamanhoMinimo: minAcao, child: aumentar),
+        ],
+      ),
     );
   }
 

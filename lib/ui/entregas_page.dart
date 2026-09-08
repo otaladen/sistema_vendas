@@ -27,6 +27,7 @@ import '../domain/motorista_lista_safe.dart';
 import '../domain/venda_relacao_safe.dart';
 import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
+import '../model/produto.dart';
 import '../model/venda.dart';
 import 'entregas/entrega_card_lista.dart';
 import 'entregas/entregas_barra_compacta.dart';
@@ -46,6 +47,7 @@ import 'entregas/romaneio_carga_consolidada.dart';
 import 'entregas/romaneio_pdf.dart';
 import 'entregas/romaneio_relatorios.dart';
 import '../data/app_config_repository.dart';
+import '../domain/entregas/carreto_saida_produto_orfao.dart';
 import '../domain/entregas/loja_origem_mercadoria.dart';
 import '../domain/entregas/buscar_na_loja.dart';
 import '../domain/entrega_pod_regra.dart';
@@ -752,6 +754,22 @@ class _EntregasPageState extends State<EntregasPage>
     }
   }
 
+  Produto? _obterProdutoPorId(int id) {
+    if (id <= 0) return null;
+    try {
+      return widget.produtoRepository.obterPorId(id) as Produto?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _itemOrfaoNaCarga(ItemVenda item) {
+    return RomaneioProdutoOrfaoHelper.itemOrfao(
+      item,
+      obterProduto: _obterProdutoPorId,
+    );
+  }
+
   bool _vendaUsaItensCarretoMigrado(Venda v) {
     try {
       return EntregaVendaHelper.vendaTemItensMigradosRetiradaParaCarreto(v);
@@ -909,6 +927,8 @@ class _EntregasPageState extends State<EntregasPage>
         return 'Complemento pendente';
       case HistoricoEntregaEventos.buscarNaLoja:
         return 'Buscar nesta loja';
+      case HistoricoEntregaEventos.carretoSaidaProdutoOrfao:
+        return 'Saida carreto (produto excluido)';
       case 'pendente':
         return 'Pendente';
       case 'roteirizada':
@@ -1399,6 +1419,7 @@ class _EntregasPageState extends State<EntregasPage>
           conferenciaRepository: conf,
           usuarioAtual: widget.usuarioAtual,
           onConfirmarBuscarNaLoja: _confirmarBuscarNaLoja,
+          obterProduto: _obterProdutoPorId,
         );
       }
       return Column(
@@ -1536,8 +1557,12 @@ class _EntregasPageState extends State<EntregasPage>
           final lote = LoteFefoService.formatarRotuloRetiradaPatio(
             LoteConsumoSnapshot.decodeList(item.loteConsumosJson),
           );
-          if (lote.isEmpty) return base;
-          return '$base\n  → $lote';
+          var linha = lote.isEmpty ? base : '$base\n  → $lote';
+          if (_itemOrfaoNaCarga(item)) {
+            linha =
+                '$linha\n  ⚠ ${RomaneioProdutoOrfaoHelper.alertaProdutoNaoEncontrado}';
+          }
+          return linha;
         })
         .whereType<String>()
         .toList();
@@ -4628,6 +4653,7 @@ class _EntregasPageState extends State<EntregasPage>
       podeGerenciarStatus: widget.podeGerenciarStatusEntrega,
       conferenciaRepository: _conferenciaCargaRepository!,
       usuarioAtual: widget.usuarioAtual,
+      obterProduto: _obterProdutoPorId,
     );
   }
 
@@ -5132,6 +5158,7 @@ class _PainelRomaneioGrupoMesmoCarro extends StatefulWidget {
     required this.conferenciaRepository,
     required this.usuarioAtual,
     this.onConfirmarBuscarNaLoja,
+    this.obterProduto,
   });
 
   final List<Venda> bloco;
@@ -5148,6 +5175,7 @@ class _PainelRomaneioGrupoMesmoCarro extends StatefulWidget {
   final String usuarioAtual;
   final Future<void> Function(int vendaId, List<int> itemIds)?
       onConfirmarBuscarNaLoja;
+  final Produto? Function(int id)? obterProduto;
 
   @override
   State<_PainelRomaneioGrupoMesmoCarro> createState() =>
@@ -5167,6 +5195,7 @@ class _PainelRomaneioGrupoMesmoCarroState
     final linhas = romaneioMergeCargaGrupo(
       widget.bloco,
       widget.quantidadeItemEntrega,
+      obterProduto: widget.obterProduto,
     );
     return Container(
       decoration: BoxDecoration(

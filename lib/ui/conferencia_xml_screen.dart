@@ -107,6 +107,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   ConferenciaNfeOpcoes _opcoes = const ConferenciaNfeOpcoes();
   final Set<int> _custoExpandido = {};
   bool _rebuildAgendado = false;
+  List<NfeDuplicataXml> _duplicatas = const [];
 
   void _agendarRebuild() {
     if (!mounted || _rebuildAgendado) return;
@@ -138,6 +139,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   @override
   void initState() {
     super.initState();
+    _duplicatas = List<NfeDuplicataXml>.from(widget.nfe.duplicatas);
     _iniciarSugestoes();
     _carregarMargemMinima();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1916,6 +1918,16 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     super.dispose();
   }
 
+  NfeXmlParseResult _nfeParaConfirmar() => NfeXmlParseResult(
+        chaveAcesso: widget.nfe.chaveAcesso,
+        numeroNota: widget.nfe.numeroNota,
+        dataEmissao: widget.nfe.dataEmissao,
+        emitente: widget.nfe.emitente,
+        itens: widget.nfe.itens,
+        duplicatas: _duplicatas,
+        valorTotalNota: widget.nfe.valorTotalNota,
+      );
+
   Future<void> _confirmar() async {
     for (final linha in _linhas) {
       linha.erroValidacao = null;
@@ -1984,7 +1996,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         return;
       }
       final confirmar = widget.nfeRepository.confirmarEntrada(
-        nfe: widget.nfe,
+        nfe: _nfeParaConfirmar(),
         linhas: confirmacoes,
         opcoes: _opcoes,
         margemMinimaVendaPercentual: _margemMinimaPadrao,
@@ -2119,7 +2131,12 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                       onChanged: _alterarOpcoes,
                     ),
                     const SizedBox(height: 12),
-                    ConferenciaNfeFinanceiroPainel(nfe: widget.nfe),
+                    ConferenciaNfeFinanceiroPainel(
+                      duplicatas: _duplicatas,
+                      valorTotalNota: widget.nfe.valorTotalNota,
+                      onDuplicatasChanged: (dups) =>
+                          setState(() => _duplicatas = dups),
+                    ),
                     const SizedBox(height: 16),
                     _buildModoExibicaoToggle(context),
                     _buildFiltros(context),

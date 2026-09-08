@@ -25,23 +25,88 @@ const int _kDebounceBuscaMs = 260;
 const double _kAlturaLinha = 68.0;
 const double _kMiniaturaPx = 40.0;
 
+/// Estado da pesquisa no cadastro de produtos (persiste entre aberturas do dialogo).
+class ProdutoPesquisaCadastroSessao {
+  String textoPesquisa = '';
+  bool somenteInativos = false;
+  List<Produto> carregados = const [];
+  int exibidos = 0;
+  int indiceSelecionado = -1;
+  bool temMaisNoRepo = true;
+  bool buscaComTexto = false;
+  double scrollOffset = 0;
+  int? produtoIdEmDestaque;
+
+  bool get temEstadoSalvo =>
+      textoPesquisa.trim().isNotEmpty ||
+      carregados.isNotEmpty ||
+      somenteInativos;
+
+  void limpar() {
+    textoPesquisa = '';
+    somenteInativos = false;
+    carregados = const [];
+    exibidos = 0;
+    indiceSelecionado = -1;
+    temMaisNoRepo = true;
+    buscaComTexto = false;
+    scrollOffset = 0;
+    produtoIdEmDestaque = null;
+  }
+
+  void atualizarProdutoSalvo(Produto produto, dynamic produtoRepository) {
+    if (produto.id <= 0) return;
+    final fresco =
+        produtoRepository.obterPorId(produto.id) as Produto? ?? produto;
+    produtoIdEmDestaque = fresco.id;
+    final idx = carregados.indexWhere((p) => p.id == fresco.id);
+    if (idx >= 0) {
+      final copia = List<Produto>.from(carregados);
+      copia[idx] = fresco;
+      carregados = copia;
+      indiceSelecionado = idx;
+    }
+  }
+
+  void removerProduto(int produtoId) {
+    if (produtoId <= 0) return;
+    final idx = carregados.indexWhere((p) => p.id == produtoId);
+    if (idx < 0) return;
+    final copia = List<Produto>.from(carregados)..removeAt(idx);
+    carregados = copia;
+    exibidos = math.min(exibidos, copia.length);
+    if (indiceSelecionado >= copia.length) {
+      indiceSelecionado = copia.isEmpty ? -1 : copia.length - 1;
+    }
+    if (produtoIdEmDestaque == produtoId) {
+      produtoIdEmDestaque = null;
+    }
+  }
+}
+
 /// Dialogo de pesquisa de produto no cadastro (debounce + scroll progressivo).
 Future<Produto?> showProdutoPesquisaDialog({
   required BuildContext context,
   required dynamic produtoRepository,
+  ProdutoPesquisaCadastroSessao? sessaoCadastro,
 }) {
   return showDialog<Produto>(
     context: context,
     builder: (context) => _ProdutoPesquisaDialog(
       produtoRepository: produtoRepository,
+      sessaoCadastro: sessaoCadastro,
     ),
   );
 }
 
 class _ProdutoPesquisaDialog extends StatefulWidget {
-  const _ProdutoPesquisaDialog({required this.produtoRepository});
+  const _ProdutoPesquisaDialog({
+    required this.produtoRepository,
+    this.sessaoCadastro,
+  });
 
   final dynamic produtoRepository;
+  final ProdutoPesquisaCadastroSessao? sessaoCadastro;
 
   @override
   State<_ProdutoPesquisaDialog> createState() => _ProdutoPesquisaDialogState();
@@ -69,14 +134,87 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    _restaurarSessaoSeHouver();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      if (widget.sessaoCadastro?.carregados.isNotEmpty ?? false) {
+        _restaurarScrollSessao();
+        return;
+      }
+      if (widget.sessaoCadastro?.textoPesquisa.trim().isNotEmpty ?? false) {
+        unawaited(_executarBuscaTexto(preservarScroll: true));
+        return;
+      }
       _carregarInicial();
     });
   }
 
+  void _restaurarSessaoSeHouver() {
+    final sessao = widget.sessaoCadastro;
+    if (sessao == null || !sessao.temEstadoSalvo) return;
+    _pesquisaController.text = sessao.textoPesquisa;
+    _somenteInativos = sessao.somenteInativos;
+    if (sessao.carregados.isNotEmpty) {
+      _carregados = List<Produto>.from(sessao.carregados);
+      _exibidos = sessao.exibidos;
+      _temMaisNoRepo = sessao.temMaisNoRepo;
+      _buscaComTexto = sessao.buscaComTexto;
+      var indice = sessao.indiceSelecionado;
+      if (sessao.produtoIdEmDestaque != null) {
+        final porId = _carregados.indexWhere(
+          (p) => p.id == sessao.produtoIdEmDestaque,
+        );
+        if (porId >= 0) indice = porId;
+      }
+      _indiceSelecionado.value = indice;
+    }
+  }
+
+  void _restaurarScrollSessao() {
+    final sessao = widget.sessaoCadastro;
+    if (sessao == null || sessao.scrollOffset <= 0) return;
+    if (!_scrollController.hasClients) return;
+    _scrollController.jumpTo(
+      sessao.scrollOffset.clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      ),
+    );
+  }
+
+  void _persistirSessao({int? produtoIdDestaque}) {
+    final sessao = widget.sessaoCadastro;
+    if (sessao == null) return;
+    sessao.textoPesquisa = _pesquisaController.text;
+    sessao.somenteInativos = _somenteInativos;
+    sessao.carregados = List<Produto>.from(_carregados);
+    sessao.exibidos = _exibidos;
+    sessao.indiceSelecionado = _indiceSelecionado.value;
+    sessao.temMaisNoRepo = _temMaisNoRepo;
+    sessao.buscaComTexto = _buscaComTexto;
+    sessao.scrollOffset = _scrollController.hasClients
+        ? _scrollController.offset
+        : sessao.scrollOffset;
+    if (produtoIdDestaque != null) {
+      sessao.produtoIdEmDestaque = produtoIdDestaque;
+    }
+  }
+
+  void _limparPesquisaCadastro() {
+    widget.sessaoCadastro?.limpar();
+    _debounce?.cancel();
+    _pesquisaController.clear();
+    setState(() => _somenteInativos = false);
+    _reiniciarLista();
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    _carregarInicial();
+  }
+
   @override
   void dispose() {
+    _persistirSessao();
     _debounce?.cancel();
     _indiceSelecionado.dispose();
     _scrollController.removeListener(_onScroll);
@@ -89,6 +227,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   void _fechar([Produto? produto]) {
     if (_fechando) return;
     _fechando = true;
+    _persistirSessao(produtoIdDestaque: produto?.id);
     Navigator.pop(context, produto);
   }
 
@@ -342,7 +481,11 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     }
   }
 
-  Future<void> _executarBuscaTexto() async {
+  Future<void> _executarBuscaTexto({bool preservarScroll = false}) async {
+    final scrollAntes = preservarScroll && _scrollController.hasClients
+        ? _scrollController.offset
+        : null;
+
     if (_termoVazio) {
       _reiniciarLista();
       await _carregarProximaPaginaRepo();
@@ -374,10 +517,20 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       setState(() {
         _carregados = lista;
         _exibidos = math.min(_kLoteInicialExibicao, lista.length);
-        _indiceSelecionado.value = lista.isEmpty ? -1 : 0;
+        final destaque = widget.sessaoCadastro?.produtoIdEmDestaque;
+        if (destaque != null) {
+          final idx = lista.indexWhere((p) => p.id == destaque);
+          _indiceSelecionado.value = idx >= 0 ? idx : (lista.isEmpty ? -1 : 0);
+        } else {
+          _indiceSelecionado.value = lista.isEmpty ? -1 : 0;
+        }
         _carregando = false;
       });
-      if (_scrollController.hasClients) {
+      if (scrollAntes != null && _scrollController.hasClients) {
+        _scrollController.jumpTo(
+          scrollAntes.clamp(0, _scrollController.position.maxScrollExtent),
+        );
+      } else if (!preservarScroll && _scrollController.hasClients) {
         _scrollController.jumpTo(0);
       }
     } catch (e) {
@@ -619,8 +772,19 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       autofocus: !compacto,
       decoration: produtoBuscaInputDecoration(
         helperText: compacto ? null : _helperBusca(),
+        suffixIcon: widget.sessaoCadastro != null &&
+                _pesquisaController.text.isNotEmpty
+            ? IconButton(
+                tooltip: 'Limpar busca',
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: _limparPesquisaCadastro,
+              )
+            : null,
       ),
-      onChanged: (_) => _agendarBusca(),
+      onChanged: (_) {
+        setState(() {});
+        _agendarBusca();
+      },
       onSubmitted: (_) => _confirmarSelecionado(),
     );
 

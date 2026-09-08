@@ -1,9 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:sistema_vendas/services/xml_nfe_parser_service.dart';
 
 void main() {
+  final _nfData = DateFormat('dd/MM/yyyy');
+
   test('parse NF-e homologacao materiais construcao', () {
     final xml = File(
       'samples/nfe_entrada_homologacao_materiais_construcao.xml',
@@ -31,5 +34,7 @@ void main() {
     expect(r.valorTotalNota, 4195.00);
     expect(r.duplicatas.length, 2);
     expect(r.duplicatas.first.valorParcela, closeTo(2097.50, 0.01));
+    expect(_nfData.format(r.duplicatas.first.dataVencimento), '02/07/2026');
+    expect(_nfData.format(r.duplicatas[1].dataVencimento), '01/08/2026');
   });
 }

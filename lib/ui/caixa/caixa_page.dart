@@ -30,6 +30,7 @@ import '../../model/recebimento_fiado.dart';
 import '../shell/main_menu_deps.dart';
 import '../shell/app_shell_aba_visibilidade.dart';
 import '../../domain/auditoria_catalogo.dart';
+import '../../domain/caixa_troco_dinheiro_helper.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../domain/promocao_cadastro.dart';
@@ -100,6 +101,7 @@ import 'caixa_pos_venda_sessao.dart';
 import 'caixa_ultimas_vendas_list.dart';
 import 'widgets/caixa_cobranca_painel.dart';
 import 'widgets/caixa_pos_venda_fiscal_painel.dart';
+import '../theme/app_semantic_colors.dart';
 import '../vendas/cancelar_venda_ui.dart';
 import 'widgets/caixa_importar_orcamento_field.dart';
 
@@ -1211,7 +1213,11 @@ class _CaixaPageState extends State<CaixaPage> {
           if (focus == _pesquisaProdutoConferenciaFocus) {
             return KeyEventResult.ignored;
           }
-          unawaited(_finalizarOrcamento(_selecionado!));
+          final v = _selecionado!;
+          if (!_cobrancaProntaParaFinalizar(v, _totalComDesconto(v))) {
+            return KeyEventResult.handled;
+          }
+          unawaited(_finalizarOrcamento(v));
           return KeyEventResult.handled;
         }
         if (_etapaCaixa == CaixaEtapa.conferencia) {
@@ -3792,27 +3798,47 @@ class _CaixaPageState extends State<CaixaPage> {
     return out;
   }
 
-  String? _validarConferenciaMistoIgualOrcamento(Venda venda, double totalComDesconto) {
-    final informado = _linhasMistoDoFormulario();
-    final esperado = _linhasPagamentoEscaladasCaixa(venda, totalComDesconto);
-    if (informado.length != esperado.length) {
-      return 'Pagamento misto invalido para conferencia no caixa.';
+  String? _validarConferenciaMistoNoCaixa(Venda venda, double totalComDesconto) {
+    return CaixaTrocoDinheiroHelper.validarLinhasMisto(
+      informado: _linhasMistoDoFormulario(),
+      esperado: _linhasPagamentoEscaladasCaixa(venda, totalComDesconto),
+      totalVenda: totalComDesconto,
+      tolerancia: _tolMistoPagamento,
+      rotuloMeio: _rotuloFormaPagamento,
+      formatarMoeda: _formatarMoeda,
+    );
+  }
+
+  bool _cobrancaProntaParaFinalizar(Venda v, double totalComDesconto) {
+    if (v.formaPagamento == 'misto') {
+      if (_mistoValorControllers.isEmpty) return false;
+      return _validarConferenciaMistoNoCaixa(v, totalComDesconto) == null;
     }
-    for (var i = 0; i < esperado.length; i++) {
-      final linhaEsperada = esperado[i];
-      final linhaInformada = informado[i];
-      if (linhaEsperada.meio == 'fiado') {
-        continue;
-      }
-      if ((linhaInformada.valor - linhaEsperada.valor).abs() > _tolMistoPagamento) {
-        final sufixoParcelas = linhaEsperada.meio == 'cartao_credito'
-            ? ' (${linhaEsperada.parcelas}x)'
-            : '';
-        return 'Valor divergente em ${_rotuloFormaPagamento(linhaEsperada.meio)}$sufixoParcelas. '
-            'Esperado: ${_formatarMoeda(linhaEsperada.valor)}.';
-      }
+    if (v.formaPagamento == 'dinheiro') {
+      return CaixaTrocoDinheiroHelper.recebidoSuficiente(
+        valorEntregue: _valorRecebido ?? 0,
+        saldoPendente: totalComDesconto,
+        tolerancia: _tolMistoPagamento,
+      );
     }
-    return null;
+    return true;
+  }
+
+  double _trocoMistoCaixa(
+    double totalComDesconto,
+    List<PagamentoOrcamentoLinha> linhas,
+  ) {
+    if (linhas.isEmpty) return 0;
+    final fiado = PagamentoOrcamentoCodec.somaPorMeio(linhas, 'fiado');
+    final recebidoCaixa = linhas
+        .where((l) => l.meio != 'fiado')
+        .fold<double>(0, (s, l) => s + l.valor);
+    final aPagarAgora =
+        (totalComDesconto - fiado).clamp(0, double.infinity).toDouble();
+    return CaixaTrocoDinheiroHelper.troco(
+      valorEntregue: recebidoCaixa,
+      saldoPendente: aPagarAgora,
+    );
   }
 
   void _recarregarOrcamentoSelecionadoAposAjusteItens() {
@@ -5034,18 +5060,19 @@ class _CaixaPageState extends State<CaixaPage> {
           .fold<double>(0, (s, l) => s + l.valor);
       final aPagarAgora = (totalVenda - fiado).clamp(0, double.infinity).toDouble();
       totalRecebido = recebidoCaixa + fiado;
-      trocoFinal =
-          (recebidoCaixa - aPagarAgora).clamp(0, double.infinity).toDouble();
+      trocoFinal = CaixaTrocoDinheiroHelper.troco(
+        valorEntregue: recebidoCaixa,
+        saldoPendente: aPagarAgora,
+      );
     } else {
       final parteDinheiro = _parteDinheiroNaFinalizacao(venda, totalVenda);
       totalRecebido = parteDinheiro > 0.001
           ? (_valorRecebido ?? 0)
           : totalVenda;
-      trocoFinal = parteDinheiro > 0.001
-          ? ((_valorRecebido ?? 0) - parteDinheiro)
-              .clamp(0, double.infinity)
-              .toDouble()
-          : 0.0;
+      trocoFinal = CaixaTrocoDinheiroHelper.troco(
+        valorEntregue: _valorRecebido ?? 0,
+        saldoPendente: parteDinheiro,
+      );
     }
     final itensCount = _itensVenda(venda).length;
 
@@ -5056,7 +5083,7 @@ class _CaixaPageState extends State<CaixaPage> {
           .where((l) => l.meio != 'fiado')
           .fold<double>(0, (s, l) => s + l.valor);
       final aPagarAgora = (totalVenda - fiado).clamp(0, double.infinity).toDouble();
-      final divergenciaMisto = _validarConferenciaMistoIgualOrcamento(
+      final divergenciaMisto = _validarConferenciaMistoNoCaixa(
         venda,
         totalVenda,
       );
@@ -5092,7 +5119,11 @@ class _CaixaPageState extends State<CaixaPage> {
     } else {
       if (venda.formaPagamento == 'dinheiro') {
         final recebido = _valorRecebido ?? 0;
-        if (recebido < totalVenda) {
+        if (!CaixaTrocoDinheiroHelper.recebidoSuficiente(
+          valorEntregue: recebido,
+          saldoPendente: totalVenda,
+          tolerancia: _tolMistoPagamento,
+        )) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
@@ -7496,9 +7527,10 @@ class _CaixaPageState extends State<CaixaPage> {
           ? () => unawaited(_abrirDescontoCaixa())
           : null,
       onFechar: _finalizandoVenda ? null : _fecharPainelCobranca,
-      onFinalizar: _finalizandoVenda
-          ? null
-          : () => unawaited(_finalizarOrcamento(selecionado)),
+      processandoFinalizacao: _finalizandoVenda,
+      finalizarHabilitado:
+          _cobrancaProntaParaFinalizar(selecionado, totalComDesconto),
+      onFinalizar: () => unawaited(_finalizarOrcamento(selecionado)),
     );
   }
 
@@ -7630,11 +7662,12 @@ class _CaixaPageState extends State<CaixaPage> {
         ? 0.0
         : PagamentoOrcamentoCodec.soma(linhasMistoCaixa);
     final troco = selecionado.formaPagamento == 'misto'
-        ? (somaMistoCaixa - totalComDesconto).clamp(0.0, double.infinity).toDouble()
+        ? _trocoMistoCaixa(totalComDesconto, linhasMistoCaixa)
         : (parteDinheiroResumo > 0.001
-            ? ((_valorRecebido ?? 0) - parteDinheiroResumo)
-                .clamp(0, double.infinity)
-                .toDouble()
+            ? CaixaTrocoDinheiroHelper.troco(
+                valorEntregue: _valorRecebido ?? 0,
+                saldoPendente: parteDinheiroResumo,
+              )
             : 0.0);
     final valorTotalRecebidoCard = selecionado.formaPagamento == 'misto' &&
             linhasMistoCaixa.isNotEmpty
@@ -8385,8 +8418,10 @@ class _CaixaPageState extends State<CaixaPage> {
         (totalComDesconto - fiadoOrc).clamp(0, double.infinity).toDouble();
     final pagamentoInsuficiente =
         recebidoAgora < aPagarAgora - _tolMistoPagamento;
-    final trocoSobreTotal =
-        (recebidoAgora - aPagarAgora).clamp(0.0, double.infinity).toDouble();
+    final trocoSobreTotal = CaixaTrocoDinheiroHelper.troco(
+      valorEntregue: recebidoAgora,
+      saldoPendente: aPagarAgora,
+    );
     final planoFiado = PlanoFiadoCodec.decode(venda.planoFiadoJson);
     final indicesCaixa = <int>[
       for (var i = 0; i < _mistoValorControllers.length; i++)
@@ -8461,12 +8496,13 @@ class _CaixaPageState extends State<CaixaPage> {
                   'Fiado (depois)',
                   _formatarMoeda(fiadoOrc),
                 ),
-              if (!pagamentoInsuficiente && trocoSobreTotal > 0.02)
+              if (!pagamentoInsuficiente && trocoSobreTotal > 0.009)
                 _buildChipResumoMisto(
                   context,
-                  'Troco',
+                  'TROCO',
                   _formatarMoeda(trocoSobreTotal),
                   corValor: theme.colorScheme.primary,
+                  destaqueVerde: true,
                 ),
             ],
           ),
@@ -8510,14 +8546,23 @@ class _CaixaPageState extends State<CaixaPage> {
     String rotulo,
     String valor, {
     Color? corValor,
+    bool destaqueVerde = false,
   }) {
     final theme = Theme.of(context);
+    final semantic = theme.extension<AppSemanticColors>();
+    final fgVerde = semantic?.successFg ?? Colors.green.shade800;
+    final bgVerde = semantic?.successBg ?? Colors.green.shade50;
+    final bordaVerde = semantic?.successBorder ?? Colors.green.shade200;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: destaqueVerde ? bgVerde : theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        border: Border.all(
+          color: destaqueVerde
+              ? bordaVerde
+              : theme.colorScheme.outlineVariant,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -8526,14 +8571,17 @@ class _CaixaPageState extends State<CaixaPage> {
           Text(
             rotulo,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              color: destaqueVerde
+                  ? fgVerde
+                  : theme.colorScheme.onSurfaceVariant,
+              fontWeight: destaqueVerde ? FontWeight.w700 : null,
             ),
           ),
           Text(
             valor,
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w800,
-              color: corValor,
+              color: destaqueVerde ? fgVerde : corValor,
             ),
           ),
         ],
@@ -8545,38 +8593,71 @@ class _CaixaPageState extends State<CaixaPage> {
     final theme = Theme.of(context);
     final meio = _mistoLinhasModelo[index].meio;
     final parcelas = _mistoLinhasModelo[index].parcelas;
+    final saldoEsperado = _mistoLinhasModelo[index].valor;
     final rotulo = '${_rotuloFormaPagamento(meio)}'
         '${meio == 'cartao_credito' ? ' · ${parcelas}x' : ''}';
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    final recebido = _parseValor(_mistoValorControllers[index].text) ?? 0;
+    final trocoLinha = meio == 'dinheiro'
+        ? CaixaTrocoDinheiroHelper.troco(
+            valorEntregue: recebido,
+            saldoPendente: saldoEsperado,
+          )
+        : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          width: 140,
-          child: Text(
-            rotulo,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 140,
+              child: Text(
+                rotulo,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _mistoValorControllers[index],
+                focusNode: index < _mistoValorFocusNodes.length
+                    ? _mistoValorFocusNodes[index]
+                    : null,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  isDense: true,
+                  labelText: meio == 'dinheiro'
+                      ? 'Valor entregue'
+                      : 'Valor no caixa',
+                  helperText: meio == 'dinheiro'
+                      ? 'Saldo pendente: ${_formatarMoeda(saldoEsperado)}'
+                      : 'Valor exato: ${_formatarMoeda(saldoEsperado)}',
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (_) {
+                  setState(() => _sincronizarRecebidoPdVComOrcamento());
+                },
+              ),
+            ),
+          ],
+        ),
+        if (meio == 'dinheiro' && trocoLinha > 0.009) ...[
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              'TROCO: ${_formatarMoeda(trocoLinha)}',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: theme.extension<AppSemanticColors>()?.successFg ??
+                    Colors.green.shade800,
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: TextField(
-            controller: _mistoValorControllers[index],
-            focusNode: index < _mistoValorFocusNodes.length
-                ? _mistoValorFocusNodes[index]
-                : null,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              isDense: true,
-              labelText: 'Valor no caixa',
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (_) {
-              setState(() => _sincronizarRecebidoPdVComOrcamento());
-            },
-          ),
-        ),
+        ],
       ],
     );
   }

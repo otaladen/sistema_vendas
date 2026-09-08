@@ -4,6 +4,7 @@ import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../entrega_venda_helper.dart';
 import '../estoque/tipo_movimento_estoque.dart';
+import '../item_venda_produto_orfao.dart';
 import '../venda_documento_rotulo_helper.dart';
 import '../../services/gerenciador_estoque_service.dart';
 
@@ -41,6 +42,7 @@ abstract final class CarretoChecklistEstoqueHelper {
       itensPendentesCarreto(Venda venda) {
     final lista = <({ItemVenda item, int quantidade, Produto? produto})>[];
     for (final item in venda.itens) {
+      if (ItemVendaProdutoOrfaoHelper.itemSemProdutoVinculado(item)) continue;
       final q = GerenciadorEstoqueService.quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
       Produto? produto;
@@ -65,10 +67,7 @@ abstract final class CarretoChecklistEstoqueHelper {
 
     for (final par in itensPendentesCarreto(venda)) {
       final produto = par.produto;
-      if (produto == null || produto.id <= 0) {
-        linhas.add('${par.item.nomeProduto}: produto nao vinculado.');
-        continue;
-      }
+      if (produto == null) continue;
       if (vistos.contains(produto.id)) continue;
       vistos.add(produto.id);
 
@@ -159,10 +158,7 @@ abstract final class CarretoChecklistEstoqueHelper {
     final falhas = <String>[];
     for (final par in itensPendentesCarreto(venda)) {
       final produto = par.produto;
-      if (produto == null) {
-        falhas.add('${par.item.nomeProduto}: produto nao vinculado.');
-        continue;
-      }
+      if (produto == null) continue;
       if (produto.estoqueReservado < par.quantidade) {
         falhas.add(
           '${produto.nome}: reservado ${produto.estoqueReservado}, '

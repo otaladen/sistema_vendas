@@ -159,9 +159,10 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       autorPadrao: autor,
       perfilUsuario: widget.usuarioLogado.perfil,
       loginUsuario: widget.usuarioLogado.login,
+      usuarioLogado: widget.usuarioLogado,
       usuarioRepo: widget.usuarioRepository is UsuarioRepository
           ? widget.usuarioRepository as UsuarioRepository
-          : null,
+          : (widget.terminalLeve ? null : UsuarioRepository()),
     );
   }
 
@@ -807,7 +808,8 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
         if (!context.isDesktopLayout) {
           return _valoresDeps(child: _buildShellMobile(context));
         }
-        return CallbackShortcuts(
+        return _valoresDeps(
+          child: CallbackShortcuts(
           bindings: <ShortcutActivator, VoidCallback>{
             const SingleActivator(LogicalKeyboardKey.keyW, control: true):
                 _fecharAbaAtual,
@@ -895,6 +897,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
                 ),
               ),
             ),
+          ),
           ),
         );
       },

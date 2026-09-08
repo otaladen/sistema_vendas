@@ -334,7 +334,7 @@ class XmlParserService {
           'Duplicata ${i + 1}: valor vDup invalido.',
         );
       }
-      final dataVenc = _parseDataDup(b.dVenc);
+      final dataVenc = NfeDuplicataXml.parseDataVencimento(b.dVenc);
       final nParcela = b.nDup.isNotEmpty
           ? b.nDup
           : '${(i + 1).toString().padLeft(3, '0')}/'
@@ -442,26 +442,9 @@ class XmlParserService {
     }
   }
 
-  /// Data de duplicata (`YYYY-MM-DD` ou ISO); normaliza para UTC meia-noite do dia civil.
-  static DateTime _parseDataDup(String raw) {
-    final t = raw.trim();
-    if (t.isEmpty) {
-      throw const FormatException('Data de vencimento da duplicata vazia.');
-    }
-    final iso = DateTime.tryParse(t);
-    if (iso != null) {
-      return DateTime.utc(iso.year, iso.month, iso.day);
-    }
-    final slash = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$');
-    final m = slash.firstMatch(t);
-    if (m != null) {
-      final dia = int.parse(m.group(1)!);
-      final mes = int.parse(m.group(2)!);
-      final ano = int.parse(m.group(3)!);
-      return DateTime.utc(ano, mes, dia);
-    }
-    throw FormatException('Data de vencimento da duplicata invalida: "$raw"');
-  }
+  /// Data de item/lote (`YYYY-MM-DD`, ISO ou `dd/MM/yyyy`) como data civil local.
+  static DateTime _parseDataDup(String raw) =>
+      NfeDuplicataXml.parseDataVencimento(raw);
 
   /// Primeiro bloco `rastro` do item (`nLote` / `dVal`).
   static ({String numeroLote, DateTime? dataValidade}) _extrairRastro(

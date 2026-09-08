@@ -13,6 +13,7 @@ import '../domain/entregas/buscar_na_loja.dart';
 import 'loja_origem_rede_store.dart';
 import '../domain/entrega_nao_entregue.dart';
 import '../domain/entrega_status_transicao.dart';
+import '../domain/entregas/carreto_saida_produto_orfao.dart';
 import '../domain/item_venda_produto_orfao.dart';
 import '../services/entrega_fluxo_service.dart';
 import '../domain/operacao_permissao_guard.dart';
@@ -4863,10 +4864,13 @@ class VendaRepository {
             venda,
             permitirVendaSemEstoque: permitirVendaSemEstoque,
           );
-          _estoque.baixarEstoqueCarretoAoMarcarSaida(
+          final orfaos = _estoque.baixarEstoqueCarretoAoMarcarSaida(
             venda,
             permitirVendaSemEstoque: permitirVendaSemEstoque,
           );
+          if (orfaos.isNotEmpty) {
+            _registrarSaidaCarretoProdutosOrfaos(venda, orfaos);
+          }
         } else if (saiuAntes && !saiuDepois) {
           _estoque.estornarBaixaEstoqueCarretoAoDesmarcarSaida(
             venda,
@@ -5332,6 +5336,28 @@ class VendaRepository {
         if (oa > 0 && ob > 0 && oa != ob) return oa.compareTo(ob);
         return a.id.compareTo(b.id);
       });
+  }
+
+  void _registrarSaidaCarretoProdutosOrfaos(
+    Venda venda,
+    List<CarretoSaidaProdutoOrfaoLinha> linhas, {
+    String usuario = 'sistema',
+  }) {
+    if (linhas.isEmpty) return;
+    final evento = CarretoSaidaProdutoOrfaoEvento(
+      vendaId: venda.id,
+      numeroOrcamento: venda.numeroOrcamento,
+      documento: VendaDocumentoRotuloHelper.rotuloControleInterno(venda),
+      dataHora: DateTime.now(),
+      linhas: linhas,
+    );
+    registrarOcorrenciaEntrega(
+      vendaId: venda.id,
+      status: HistoricoEntregaEventos.carretoSaidaProdutoOrfao,
+      motivo: evento.textoHumano,
+      usuario: usuario,
+      detalhesEstruturados: evento.encode(),
+    );
   }
 
   void registrarHistoricoStatusEntrega({

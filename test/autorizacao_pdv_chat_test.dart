@@ -105,6 +105,36 @@ void main() {
     expect(usuarioPodeResponderAutorizacaoPdvChat(admin), isTrue);
     expect(usuarioPodeResponderAutorizacaoPdvChat(gerente), isTrue);
     expect(usuarioPodeResponderAutorizacaoPdvChat(vendedor), isFalse);
+    const dono = UsuarioSistema(
+      id: '4',
+      nome: 'Dono',
+      login: 'dono',
+      senha: 'x',
+      perfil: 'dono',
+    );
+    expect(usuarioPodeResponderAutorizacaoPdvChat(dono), isTrue);
+  });
+
+  test('payload com solicitacaoId vale como card mesmo sem tipo', () {
+    final m = MensagemInterna.fromMap({
+      'id': 2,
+      'vendedor': 'Operador',
+      'texto': 'Solicitacao de Autorizacao - PDV',
+      'dataHora': '2026-01-01T10:00:00Z',
+      'payload': {
+        'solicitacaoId': 'req-x',
+        'tipoOperacao': 'desconto_acima_teto',
+        'operadorLogin': 'op',
+        'operadorNome': 'Op',
+        'timestamp': '2026-01-01T10:00:00Z',
+        'status': 'pendente',
+        'valorOriginal': 100,
+        'valorSolicitado': 20,
+      },
+    });
+    expect(m.ehAutorizacaoPdv, isTrue);
+    expect(m.autorizacaoPdv?.solicitacaoId, 'req-x');
+    expect(m.autorizacaoPdv?.pendente, isTrue);
   });
 
   test('mensagem antiga sem tipo continua texto', () {

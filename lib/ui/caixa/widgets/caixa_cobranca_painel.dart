@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../domain/venda_documento_rotulo_helper.dart';
+import '../../theme/app_semantic_colors.dart';
 
 /// Rodape com total em destaque (padrao PDV), compartilhado entre etapas do caixa.
 class CaixaRodapeTotalDestaque extends StatelessWidget {
@@ -150,9 +151,10 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
                 Expanded(
                   child: _chipValor(
                     context,
-                    rotulo: 'Troco',
+                    rotulo: 'TROCO',
                     valor: formatarMoeda(trocoValor),
                     destaque: trocoValor > 0.009,
+                    destaqueVerde: trocoValor > 0.009,
                   ),
                 ),
               ],
@@ -168,20 +170,29 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
     required String rotulo,
     required String valor,
     bool destaque = false,
+    bool destaqueVerde = false,
   }) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final semantic = theme.extension<AppSemanticColors>();
+    final fgVerde = semantic?.successFg ?? Colors.green.shade800;
+    final bgVerde = semantic?.successBg ?? Colors.green.shade50;
+    final bordaVerde = semantic?.successBorder ?? Colors.green.shade200;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: destaque
-            ? scheme.primaryContainer.withValues(alpha: 0.65)
-            : scheme.surface,
+        color: destaqueVerde
+            ? bgVerde
+            : destaque
+                ? scheme.primaryContainer.withValues(alpha: 0.65)
+                : scheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: destaque
-              ? scheme.primary.withValues(alpha: 0.45)
-              : scheme.outlineVariant,
+          color: destaqueVerde
+              ? bordaVerde
+              : destaque
+                  ? scheme.primary.withValues(alpha: 0.45)
+                  : scheme.outlineVariant,
         ),
       ),
       child: Column(
@@ -190,7 +201,10 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
           Text(
             rotulo,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
+              color: destaqueVerde
+                  ? fgVerde
+                  : scheme.onSurfaceVariant,
+              fontWeight: destaqueVerde ? FontWeight.w700 : null,
             ),
           ),
           FittedBox(
@@ -202,7 +216,11 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
               softWrap: false,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
-                color: destaque ? scheme.primary : null,
+                color: destaqueVerde
+                    ? fgVerde
+                    : destaque
+                        ? scheme.primary
+                        : null,
               ),
             ),
           ),
@@ -449,6 +467,8 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
             decoration: InputDecoration(
               labelText: 'Valor recebido',
               hintText: widget.formatarMoeda(widget.totalAPagar),
+              helperText:
+                  'Saldo pendente: ${widget.formatarMoeda(widget.totalAPagar)}',
               border: const OutlineInputBorder(),
               isDense: false,
               contentPadding: const EdgeInsets.symmetric(
@@ -463,6 +483,47 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
             },
             onChanged: widget.onChanged,
             onSubmitted: widget.onSubmitted,
+          ),
+          if (widget.troco > 0.009) ...[
+            const SizedBox(height: 12),
+            _bannerTroco(context),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _bannerTroco(BuildContext context) {
+    final theme = Theme.of(context);
+    final semantic = theme.extension<AppSemanticColors>();
+    final fg = semantic?.successFg ?? Colors.green.shade800;
+    final bg = semantic?.successBg ?? Colors.green.shade50;
+    final border = semantic?.successBorder ?? Colors.green.shade200;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'TROCO',
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: fg,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            widget.formatarMoeda(widget.troco),
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: fg,
+            ),
           ),
         ],
       ),
@@ -483,6 +544,8 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
     required this.valorRecebidoExibicao,
     required this.troco,
     required this.onFinalizar,
+    this.processandoFinalizacao = false,
+    this.finalizarHabilitado = true,
     this.onAlterarForma,
     this.onDesconto,
     this.onFechar,
@@ -497,6 +560,8 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
   final double valorRecebidoExibicao;
   final double troco;
   final VoidCallback? onFinalizar;
+  final bool processandoFinalizacao;
+  final bool finalizarHabilitado;
   final VoidCallback? onAlterarForma;
   final VoidCallback? onDesconto;
   final VoidCallback? onFechar;
@@ -574,8 +639,10 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
             SizedBox(
               height: 46,
               child: FilledButton.icon(
-                onPressed: onFinalizar,
-                icon: onFinalizar == null
+                onPressed: processandoFinalizacao || !finalizarHabilitado
+                    ? null
+                    : onFinalizar,
+                icon: processandoFinalizacao
                     ? const SizedBox(
                         width: 18,
                         height: 18,
@@ -583,7 +650,7 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
                       )
                     : const Icon(Icons.check_circle_outline),
                 label: Text(
-                  onFinalizar == null
+                  processandoFinalizacao
                       ? 'Processando...'
                       : 'Finalizar venda (Enter)',
                 ),

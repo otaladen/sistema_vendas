@@ -301,6 +301,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   final FocusNode _cadastroKeyboardFocusNode = FocusNode(
     debugLabel: 'produtosCadastroTeclado',
   );
+  final _sessaoPesquisaCadastro = ProdutoPesquisaCadastroSessao();
 
   String _status = '';
   bool _statusEhErro = false;
@@ -2081,7 +2082,10 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
-  void _resetarFormulario() {
+  void _resetarFormulario({bool limparPesquisa = false}) {
+    if (limparPesquisa) {
+      _sessaoPesquisaCadastro.limpar();
+    }
     _formKey.currentState?.reset();
     _formFiscalKey.currentState?.reset();
     setState(() {
@@ -2729,6 +2733,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       );
     }
     _resetarFormulario();
+    _sessaoPesquisaCadastro.removerProduto(produtoId);
     _definirStatus('Produto excluido com sucesso.', erro: false);
   }
 
@@ -5118,6 +5123,13 @@ class _ProdutosPageState extends State<ProdutosPage>
       }
       setState(() => _historicoVersao++);
     }
+    final salvoLista = widget.produtoRepository.obterPorId(idSalvo);
+    if (salvoLista != null) {
+      _sessaoPesquisaCadastro.atualizarProdutoSalvo(
+        salvoLista,
+        widget.produtoRepository,
+      );
+    }
     _definirStatus(
       !estavaEditando
           ? 'Produto incluido com sucesso.'
@@ -6070,6 +6082,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     final produtoSelecionado = await showProdutoPesquisaDialog(
       context: context,
       produtoRepository: widget.produtoRepository,
+      sessaoCadastro: _sessaoPesquisaCadastro,
     );
     if (!mounted || produtoSelecionado == null) return;
     await _abrirProdutoParaEdicao(produtoSelecionado);
@@ -7595,7 +7608,8 @@ class _ProdutosPageState extends State<ProdutosPage>
                                     ProdutoCadastroRodape(
                                       emEdicao: _produtoEmEdicaoId != null,
                                       onSalvar: _salvarProduto,
-                                      onNovo: _resetarFormulario,
+                                      onNovo: () =>
+                                          _resetarFormulario(limparPesquisa: true),
                                       onCancelar: _limparFormularioComConfirmacao,
                                       podeExcluir: _produtoEmEdicaoId != null,
                                       onExcluir: _excluirProdutoEmEdicao,

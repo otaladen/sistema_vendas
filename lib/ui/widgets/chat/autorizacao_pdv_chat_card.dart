@@ -36,9 +36,12 @@ class _AutorizacaoPdvChatCardState extends State<AutorizacaoPdvChatCard> {
     super.dispose();
   }
 
+  UsuarioSistema? get _usuario =>
+      widget.usuarioLogado ?? ChatInternoHub.instance.usuarioLogado;
+
   Future<void> _responder(bool aprovar) async {
     final payload = widget.mensagem.autorizacaoPdv;
-    final usuario = widget.usuarioLogado;
+    final usuario = _usuario;
     if (payload == null || usuario == null || _ocupado) return;
     setState(() {
       _ocupado = true;
@@ -66,16 +69,13 @@ class _AutorizacaoPdvChatCardState extends State<AutorizacaoPdvChatCard> {
     if (payload == null) {
       return Text(widget.mensagem.texto, style: theme.textTheme.bodyMedium);
     }
-    final usuario = widget.usuarioLogado;
-    final podeResponder = usuario != null &&
-        payload.pendente &&
-        !widget.mensagem.pendenteLocal &&
+    final usuario = _usuario;
+    final podePelaPermissao = usuario != null &&
         usuarioPodeResponderAutorizacaoPdvChat(
           usuario,
           tipoOperacao: payload.tipoOperacao,
-        ) &&
-        usuario.login.trim().toLowerCase() !=
-            payload.operadorLogin.toLowerCase();
+        );
+    final podeResponder = podePelaPermissao && payload.pendente;
     final statusCor = switch (payload.status) {
       AutorizacaoPdvChatStatus.aprovada => Colors.green.shade700,
       AutorizacaoPdvChatStatus.recusada => scheme.error,
@@ -131,6 +131,18 @@ class _AutorizacaoPdvChatCardState extends State<AutorizacaoPdvChatCard> {
                   ? 'Por ${payload.respondidoPor}'
                   : 'Por ${payload.respondidoPor}: ${payload.motivo}',
               style: theme.textTheme.bodySmall,
+            ),
+          ),
+        if (payload.pendente && !podeResponder)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              usuario == null
+                  ? 'Nao foi possivel identificar o usuario logado para autorizar.'
+                  : !podePelaPermissao
+                      ? 'Sem permissao para aprovar. Entre com gerente, admin ou dono.'
+                      : 'Aguardando confirmacao do recado no servidor...',
+              style: theme.textTheme.bodySmall?.copyWith(color: scheme.error),
             ),
           ),
         if (podeResponder) ...[

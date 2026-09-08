@@ -54,7 +54,8 @@ class ChatInternoDrawer {
   static Future<void> abrir(BuildContext context) async {
     final hub = ChatInternoHub.instance;
     final abrirEntregas = AppShellScope.maybeOf(context)?.irPara;
-    final usuario = MainMenuDeps.maybeOf(context)?.usuarioLogado;
+    final usuario = MainMenuDeps.maybeOf(context)?.usuarioLogado ??
+        ChatInternoHub.instance.usuarioLogado;
     await hub.carregarHistorico();
     hub.marcarPainelAberto(true);
     await showGeneralDialog<void>(

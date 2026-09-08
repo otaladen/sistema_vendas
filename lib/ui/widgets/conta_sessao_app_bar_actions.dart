@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../app_global_error_handler.dart';
+
 enum _AcaoMenuConta { mudarUsuario, sair }
 
 /// Login + menu [Mudar de usuário] / [Sair] para AppBars (menu principal, hub Vendas, etc.).
@@ -13,13 +15,20 @@ class ContaSessaoAppBarActions extends StatelessWidget {
   final String login;
   final VoidCallback onLogout;
 
-  /// Fecha telas empilhadas (hub Vendas, Caixa, etc.) antes de limpar a sessao.
-  void _executarLogout(BuildContext context) {
-    final navigator = Navigator.of(context, rootNavigator: true);
-    if (navigator.canPop()) {
-      navigator.popUntil((route) => route.isFirst);
-    }
-    onLogout();
+  /// Espera o [PopupMenu] fechar antes de mexer no navigator / sessao.
+  ///
+  /// Chamar [Navigator.popUntil] no [onSelected] trava o navigator
+  /// (`!_debugLocked`) e o context do menu ja pode estar desativado.
+  void _agendarLogout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        final navigator = appNavigatorKey.currentState;
+        if (navigator != null && navigator.canPop()) {
+          navigator.popUntil((route) => route.isFirst);
+        }
+      } catch (_) {}
+      onLogout();
+    });
   }
 
   Future<void> _confirmarMudarDeUsuario(BuildContext context) async {
@@ -45,8 +54,8 @@ class ContaSessaoAppBarActions extends StatelessWidget {
         );
       },
     );
-    if (aceitar != true || !context.mounted) return;
-    _executarLogout(context);
+    if (aceitar != true) return;
+    _agendarLogout();
   }
 
   @override
@@ -73,41 +82,40 @@ class ContaSessaoAppBarActions extends StatelessWidget {
                 _confirmarMudarDeUsuario(context);
                 break;
               case _AcaoMenuConta.sair:
-                _executarLogout(context);
+                _agendarLogout();
                 break;
             }
           },
-          itemBuilder: (context) => [
-            PopupMenuItem(
-              value: _AcaoMenuConta.mudarUsuario,
-              child: Row(
-                children: [
-                  Icon(
+          itemBuilder: (context) {
+            final scheme = Theme.of(context).colorScheme;
+            return [
+              PopupMenuItem(
+                value: _AcaoMenuConta.mudarUsuario,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  leading: Icon(
                     Icons.switch_account_outlined,
-                    color: Theme.of(context).colorScheme.primary,
-                    size: 22,
+                    color: scheme.primary,
                   ),
-                  const SizedBox(width: 12),
-                  const Expanded(child: Text('Mudar de usuário')),
-                ],
+                  title: const Text('Mudar de usuário'),
+                ),
               ),
-            ),
-            const PopupMenuDivider(),
-            PopupMenuItem(
-              value: _AcaoMenuConta.sair,
-              child: Row(
-                children: [
-                  Icon(
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: _AcaoMenuConta.sair,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  leading: Icon(
                     Icons.logout,
-                    color: Theme.of(context).colorScheme.error,
-                    size: 22,
+                    color: scheme.error,
                   ),
-                  const SizedBox(width: 12),
-                  const Expanded(child: Text('Sair')),
-                ],
+                  title: const Text('Sair'),
+                ),
               ),
-            ),
-          ],
+            ];
+          },
         ),
         const SizedBox(width: 4),
       ],

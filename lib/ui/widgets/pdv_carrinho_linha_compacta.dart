@@ -283,19 +283,26 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                 fontSizeNome: 13,
               ),
             ),
-            const SizedBox(width: 6),
-            InkWell(
-              onTap: onAlterarPreco,
-              borderRadius: BorderRadius.circular(4),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-                child: Text(
-                  subtotalFormatado,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                    color: precoManual ? scheme.tertiary : null,
-                    height: 1.0,
+            const SizedBox(width: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: InkWell(
+                onTap: onAlterarPreco,
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 1, vertical: 1),
+                  child: Text(
+                    subtotalFormatado,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: precoManual ? scheme.tertiary : null,
+                      height: 1.0,
+                    ),
                   ),
                 ),
               ),
@@ -401,6 +408,10 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
     ColorScheme scheme,
     double minAcao,
   ) {
+    final minAcaoQtd = PdvCarrinhoLinhaColunas.minAcaoQuantidadeDe(
+      alvosTouchAmplos: alvosTouchAmplos,
+    );
+
     return PdvCarrinhoLinhaColunas.linha(
       entrega: _buildBotaoEntrega(),
       codigo: _buildColunaCodigo(theme, scheme),
@@ -436,12 +447,11 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
               onTap: onAlterarPreco,
               borderRadius: BorderRadius.circular(4),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 1, vertical: 2),
                 child: Text(
                   precoUnitarioFormatado,
-                  textAlign: TextAlign.right,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
                   style: theme.textTheme.labelSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     fontSize: 11,
@@ -458,10 +468,11 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
         onTap: onAlterarPreco,
         borderRadius: BorderRadius.circular(4),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 1, vertical: 2),
           child: Text(
             subtotalFormatado,
-            textAlign: TextAlign.right,
+            maxLines: 1,
+            softWrap: false,
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.bold,
               fontSize: 13,
@@ -477,7 +488,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           tooltip: 'Diminuir',
           icon: Icons.remove,
           onPressed: editandoQuantidade ? null : onDiminuir,
-          tamanhoMinimo: minAcao,
+          tamanhoMinimo: minAcaoQtd,
         ),
         quantidade: PdvCarrinhoCampoQuantidade(
           quantidadeExibicao: quantidadeExibicao,
@@ -497,7 +508,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           tooltip: 'Aumentar',
           icon: Icons.add,
           onPressed: editandoQuantidade ? null : onAumentar,
-          tamanhoMinimo: minAcao,
+          tamanhoMinimo: minAcaoQtd,
         ),
       ),
       tabelaPreco: PdvBotaoTabelaPrecoItem(

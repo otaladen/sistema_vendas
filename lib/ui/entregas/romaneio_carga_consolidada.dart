@@ -1,6 +1,7 @@
 import '../../domain/entregas/romaneio_carga_merge.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../model/item_venda.dart';
+import '../../model/produto.dart';
 import '../../model/venda.dart';
 
 /// Linha da carga total consolidada de um grupo (mesmo carro) no romaneio.
@@ -9,9 +10,13 @@ typedef RomaneioCargaConsolidadaLinha = RomaneioCargaLinha;
 /// Percorre [vendasGrupo], soma quantidades por produto (regra unica de dominio).
 List<RomaneioCargaConsolidadaLinha> romaneioMergeCargaGrupo(
   List<Venda> vendasGrupo,
-  int Function(Venda venda, ItemVenda item) quantidadeEntrega,
-) {
-  return RomaneioCargaMerge.montarLinhas(vendasGrupo);
+  int Function(Venda venda, ItemVenda item) quantidadeEntrega, {
+  Produto? Function(int id)? obterProduto,
+}) {
+  return RomaneioCargaMerge.montarLinhas(
+    vendasGrupo,
+    obterProduto: obterProduto,
+  );
 }
 
 /// Explicacao quando [romaneioMergeCargaGrupo] retorna vazio mas o pedido esta na fila.

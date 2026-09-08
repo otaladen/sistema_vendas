@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 
 import '../data/api/venda_api_repository.dart';
 import '../data/app_config_repository.dart';
@@ -146,24 +148,71 @@ class OrcamentosPage extends StatelessWidget {
         return;
       }
 
-      final r = await EscPosPrinterService.imprimirOrcamentoDireto(
-        OrcamentoEscPosDados(
-          venda: venda,
-          config: config,
-          itens: carregado.itens,
-          validadeDias: _validadeOrcamentoDias,
-          cliente: VendaRelacaoSafe.cliente(
-            venda,
-            clienteRepository: clienteRepository,
+      final cliente = VendaRelacaoSafe.cliente(
+        venda,
+        clienteRepository: clienteRepository,
+      );
+      final vendedor = VendaRelacaoSafe.vendedor(
+        venda,
+        vendedorRepository: vendedorRepository,
+      );
+
+      if (config.modoImpressaoBalcao == 'escpos') {
+        final r = await EscPosPrinterService.imprimirOrcamentoDireto(
+          OrcamentoEscPosDados(
+            venda: venda,
+            config: config,
+            itens: carregado.itens,
+            validadeDias: _validadeOrcamentoDias,
+            cliente: cliente,
+            vendedor: vendedor,
+            produtosPorItem: carregado.produtos,
           ),
-          vendedor: VendaRelacaoSafe.vendedor(
-            venda,
-            vendedorRepository: vendedorRepository,
+        );
+        messenger.showSnackBar(SnackBar(content: Text(r.mensagem)));
+        return;
+      }
+
+      final pdf = await OrcamentoPdfService.gerar(
+        venda: venda,
+        itens: carregado.itens,
+        empresa: config,
+        validadeDias: _validadeOrcamentoDias,
+        cliente: cliente,
+        vendedor: vendedor,
+        produtosPorItem: carregado.produtos,
+      );
+      final printer = await printService.resolverImpressoraPorNome(
+        config.impressoraPadrao,
+      );
+      if (printer == null) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Impressora padrao nao configurada/encontrada. '
+              'Configure em Configuracoes > Impressora.',
+            ),
           ),
-          produtosPorItem: carregado.produtos,
+        );
+        return;
+      }
+      final numero = venda.numeroOrcamento > 0
+          ? venda.numeroOrcamento
+          : venda.id;
+      final formatDireto = config.modeloPdf == 'a4'
+          ? PdfPageFormat.a4
+          : pdf.pageFormat;
+      await Printing.directPrintPdf(
+        printer: printer,
+        onLayout: (_) async => pdf.bytes,
+        name: 'Orcamento $numero',
+        format: formatDireto,
+      );
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Orcamento enviado para a impressora configurada.'),
         ),
       );
-      messenger.showSnackBar(SnackBar(content: Text(r.mensagem)));
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text('Falha ao imprimir orcamento: $e')),
