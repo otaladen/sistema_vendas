@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
@@ -129,6 +130,14 @@ abstract final class EscPosOrcamentoBuilder {
       ));
     }
 
+    _adicionarBlocoEntregaCarreto(
+      out,
+      cols: cols,
+      venda: venda,
+      cliente: cliente,
+      itens: itens,
+    );
+
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line('ITENS'));
@@ -244,6 +253,34 @@ abstract final class EscPosOrcamentoBuilder {
       out.add(EscPosCommands.cutPartial);
     }
     return out.toBytes();
+  }
+
+  static void _adicionarBlocoEntregaCarreto(
+    BytesBuilder out, {
+    required int cols,
+    required Venda venda,
+    Cliente? cliente,
+    required List<ItemVenda> itens,
+  }) {
+    final linhas = EntregaVendaHelper.linhasBlocoEntregaImpressao(
+      venda: venda,
+      cliente: cliente,
+      itens: itens,
+    );
+    if (linhas.isEmpty) return;
+
+    out.add(EscPosCommands.separator(cols));
+    out.add(EscPosCommands.alignLeft);
+    out.add(EscPosCommands.boldOn);
+    for (final l in _wrap(EntregaVendaHelper.tituloBlocoEntregaImpressao, cols)) {
+      out.add(EscPosCommands.line(l));
+    }
+    out.add(EscPosCommands.boldOff);
+    for (final linha in linhas) {
+      for (final l in _wrap(linha, cols)) {
+        out.add(EscPosCommands.line(l));
+      }
+    }
   }
 
   static String _formatCnpj(String raw) {

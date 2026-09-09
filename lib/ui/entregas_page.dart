@@ -1553,7 +1553,12 @@ class _EntregasPageState extends State<EntregasPage>
           final tag = EntregaVendaHelper.abreviacaoTipoItem(
             item.tipoEntregaItem,
           );
-          final base = '${q}x ${item.nomeProduto} ($tag)';
+          final qtdTxt = _textoQuantidadeExibicaoEntrega(venda, item);
+          final un = RomaneioProdutoOrfaoHelper.unidadeSnapshot(
+            item,
+            obterProduto: _obterProdutoPorId,
+          );
+          final base = '$qtdTxt $un · ${item.nomeProduto} ($tag)';
           final lote = LoteFefoService.formatarRotuloRetiradaPatio(
             LoteConsumoSnapshot.decodeList(item.loteConsumosJson),
           );
@@ -3233,6 +3238,7 @@ class _EntregasPageState extends State<EntregasPage>
     bool? separado,
     bool? carregado,
     bool? saiu,
+    bool forcarSaidaRomaneio = false,
     String? lojaOrigemMercadoria,
     Map<int, String>? origemPorItem,
   }) async {
@@ -3255,8 +3261,10 @@ class _EntregasPageState extends State<EntregasPage>
           separado: separado,
           carregado: carregado,
           saiu: saiu,
+          forcarSaidaRomaneio: forcarSaidaRomaneio,
           lojaOrigemMercadoria: lojaOrigemMercadoria,
           origemPorItem: origemPorItem,
+          usuario: widget.usuarioAtual,
         );
       } else {
         widget.vendaRepository.atualizarChecklistCargaEntrega(
@@ -3265,8 +3273,10 @@ class _EntregasPageState extends State<EntregasPage>
           carregado: carregado,
           saiu: saiu,
           permitirVendaSemEstoque: await _permitirVendaSemEstoqueAtual(),
+          forcarSaidaRomaneio: forcarSaidaRomaneio,
           lojaOrigemMercadoria: lojaOrigemMercadoria,
           origemPorItem: origemPorItem,
+          usuario: widget.usuarioAtual,
         );
       }
       // Atualiza flags locais imediatamente (evita flicker antes do hidratar).
@@ -3359,6 +3369,7 @@ class _EntregasPageState extends State<EntregasPage>
   Future<bool> _liberarSaidaEntrega(
     Venda venda, {
     bool mostrarSnackSucesso = true,
+    bool forcarSaidaRomaneio = false,
     String? lojaOrigemMercadoria,
     Map<int, String>? origemPorItem,
   }) async {
@@ -3399,6 +3410,7 @@ class _EntregasPageState extends State<EntregasPage>
       separado: true,
       carregado: true,
       saiu: true,
+      forcarSaidaRomaneio: forcarSaidaRomaneio,
       lojaOrigemMercadoria: origem,
       origemPorItem: origensItem,
     );
@@ -3426,6 +3438,18 @@ class _EntregasPageState extends State<EntregasPage>
     }
 
     if (mostrarSnackSucesso && mounted) {
+      if (forcarSaidaRomaneio) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Saida forcada — romaneio liberado sem validar reserva de estoque. '
+              'Consulte o historico da entrega.',
+            ),
+            duration: Duration(seconds: 8),
+          ),
+        );
+        return true;
+      }
       final origemTxt = LojaOrigemMercadoria.ehLocal(venda.lojaOrigemMercadoria)
           ? 'estoque desta loja baixado'
           : LojaOrigemMercadoria.ehMisto(venda.lojaOrigemMercadoria)
@@ -3440,6 +3464,50 @@ class _EntregasPageState extends State<EntregasPage>
       );
     }
     return true;
+  }
+
+  Future<bool> _forcarSaidaRomaneioEntrega(Venda venda) async {
+    if (!widget.podeGerenciarStatusEntrega) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_mensagemSemPermissaoStatus())),
+      );
+      return false;
+    }
+    if (!EntregaFluxoService.podeLiberarSaida(venda) && venda.cargaSaiu) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Este pedido ja consta como saido.')),
+      );
+      return false;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Forcar saida do romaneio?'),
+        content: Text(
+          'Pedido ${venda.numeroOrcamento}: libera "Saiu" ignorando reserva '
+          'de estoque e conferencia de patio. Use apenas para romaneios antigos '
+          'com pendencia de saldo ou cadastro inconsistente.\n\n'
+          'A acao fica registrada no historico da entrega.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Forcar saida'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return false;
+    return _liberarSaidaEntrega(
+      venda,
+      forcarSaidaRomaneio: true,
+    );
   }
 
   Future<bool> _autoRoteirizarAposMotorista(Venda venda) async {
@@ -4613,6 +4681,7 @@ class _EntregasPageState extends State<EntregasPage>
         ),
     atualizarStatus: _atualizarStatusEntrega,
     liberarSaida: _liberarSaidaEntrega,
+    forcarSaidaRomaneio: _forcarSaidaRomaneioEntrega,
     emitirRelatorio: ({required tipo, motorista, viagem, required salvarPdf}) =>
         _emitirRelatorioEntrega(
           tipo: tipo,

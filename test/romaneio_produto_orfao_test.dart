@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/domain/entrega_venda_helper.dart';
 import 'package:sistema_vendas/domain/entregas/carreto_saida_produto_orfao.dart';
 import 'package:sistema_vendas/domain/entregas/romaneio_carga_merge.dart';
+import 'package:sistema_vendas/domain/produto_embalagem.dart';
 import 'package:sistema_vendas/model/item_venda.dart';
 import 'package:sistema_vendas/model/produto.dart';
 import 'package:sistema_vendas/model/venda.dart';
@@ -69,6 +70,56 @@ void main() {
     });
   });
 
+  group('leituraUsaEscalaFracionada legado', () {
+    test('1 m3 fracionado nao vira 0,001 na exibicao', () {
+      final produto = Produto(
+        id: 1,
+        codigoInterno: 'AREIA',
+        nome: 'Areia 1/2m3',
+        unidade: 'M3',
+        quantidadeMinima: 0,
+        precoCusto: 1,
+        precoVenda: 2,
+        permiteQuantidadeFracionada: true,
+      );
+      expect(
+        ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, 1),
+        isFalse,
+      );
+      expect(
+        ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+          produto: produto,
+          quantidadeArmazenada: 1,
+        ),
+        1,
+      );
+    });
+
+    test('0,5 m3 em milesimos continua decimal', () {
+      final produto = Produto(
+        id: 2,
+        codigoInterno: 'AREIA',
+        nome: 'Areia',
+        unidade: 'M3',
+        quantidadeMinima: 0,
+        precoCusto: 1,
+        precoVenda: 2,
+        permiteQuantidadeFracionada: true,
+      );
+      expect(
+        ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, 500),
+        isTrue,
+      );
+      expect(
+        ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+          produto: produto,
+          quantidadeArmazenada: 500,
+        ),
+        closeTo(0.5, 0.001),
+      );
+    });
+  });
+
   group('CarretoSaidaProdutoOrfaoEvento', () {
     test('encode e parse preservam linhas', () {
       final ev = CarretoSaidaProdutoOrfaoEvento(
@@ -89,6 +140,26 @@ void main() {
       expect(round, isNotNull);
       expect(round!.linhas.single.nomeProduto, 'Tinta velha');
       expect(round.textoHumano, contains('cadastro excluido'));
+    });
+
+    test('texto humano descreve reserva inconsistente', () {
+      final ev = CarretoSaidaProdutoOrfaoEvento(
+        vendaId: 8,
+        numeroOrcamento: 8,
+        documento: 'Pedido #8',
+        dataHora: DateTime.utc(2026, 3, 9),
+        linhas: const [
+          CarretoSaidaProdutoOrfaoLinha(
+            itemVendaId: 1,
+            nomeProduto: 'Areia 1/2m3',
+            quantidade: 1,
+            unidade: 'M3',
+            motivo: CarretoSaidaSemBaixaMotivo.reservaInconsistente,
+            reservadoCadastro: 0,
+          ),
+        ],
+      );
+      expect(ev.textoHumano, contains('reserva 0 no cadastro'));
     });
   });
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'pdv_mobile_ui.dart';
 import 'quantidade_pdv_input_formatter.dart';
 
 /// Campo de quantidade na linha do carrinho (exibicao ou edicao inline com destaque).
@@ -101,7 +102,10 @@ class _PdvCarrinhoCampoQuantidadeState extends State<PdvCarrinhoCampoQuantidade>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final baseStyle = widget.textStyle ??
-        theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800);
+        theme.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          fontSize: PdvTipografia.listaQuantidade,
+        );
 
     if (!widget.editando) {
       return Tooltip(
@@ -110,8 +114,17 @@ class _PdvCarrinhoCampoQuantidadeState extends State<PdvCarrinhoCampoQuantidade>
           onTap: widget.onTapEditar,
           borderRadius: BorderRadius.circular(4),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Text(widget.quantidadeExibicao, style: baseStyle),
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                widget.quantidadeExibicao,
+                style: baseStyle,
+                textAlign: TextAlign.center,
+                softWrap: false,
+                maxLines: 1,
+              ),
+            ),
           ),
         ),
       );
@@ -147,15 +160,13 @@ class _PdvCarrinhoCampoQuantidadeState extends State<PdvCarrinhoCampoQuantidade>
           child: child,
         );
       },
-      child: SizedBox(
-        width: 48,
-        child: TextField(
+      child: TextField(
           controller: widget.controller,
           focusNode: widget.focusNode,
           textAlign: TextAlign.center,
           style: baseStyle?.copyWith(
             color: scheme.primary,
-            fontSize: 13,
+            fontSize: PdvTipografia.listaQuantidade,
             height: 1.0,
           ),
           decoration: const InputDecoration(
@@ -172,7 +183,6 @@ class _PdvCarrinhoCampoQuantidadeState extends State<PdvCarrinhoCampoQuantidade>
           onSubmitted: (_) => widget.onConfirmar(),
           onTap: _selecionarTexto,
         ),
-      ),
     );
   }
 }

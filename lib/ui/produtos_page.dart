@@ -3466,6 +3466,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                   if (value == null) return;
                   setState(() {
                     _unidadeCompraController.text = value;
+                    if (value.isEmpty) {
+                      _quantidadeEmbalagemController.text = '1';
+                    }
                   });
                 },
               ),
@@ -3592,7 +3595,22 @@ class _ProdutosPageState extends State<ProdutosPage>
         '';
   }
 
+  /// Sem unidade de compra distinta, nao mantem fator de conversao no cadastro.
+  ({String unidadeCompra, double quantidadePorEmbalagem})
+      _embalagemPersistenciaFormulario() {
+    final uVenda = _normalizarUnidade(_unidadeSelecionada);
+    final uCompra = _unidadeCompraNoFormulario();
+    if (uCompra.isEmpty || uCompra == uVenda) {
+      return (unidadeCompra: '', quantidadePorEmbalagem: 1);
+    }
+    return (
+      unidadeCompra: uCompra,
+      quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
+    );
+  }
+
   Produto _produtoEmbalagemContexto() {
+    final emb = _embalagemPersistenciaFormulario();
     return Produto(
       codigoInterno: _codigoInternoController.text.trim().isEmpty
           ? 'rascunho'
@@ -3601,8 +3619,8 @@ class _ProdutosPageState extends State<ProdutosPage>
           ? 'Novo'
           : _nomeController.text.trim(),
       unidade: _normalizarUnidade(_unidadeSelecionada),
-      unidadeCompra: _unidadeCompraNoFormulario(),
-      quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
+      unidadeCompra: emb.unidadeCompra,
+      quantidadePorEmbalagem: emb.quantidadePorEmbalagem,
       embalagemMultiplica: _embalagemMultiplica,
       permiteQuantidadeFracionada: _permiteQuantidadeFracionada,
       quantidadeMinima: 0,
@@ -4887,6 +4905,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       }
     }
 
+    final embalagemSalvar = _embalagemPersistenciaFormulario();
     final produto = Produto(
       id: produtoExistente?.id ?? 0,
       codigoInterno: codigoInternoFinal,
@@ -4939,8 +4958,8 @@ class _ProdutosPageState extends State<ProdutosPage>
             _limiteDescontoPreco3Controller.text,
           ) ??
           0,
-      unidadeCompra: _unidadeCompraNoFormulario(),
-      quantidadePorEmbalagem: _lerQuantidadeEmbalagem(),
+      unidadeCompra: embalagemSalvar.unidadeCompra,
+      quantidadePorEmbalagem: embalagemSalvar.quantidadePorEmbalagem,
       embalagemMultiplica: _embalagemMultiplica,
       permiteQuantidadeFracionada: _permiteQuantidadeFracionada,
       controlaLoteValidade: _controlaLoteValidade,

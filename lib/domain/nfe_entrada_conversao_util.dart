@@ -89,13 +89,31 @@ abstract final class NfeEntradaConversaoUtil {
     return convertido;
   }
 
+  /// Nota com unidade distinta da interna e fator != 1 exige opt-in para PDV/cadastro.
+  static bool notaExigeConfirmacaoEmbalagem({
+    required ItemNotaTemporario item,
+    required String unidadeInterna,
+    required double fator,
+  }) {
+    if (fator <= 0 || (fator - 1).abs() < 0.0001) return false;
+    final uNota = _unidadeComercialEfetiva(item);
+    final uVenda = ProdutoEmbalagem.normalizarUnidade(unidadeInterna);
+    return !ProdutoEmbalagem.unidadesEquivalentes(uNota, uVenda);
+  }
+
   /// Indica se a nota exige confirmacao explicita para gravar conversao no cadastro.
   static bool precisaConfirmarConversaoEmbalagem({
     required ItemNotaTemporario item,
     required Produto produto,
     required double fator,
   }) {
-    if (fator <= 0 || (fator - 1).abs() < 0.0001) return false;
+    if (!notaExigeConfirmacaoEmbalagem(
+      item: item,
+      unidadeInterna: produto.unidade,
+      fator: fator,
+    )) {
+      return false;
+    }
     final uNota = _unidadeComercialEfetiva(item);
     final uVenda = ProdutoEmbalagem.normalizarUnidade(produto.unidade);
     if (ProdutoEmbalagem.unidadesEquivalentes(uNota, uVenda)) return false;

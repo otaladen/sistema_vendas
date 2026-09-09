@@ -88,6 +88,7 @@ import '../../services/recibo_recebimento_fiado_pdf.dart';
 import '../fiscal/emitir_nfce_venda_flow.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
 import '../fiscal/pendencias_fiscais_page.dart';
+import '../orcamento_pdv_navigation.dart';
 import '../pdv_consulta_produtos_page.dart';
 import '../pdv_desconto_autorizacao.dart';
 import '../promocao_margem_autorizacao.dart';
@@ -1025,6 +1026,72 @@ class _CaixaPageState extends State<CaixaPage> {
       _prepararEdicaoMisto(alvo);
       _sincronizarRecebidoPdVComOrcamento();
     });
+  }
+
+  Future<void> _recarregarOrcamentoNoCaixa(int vendaId) async {
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      try {
+        await repo.carregarItensRemoto(vendaId);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final atualizado = repo.obterPorId(vendaId);
+    if (atualizado == null) return;
+    setState(() {
+      final i = _orcamentos.indexWhere((v) => v.id == vendaId);
+      if (i >= 0) _orcamentos[i] = atualizado;
+      if (_selecionado?.id == vendaId) {
+        _selecionado = atualizado;
+        _prepararEdicaoMisto(atualizado);
+        _sincronizarRecebidoPdVComOrcamento();
+      }
+    });
+  }
+
+  Future<bool> _bloquearFinalizacaoCarretoCotacao(Venda venda) async {
+    final itens = await _itensDaVendaAsync(venda);
+    if (!EntregaVendaHelper.orcamentoCarretoSemEnderecoParaFinalizar(
+      venda,
+      itens: itens,
+    )) {
+      return false;
+    }
+    if (!mounted) return true;
+    final editar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Entrega incompleta'),
+        content: Text(
+          EntregaVendaHelper.mensagemBloqueioFinalizacaoCarretoCotacao(venda),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Voltar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Editar no PDV'),
+          ),
+        ],
+      ),
+    );
+    if (editar == true && mounted) {
+      await abrirPdvComOrcamento(
+        context,
+        orcamentoId: venda.id,
+        produtoRepository: widget.produtoRepository,
+        clienteRepository: widget.clienteRepository,
+        vendaRepository: widget.vendaRepository,
+        vendedorRepository: widget.vendedorRepository,
+        appConfigRepository: widget.appConfigRepository,
+        printService: widget.printService,
+        usuarioLogado: widget.usuarioLogado,
+      );
+      await _recarregarOrcamentoNoCaixa(venda.id);
+    }
+    return true;
   }
 
   Future<void> _garantirItensOrcamentoApi(int vendaId) async {
@@ -4995,6 +5062,7 @@ class _CaixaPageState extends State<CaixaPage> {
       );
       return;
     }
+    if (await _bloquearFinalizacaoCarretoCotacao(venda)) return;
     if (valorFiado > 0.001) {
       final plano = PlanoFiadoCodec.decode(venda.planoFiadoJson);
       if (!PlanoFiadoCodec.validarContraValor(plano, valorFiado)) {

@@ -708,16 +708,20 @@ class GerenciadorEstoqueService {
   void validarEstoqueAntesDespachoCarreto(
     Venda venda, {
     bool permitirVendaSemEstoque = true,
+    bool forcarSaidaRomaneio = false,
   }) {
-    if (!venda.carretoReservaAteSaida) return;
+    if (!venda.carretoReservaAteSaida || forcarSaidaRomaneio) return;
     final porProduto = <int, ({int q, String nome})>{};
     for (final item in venda.itens) {
       final q = quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
       if (_itemProdutoOrfao(item)) continue;
-      final produto = item.produtoOuNull;
-      final pid = produto?.id ?? _produtoIdDoItem(item);
+      final pid = _produtoIdDoItem(item);
       if (pid <= 0) continue;
+      final produtoDb = _db.produtoBox.get(pid);
+      if (produtoDb == null) continue;
+      if (produtoDb.estoqueReservado < q) continue;
+      final produto = item.produtoOuNull;
       final nome = produto?.nome ?? item.nomeProduto;
       final atual = porProduto[pid];
       porProduto[pid] = (
@@ -739,17 +743,9 @@ class GerenciadorEstoqueService {
     final falhas = <String>[];
     for (final e in porProduto.entries) {
       final produto = _db.produtoBox.get(e.key);
-      if (produto == null) {
-        falhas.add('Produto id ${e.key} nao encontrado.');
-        continue;
-      }
+      if (produto == null) continue;
       final q = e.value.q;
-      if (produto.estoqueReservado < q) {
-        falhas.add(
-          '${e.value.nome}: reservado ${produto.estoqueReservado}, '
-          'necessario $q para o romaneio.',
-        );
-      }
+      if (produto.estoqueReservado < q) continue;
       final qFisico = fisicoPorProduto[e.key] ?? 0;
       if (qFisico > 0 &&
           !permitirVendaSemEstoque &&
@@ -768,22 +764,48 @@ class GerenciadorEstoqueService {
     }
   }
 
+  CarretoSaidaProdutoOrfaoLinha _linhaSemBaixaCarreto({
+    required ItemVenda item,
+    required int q,
+    required String motivo,
+    int reservadoCadastro = 0,
+  }) {
+    return CarretoSaidaProdutoOrfaoLinha(
+      itemVendaId: item.id,
+      nomeProduto: RomaneioProdutoOrfaoHelper.nomeSnapshot(item),
+      quantidade: q,
+      unidade: RomaneioProdutoOrfaoHelper.unidadeSnapshot(item),
+      motivo: motivo,
+      reservadoCadastro: reservadoCadastro,
+    );
+  }
+
   List<CarretoSaidaProdutoOrfaoLinha> baixarEstoqueCarretoAoMarcarSaida(
     Venda venda, {
     bool permitirVendaSemEstoque = true,
+    bool forcarSaidaRomaneio = false,
   }) {
     final falhas = <String>[];
-    final orfaos = <CarretoSaidaProdutoOrfaoLinha>[];
+    final semBaixa = <CarretoSaidaProdutoOrfaoLinha>[];
     for (final item in venda.itens) {
       final q = quantidadeItemParaEstoqueCarreto(item);
       if (q <= 0) continue;
+      if (forcarSaidaRomaneio) {
+        semBaixa.add(
+          _linhaSemBaixaCarreto(
+            item: item,
+            q: q,
+            motivo: CarretoSaidaSemBaixaMotivo.forcaAdmin,
+          ),
+        );
+        continue;
+      }
       if (_itemProdutoOrfao(item)) {
-        orfaos.add(
-          CarretoSaidaProdutoOrfaoLinha(
-            itemVendaId: item.id,
-            nomeProduto: RomaneioProdutoOrfaoHelper.nomeSnapshot(item),
-            quantidade: q,
-            unidade: RomaneioProdutoOrfaoHelper.unidadeSnapshot(item),
+        semBaixa.add(
+          _linhaSemBaixaCarreto(
+            item: item,
+            q: q,
+            motivo: CarretoSaidaSemBaixaMotivo.produtoExcluido,
           ),
         );
         continue;
@@ -804,13 +826,23 @@ class GerenciadorEstoqueService {
       try {
         produto = _produtoAtualDoItem(item);
       } catch (e) {
-        falhas.add('$e');
+        semBaixa.add(
+          _linhaSemBaixaCarreto(
+            item: item,
+            q: q,
+            motivo: CarretoSaidaSemBaixaMotivo.produtoExcluido,
+          ),
+        );
         continue;
       }
       if (produto.estoqueReservado < q) {
-        falhas.add(
-          '${produto.nome}: reservado ${produto.estoqueReservado}, '
-          'necessario $q para saida do carro.',
+        semBaixa.add(
+          _linhaSemBaixaCarreto(
+            item: item,
+            q: q,
+            motivo: CarretoSaidaSemBaixaMotivo.reservaInconsistente,
+            reservadoCadastro: produto.estoqueReservado,
+          ),
         );
         continue;
       }
@@ -855,7 +887,7 @@ class GerenciadorEstoqueService {
         '${falhas.join('\n')}',
       );
     }
-    return orfaos;
+    return semBaixa;
   }
 
   /// Depois da saida (reserva ja liberada), baixa so o fisico dos itens

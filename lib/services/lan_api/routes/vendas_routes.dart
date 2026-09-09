@@ -127,6 +127,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         dataEntregaMarcada: DateTime.tryParse(
           (entregaMap['dataEntregaMarcada'] ?? '').toString(),
         )?.toUtc(),
+        entregaSomenteCotacao: entregaMap['entregaSomenteCotacao'] == true,
       );
       final idResult = d.vendaRepository.registrarOrcamentoIdempotente(
         itens,
@@ -216,6 +217,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         dataEntregaMarcada: DateTime.tryParse(
           (entregaMap['dataEntregaMarcada'] ?? '').toString(),
         )?.toUtc(),
+        entregaSomenteCotacao: entregaMap['entregaSomenteCotacao'] == true,
       );
       final vendaId = int.parse(id);
       d.vendaRepository.atualizarOrcamento(
@@ -1036,10 +1038,12 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
               ? body['cargaCarregada'] == true
               : null,
           saiu: body.containsKey('cargaSaiu') ? body['cargaSaiu'] == true : null,
+          forcarSaidaRomaneio: body['forcarSaidaRomaneio'] == true,
           lojaOrigemMercadoria: body.containsKey('lojaOrigemMercadoria')
               ? (body['lojaOrigemMercadoria'] ?? '').toString()
               : null,
           origemPorItem: origemItens.isEmpty ? null : origemItens,
+          usuario: (body['usuario'] ?? '').toString(),
         );
       }
       d.notificar('entrega');
@@ -1082,6 +1086,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         exigirConferenciaPatio: body['exigirConferenciaPatio'] == true,
         incluirGrupo: body['incluirGrupo'] != false,
         permitirVendaSemEstoque: permitir,
+        forcarSaidaRomaneio: body['forcarSaidaRomaneio'] == true,
       );
       d.notificar('entrega');
       d.notificar('venda');

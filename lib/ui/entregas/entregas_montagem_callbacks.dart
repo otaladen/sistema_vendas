@@ -7,6 +7,7 @@ class EntregasMontagemCallbacks {
     required this.atualizarChecklist,
     required this.atualizarStatus,
     required this.liberarSaida,
+    required this.forcarSaidaRomaneio,
     required this.emitirRelatorio,
     required this.trocarParada,
     required this.trocarParadaMotorista,
@@ -38,9 +39,13 @@ class EntregasMontagemCallbacks {
   final Future<bool> Function(
     Venda venda, {
     bool mostrarSnackSucesso,
+    bool forcarSaidaRomaneio,
     String? lojaOrigemMercadoria,
     Map<int, String>? origemPorItem,
   }) liberarSaida;
+
+  /// Destrava romaneio antigo ignorando reserva/conferencia de estoque.
+  final Future<bool> Function(Venda venda) forcarSaidaRomaneio;
 
   final Future<void> Function({
     required RelatorioEntregaTipo tipo,

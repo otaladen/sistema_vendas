@@ -319,7 +319,12 @@ void _aplicarDadosEntregaOrcamentoNaVenda(
   venda.valorFrete = temCarreto ? entrega.valorFrete : 0;
   venda.enderecoEntrega = temCarreto ? entrega.enderecoEntrega : '';
   venda.observacaoEntrega = temCarreto ? entrega.observacaoEntrega : '';
-  venda.statusEntrega = temCarreto ? 'pendente' : 'nao_aplicavel';
+  final cotacaoSemEndereco = temCarreto &&
+      entrega.entregaSomenteCotacao &&
+      entrega.enderecoEntrega.trim().isEmpty;
+  venda.statusEntrega = temCarreto
+      ? (cotacaoSemEndereco ? 'cotacao' : 'pendente')
+      : 'nao_aplicavel';
   venda.prioridadeEntrega = temCarreto ? entrega.prioridadeEntrega : 'normal';
   venda.janelaEntrega = temCarreto ? entrega.janelaEntrega : 'nao_definida';
   venda.dataEntregaMarcada = temCarreto ? entrega.dataEntregaMarcada : null;
@@ -422,6 +427,7 @@ class DadosEntregaOrcamento {
     this.prioridadeEntrega = 'normal',
     this.janelaEntrega = 'nao_definida',
     this.dataEntregaMarcada,
+    this.entregaSomenteCotacao = false,
   });
 
   final String tipoEntrega; // retirada | retirada_futura | entrega_loja
@@ -431,6 +437,9 @@ class DadosEntregaOrcamento {
   final String prioridadeEntrega; // normal | urgente | agendada
   final String janelaEntrega; // manha | tarde | nao_definida
   final DateTime? dataEntregaMarcada;
+
+  /// Orcamento de cotacao: frete estimado sem endereco/agenda definidos.
+  final bool entregaSomenteCotacao;
 }
 
 /// Filtros da [ListagemVendasPage]: condicoes aplicadas no ObjectBox (sem `getAll`).
@@ -2212,7 +2221,8 @@ class VendaRepository {
         if (venda.valorFrete < 0) {
           throw StateError('Valor de frete nao pode ser negativo.');
         }
-        if (venda.enderecoEntrega.trim().isEmpty) {
+        if (venda.enderecoEntrega.trim().isEmpty &&
+            venda.statusEntrega != 'cotacao') {
           throw StateError('Endereco de entrega obrigatorio para carreto.');
         }
       }
@@ -2713,7 +2723,8 @@ class VendaRepository {
         if (venda.valorFrete < 0) {
           throw StateError('Valor de frete nao pode ser negativo.');
         }
-        if (venda.enderecoEntrega.trim().isEmpty) {
+        if (venda.enderecoEntrega.trim().isEmpty &&
+            venda.statusEntrega != 'cotacao') {
           throw StateError('Endereco de entrega obrigatorio para carreto.');
         }
       }
@@ -2874,6 +2885,19 @@ class VendaRepository {
       }
 
       final filhoFreteRetirada = venda.vendaOrigemFreteRetiradaId > 0;
+
+      if (EntregaVendaHelper.orcamentoCarretoSemEnderecoParaFinalizar(
+        venda,
+        itens: itens,
+      )) {
+        throw StateError(
+          EntregaVendaHelper.mensagemBloqueioFinalizacaoCarretoCotacao(venda),
+        );
+      }
+      if (EntregaVendaHelper.vendaTemItensCarreto(venda, itens: itens) &&
+          EntregaVendaHelper.statusEntregaEhCotacao(venda.statusEntrega)) {
+        venda.statusEntrega = 'pendente';
+      }
 
       if (!filhoFreteRetirada) {
         // So cabecalho explicito de futura: flag entregaPendente sozinha pode
@@ -4822,8 +4846,10 @@ class VendaRepository {
     bool? saiu,
     bool permitirVendaSemEstoque = true,
     bool exigirConferenciaPatio = false,
+    bool forcarSaidaRomaneio = false,
     String? lojaOrigemMercadoria,
     Map<int, String>? origemPorItem,
+    String usuario = 'sistema',
   }) {
     _db.store.runInTransaction(TxMode.write, () {
       final venda = _db.vendaBox.get(vendaId);
@@ -4853,7 +4879,7 @@ class VendaRepository {
           !venda.cancelada) {
         if (!saiuAntes && saiuDepois) {
           _preencherOrigemPadraoCarretoSeVazio(venda);
-          if (exigirConferenciaPatio) {
+          if (exigirConferenciaPatio && !forcarSaidaRomaneio) {
             final vendasEscopo = _vendasEscopoConferenciaCarreto(venda);
             ConferenciaCargaValidacao.validarAntesMarcarSaiu(
               repository: _conferenciaCarga,
@@ -4863,13 +4889,19 @@ class VendaRepository {
           _estoque.validarEstoqueAntesDespachoCarreto(
             venda,
             permitirVendaSemEstoque: permitirVendaSemEstoque,
+            forcarSaidaRomaneio: forcarSaidaRomaneio,
           );
-          final orfaos = _estoque.baixarEstoqueCarretoAoMarcarSaida(
+          final semBaixa = _estoque.baixarEstoqueCarretoAoMarcarSaida(
             venda,
             permitirVendaSemEstoque: permitirVendaSemEstoque,
+            forcarSaidaRomaneio: forcarSaidaRomaneio,
           );
-          if (orfaos.isNotEmpty) {
-            _registrarSaidaCarretoProdutosOrfaos(venda, orfaos);
+          if (semBaixa.isNotEmpty) {
+            _registrarSaidaCarretoProdutosOrfaos(
+              venda,
+              semBaixa,
+              usuario: usuario,
+            );
           }
         } else if (saiuAntes && !saiuDepois) {
           _estoque.estornarBaixaEstoqueCarretoAoDesmarcarSaida(
@@ -4900,6 +4932,7 @@ class VendaRepository {
     bool exigirConferenciaPatio = false,
     bool incluirGrupo = true,
     bool permitirVendaSemEstoque = true,
+    bool forcarSaidaRomaneio = false,
   }) {
     final raiz = _db.vendaBox.get(vendaId);
     if (raiz == null) {
@@ -4935,6 +4968,8 @@ class VendaRepository {
         saiu: true,
         exigirConferenciaPatio: exigirConferenciaPatio,
         permitirVendaSemEstoque: permitirVendaSemEstoque,
+        forcarSaidaRomaneio: forcarSaidaRomaneio,
+        usuario: quem,
       );
       var atual = _db.vendaBox.get(id);
       if (atual == null) continue;
@@ -5341,7 +5376,7 @@ class VendaRepository {
   void _registrarSaidaCarretoProdutosOrfaos(
     Venda venda,
     List<CarretoSaidaProdutoOrfaoLinha> linhas, {
-    String usuario = 'sistema',
+    required String usuario,
   }) {
     if (linhas.isEmpty) return;
     final evento = CarretoSaidaProdutoOrfaoEvento(

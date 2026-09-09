@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/quantidade_venda_util.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
@@ -164,6 +165,14 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.line('Vendedor: ${_trunc(vendNome, cols - 10)}'));
     }
 
+    _adicionarBlocoEntregaCarreto(
+      out,
+      cols: cols,
+      venda: venda,
+      cliente: dados.cliente,
+      itens: dados.itens,
+    );
+
     final cli = dados.cliente;
     if (temNfceReal && homolog) {
       out.add(EscPosCommands.line(
@@ -322,6 +331,34 @@ abstract final class EscPosCupomBuilder {
     }
 
     return out.toBytes();
+  }
+
+  static void _adicionarBlocoEntregaCarreto(
+    BytesBuilder out, {
+    required int cols,
+    required Venda venda,
+    Cliente? cliente,
+    required List<ItemVenda> itens,
+  }) {
+    final linhas = EntregaVendaHelper.linhasBlocoEntregaImpressao(
+      venda: venda,
+      cliente: cliente,
+      itens: itens,
+    );
+    if (linhas.isEmpty) return;
+
+    out.add(EscPosCommands.separator(cols));
+    out.add(EscPosCommands.alignLeft);
+    out.add(EscPosCommands.boldOn);
+    for (final l in _wrap(EntregaVendaHelper.tituloBlocoEntregaImpressao, cols)) {
+      out.add(EscPosCommands.line(l));
+    }
+    out.add(EscPosCommands.boldOff);
+    for (final linha in linhas) {
+      for (final l in _wrap(linha, cols)) {
+        out.add(EscPosCommands.line(l));
+      }
+    }
   }
 
   static bool _pareceRodapeNaoFiscal(String s) {

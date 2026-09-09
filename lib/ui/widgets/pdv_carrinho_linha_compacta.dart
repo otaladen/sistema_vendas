@@ -7,7 +7,7 @@ import 'pdv_mobile_ui.dart';
 import 'pdv_tipo_entrega_item.dart';
 import 'promocao_badge.dart';
 
-/// Linha compacta do carrinho do PDV (~36px no desktop; densa no celular).
+/// Linha compacta do carrinho do PDV (~34px no desktop; densa no celular).
 class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   const PdvCarrinhoLinhaCompacta({
     super.key,
@@ -76,7 +76,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
   final VoidCallback? onConfirmarQuantidade;
   final bool exibirColunaUnitario;
 
-  static const double alturaLinha = 36;
+  static const double alturaLinha = PdvTipografia.alturaLinhaLista;
   static const double alturaLinhaTouch = 40;
 
   /// Duas faixas densas: nome+total / controles (~8 itens na tela tipica).
@@ -158,7 +158,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
       textAlign: TextAlign.center,
       style: theme.textTheme.bodySmall?.copyWith(
         fontWeight: FontWeight.w500,
-        fontSize: 12,
+        fontSize: PdvTipografia.listaMeta,
         height: 1.1,
         color: scheme.onSurfaceVariant.withValues(alpha: 0.82),
       ),
@@ -176,7 +176,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
       textAlign: TextAlign.center,
       style: theme.textTheme.bodySmall?.copyWith(
         fontWeight: FontWeight.w600,
-        fontSize: 12,
+        fontSize: PdvTipografia.listaMeta,
         height: 1.1,
         color: scheme.onSurfaceVariant.withValues(alpha: 0.88),
       ),
@@ -189,7 +189,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.bodyMedium?.copyWith(
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         fontSize: fontSize,
         height: 1.1,
       ),
@@ -280,7 +280,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
               child: _buildLinhaIdentificacaoProduto(
                 theme,
                 scheme,
-                fontSizeNome: 13,
+                fontSizeNome: PdvTipografia.listaNome,
               ),
             ),
             const SizedBox(width: 4),
@@ -298,8 +298,8 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                     maxLines: 1,
                     softWrap: false,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      fontSize: PdvTipografia.listaValor,
                       color: precoManual ? scheme.tertiary : null,
                       height: 1.0,
                     ),
@@ -321,7 +321,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                   color:
                       precoManual ? scheme.tertiary : scheme.onSurfaceVariant,
                   fontWeight: precoManual ? FontWeight.w700 : FontWeight.w500,
-                  fontSize: 11,
+                  fontSize: PdvTipografia.listaSecundario,
                   height: 1.0,
                 ),
               ),
@@ -332,18 +332,23 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
               onPressed: editandoQuantidade ? null : onDiminuir,
               tamanhoMinimo: minAcao,
             ),
-            PdvCarrinhoCampoQuantidade(
-              quantidadeExibicao: quantidadeExibicao,
-              editando: editandoQuantidade,
-              fracionada: quantidadeFracionada,
-              onTapEditar: onEditarQuantidade,
-              onConfirmar: onConfirmarQuantidade ?? onEditarQuantidade,
-              controller: quantidadeController,
-              focusNode: quantidadeFocus,
-              textStyle: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-                height: 1.0,
+            SizedBox(
+              width: PdvCarrinhoLinhaColunas.larguraCampoQuantidade,
+              child: Center(
+                child: PdvCarrinhoCampoQuantidade(
+                  quantidadeExibicao: quantidadeExibicao,
+                  editando: editandoQuantidade,
+                  fracionada: quantidadeFracionada,
+                  onTapEditar: onEditarQuantidade,
+                  onConfirmar: onConfirmarQuantidade ?? onEditarQuantidade,
+                  controller: quantidadeController,
+                  focusNode: quantidadeFocus,
+                  textStyle: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: PdvTipografia.listaQuantidade,
+                    height: 1.0,
+                  ),
+                ),
               ),
             ),
             _AcaoIcone(
@@ -423,7 +428,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           _buildLinhaIdentificacaoProduto(
             theme,
             scheme,
-            fontSizeNome: 13,
+            fontSizeNome: PdvTipografia.listaNome,
           ),
           if (!exibirColunaUnitario)
             Text(
@@ -436,7 +441,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                     : scheme.onSurfaceVariant,
                 fontWeight:
                     precoManual ? FontWeight.w700 : FontWeight.normal,
-                fontSize: 11,
+                fontSize: PdvTipografia.listaSecundario,
                 height: 1.0,
               ),
             ),
@@ -454,7 +459,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
                   softWrap: false,
                   style: theme.textTheme.labelSmall?.copyWith(
                     fontWeight: FontWeight.w600,
-                    fontSize: 11,
+                    fontSize: PdvTipografia.listaSecundario,
                     height: 1.0,
                     color: precoManual
                         ? scheme.tertiary
@@ -475,7 +480,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
             softWrap: false,
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.bold,
-              fontSize: 13,
+              fontSize: PdvTipografia.listaValor,
               height: 1.0,
               color: precoManual ? scheme.tertiary : null,
             ),
@@ -500,7 +505,7 @@ class PdvCarrinhoLinhaCompacta extends StatelessWidget {
           focusNode: quantidadeFocus,
           textStyle: theme.textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w700,
-            fontSize: 13,
+            fontSize: PdvTipografia.listaQuantidade,
             height: 1.0,
           ),
         ),

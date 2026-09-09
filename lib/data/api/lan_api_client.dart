@@ -2154,10 +2154,12 @@ class LanApiClient {
     required int vendaId,
     String usuario = '',
     bool incluirGrupo = true,
+    bool forcarSaidaRomaneio = false,
   }) =>
       _postJson('/api/entregas/$vendaId/liberar-saida', {
         'usuario': usuario,
         'incluirGrupo': incluirGrupo,
+        if (forcarSaidaRomaneio) 'forcarSaidaRomaneio': true,
       });
 
   Future<Map<String, dynamic>> atualizarBuscarNaLoja({

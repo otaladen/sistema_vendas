@@ -72,7 +72,9 @@ class PdvBotaoTipoEntregaItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final tipo = EntregaVendaHelper.normalizarTipoItem(tipoEntregaItem);
     final rotuloCompleto = EntregaVendaHelper.rotuloTipoItem(tipo);
-    final rotuloCurto = EntregaVendaHelper.rotuloCurtoTipoItem(tipo);
+    final rotuloExibicao = compacto
+        ? EntregaVendaHelper.abreviacaoTipoItem(tipo)
+        : EntregaVendaHelper.rotuloCurtoTipoItem(tipo);
     final emoji = EntregaVendaHelper.emojiTipoItem(tipo);
     final cor = corPara(context, tipo);
     final theme = Theme.of(context);
@@ -89,25 +91,31 @@ class PdvBotaoTipoEntregaItem extends StatelessWidget {
               horizontal: compacto ? 3 : 5,
               vertical: compacto ? 2 : 4,
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  iconePara(tipo),
-                  size: compacto ? 14 : 18,
-                  color: cor,
-                ),
-                SizedBox(width: compacto ? 2 : 4),
-                Text(
-                  rotuloCurto,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    fontSize: compacto ? 10 : 11,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    iconePara(tipo),
+                    size: compacto ? 14 : 18,
                     color: cor,
-                    height: 1.0,
                   ),
-                ),
-              ],
+                  SizedBox(width: compacto ? 2 : 4),
+                  Text(
+                    rotuloExibicao,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: compacto ? 10 : 11,
+                      color: cor,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

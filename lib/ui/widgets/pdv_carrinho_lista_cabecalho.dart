@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'pdv_carrinho_linha_colunas.dart';
+import 'pdv_mobile_ui.dart';
 
 /// Cabecalho fino das colunas do carrinho PDV (padrao tabela ERP).
 class PdvCarrinhoListaCabecalho extends StatelessWidget {
@@ -18,14 +19,14 @@ class PdvCarrinhoListaCabecalho extends StatelessWidget {
   TextStyle _estiloColuna(ThemeData theme, ColorScheme scheme) {
     return theme.textTheme.labelSmall?.copyWith(
           fontWeight: FontWeight.w700,
-          fontSize: 11,
+          fontSize: PdvTipografia.listaCabecalho,
           height: 1.0,
           letterSpacing: 0.55,
           color: scheme.onSurface.withValues(alpha: 0.62),
         ) ??
         TextStyle(
           fontWeight: FontWeight.w700,
-          fontSize: 11,
+          fontSize: PdvTipografia.listaCabecalho,
           height: 1.0,
           letterSpacing: 0.55,
           color: scheme.onSurface.withValues(alpha: 0.62),

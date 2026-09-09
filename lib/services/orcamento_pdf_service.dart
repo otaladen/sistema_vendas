@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
@@ -213,6 +214,17 @@ abstract final class OrcamentoPdfService {
       nomesItens,
       comModalidade: false,
     );
+    final linhasEntrega = EntregaVendaHelper.linhasBlocoEntregaImpressao(
+      venda: venda,
+      cliente: c,
+      itens: itensOrcamento,
+    );
+    final linhasEntregaExtra =
+        EntregaVendaHelper.contarLinhasBlocoEntregaImpressao(
+      venda: venda,
+      cliente: c,
+      itens: itensOrcamento,
+    );
     final pageFormat = CupomPdfLayout.formatoPaginaOrcamentoSalvar(
       modelo: modelo,
       layout: layout,
@@ -233,6 +245,7 @@ abstract final class OrcamentoPdfService {
           (temFrete ? 1 : 0) +
           (desconto > 0 ? 1 : 0) +
           (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda) ? 3 : 0) +
+          linhasEntregaExtra +
           (empresa.rodapeOrcamento.trim().isEmpty ? 0 : 2),
       comLogo: comLogo,
     );
@@ -299,6 +312,10 @@ abstract final class OrcamentoPdfService {
                   'Vendedor/Atendente: $rotuloVend',
                   layout,
                 ),
+              ...CupomPdfLayout.blocoDadosEntregaCarreto(
+                layout: layout,
+                linhas: linhasEntrega,
+              ),
               CupomPdfLayout.divisoriaSecao(layout: layout),
               CupomPdfLayout.tituloSecao('ITENS', layout),
               if (CupomPdfLayout.cabecalhoColunasItens(layout) != null)

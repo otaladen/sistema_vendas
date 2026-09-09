@@ -1489,12 +1489,14 @@ class VendaApiRepository extends ChangeNotifier {
     required int vendaId,
     String usuario = '',
     bool incluirGrupo = true,
+    bool forcarSaidaRomaneio = false,
   }) async {
     _exigirServidorOnline();
     await _client.liberarSaidaCarreto(
       vendaId: vendaId,
       usuario: usuario,
       incluirGrupo: incluirGrupo,
+      forcarSaidaRomaneio: forcarSaidaRomaneio,
     );
     await hidratarEntregas(limit: 500);
   }
@@ -1504,14 +1506,18 @@ class VendaApiRepository extends ChangeNotifier {
     bool? separado,
     bool? carregado,
     bool? saiu,
+    bool forcarSaidaRomaneio = false,
     String? lojaOrigemMercadoria,
     Map<int, String>? origemPorItem,
+    String usuario = '',
   }) async {
     _exigirServidorOnline();
     final campos = <String, dynamic>{};
     if (separado != null) campos['cargaSeparada'] = separado;
     if (carregado != null) campos['cargaCarregada'] = carregado;
     if (saiu != null) campos['cargaSaiu'] = saiu;
+    if (forcarSaidaRomaneio) campos['forcarSaidaRomaneio'] = true;
+    if (usuario.trim().isNotEmpty) campos['usuario'] = usuario.trim();
     if (lojaOrigemMercadoria != null) {
       campos['lojaOrigemMercadoria'] = lojaOrigemMercadoria;
     }
@@ -1796,6 +1802,7 @@ class VendaApiRepository extends ChangeNotifier {
         'dataEntregaMarcada': entrega.dataEntregaMarcada
             ?.toUtc()
             .toIso8601String(),
+        'entregaSomenteCotacao': entrega.entregaSomenteCotacao,
       },
       clienteId: clienteId,
       vendedorId: vendedorId,
@@ -1882,6 +1889,7 @@ class VendaApiRepository extends ChangeNotifier {
         'dataEntregaMarcada': entrega.dataEntregaMarcada
             ?.toUtc()
             .toIso8601String(),
+        'entregaSomenteCotacao': entrega.entregaSomenteCotacao,
       },
       clienteId: clienteId,
       vendedorId: vendedorId,

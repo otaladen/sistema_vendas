@@ -175,7 +175,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             fatorCtrl: c,
             unidade: s.unidadeInternaInicial,
             embalagemMultiplica: s.embalagemMultiplicaInicial,
-            confirmarConversaoEmbalagem: s.produtoNovo,
+            confirmarConversaoEmbalagem: false,
             loteCtrl: lote,
             dataValidade: s.item.dataValidade,
           );
@@ -433,12 +433,18 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   }
 
   bool _linhaOfereceConfirmarConversaoEmbalagem(_LinhaEdicao linha) {
-    final produto = _produtoDestinoLinha(linha);
-    if (produto == null) return false;
     final f = _lerFator(linha.fatorCtrl.text);
-    return NfeEntradaConversaoUtil.precisaConfirmarConversaoEmbalagem(
+    final produto = _produtoDestinoLinha(linha);
+    if (produto != null) {
+      return NfeEntradaConversaoUtil.precisaConfirmarConversaoEmbalagem(
+        item: linha.sugestao.item,
+        produto: produto,
+        fator: f,
+      );
+    }
+    return NfeEntradaConversaoUtil.notaExigeConfirmacaoEmbalagem(
       item: linha.sugestao.item,
-      produto: produto,
+      unidadeInterna: linha.unidade,
       fator: f,
     );
   }
@@ -448,13 +454,13 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       linha.unidade = linha.sugestao.unidadeInternaInicial;
       linha.fatorCtrl.text = _formatarFator(linha.sugestao.fatorInicial);
       linha.embalagemMultiplica = true;
-      linha.confirmarConversaoEmbalagem = true;
+      linha.confirmarConversaoEmbalagem = false;
       return;
     }
     linha.unidade = 'UN';
     linha.fatorCtrl.text = _formatarFator(1);
     linha.embalagemMultiplica = true;
-    linha.confirmarConversaoEmbalagem = true;
+    linha.confirmarConversaoEmbalagem = false;
   }
 
   void _restaurarSugestaoAutomatica(_LinhaEdicao linha) {
@@ -1977,9 +1983,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           produtoExistenteId: linha.produtoDestinoId(),
           numeroLote: linha.loteCtrl.text.trim(),
           dataValidade: linha.dataValidade,
-          confirmarConversaoEmbalagem: linha.produtoDestinoId() == null
-              ? true
-              : linha.confirmarConversaoEmbalagem,
+          confirmarConversaoEmbalagem: linha.confirmarConversaoEmbalagem,
         ),
       );
     }

@@ -1,3 +1,4 @@
+import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
 import 'produto_embalagem.dart';
@@ -401,6 +402,121 @@ class EntregaVendaHelper {
     return tipoEfetivoItem(item) == tipoEntregaLoja;
   }
 
+  static const String tituloBlocoEntregaImpressao =
+      '--- DADOS PARA ENTREGA / CARRETO ---';
+
+  /// Aliases legados do cabecalho (`carreto`, `entrega`, etc.).
+  static bool tipoEntregaEhCarreto(String? tipo) {
+    switch (tipo?.trim().toLowerCase()) {
+      case tipoEntregaLoja:
+      case 'carreto':
+      case 'entrega':
+      case 'a_entregar':
+      case 'a entregar':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// Bloco de endereco/contato so quando ha carreto com entrega definida.
+  /// Orcamentos em cotacao (frete estimado sem endereco) nao imprimem este bloco.
+  static bool vendaDeveImprimirBlocoEntrega(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    if (statusEntregaEhCotacao(venda.statusEntrega)) return false;
+    if (vendaTemItensCarreto(venda, itens: itens)) return true;
+    return tipoEntregaEhCarreto(venda.tipoEntrega);
+  }
+
+  /// Linhas de corpo do bloco (nome, telefone, endereco, obs.).
+  static List<String> linhasBlocoEntregaImpressao({
+    required Venda venda,
+    Cliente? cliente,
+    List<ItemVenda>? itens,
+  }) {
+    if (!vendaDeveImprimirBlocoEntrega(venda, itens: itens)) {
+      return const [];
+    }
+
+    final linhas = <String>[];
+    final nome = cliente?.nomeRazao.trim() ?? '';
+    if (nome.isNotEmpty) {
+      linhas.add('Nome: $nome');
+    }
+
+    final tel = cliente?.telefone.trim() ?? '';
+    if (tel.isNotEmpty) {
+      linhas.add('Telefone/WhatsApp: $tel');
+    }
+
+    final enderecoGravado = venda.enderecoEntrega.trim();
+    if (enderecoGravado.isNotEmpty) {
+      linhas.add('Endereco: $enderecoGravado');
+    } else {
+      final padrao = cliente?.enderecoPadraoEntrega();
+      if (padrao != null) {
+        final partes = <String>[];
+        final ruaNumero = [
+          padrao.endereco.trim(),
+          padrao.numero.trim(),
+        ].where((p) => p.isNotEmpty).join(', ');
+        if (ruaNumero.isNotEmpty) partes.add(ruaNumero);
+        if (padrao.bairro.trim().isNotEmpty) {
+          partes.add(padrao.bairro.trim());
+        }
+        final cidadeUf = [
+          padrao.cidade.trim(),
+          padrao.uf.trim(),
+        ].where((p) => p.isNotEmpty).join(' - ');
+        if (cidadeUf.isNotEmpty) partes.add(cidadeUf);
+        if (partes.isNotEmpty) {
+          linhas.add('Endereco: ${partes.join(' | ')}');
+        }
+        final refCliente = padrao.referencia.trim();
+        if (refCliente.isNotEmpty &&
+            !venda.observacaoEntrega.trim().contains(refCliente)) {
+          linhas.add('Referencia: $refCliente');
+        }
+      }
+    }
+
+    final obs = venda.observacaoEntrega.trim();
+    if (obs.isNotEmpty) {
+      for (final linha in obs.split('\n')) {
+        final t = linha.trim();
+        if (t.isEmpty) continue;
+        linhas.add(
+          t.toLowerCase().startsWith('obs')
+              ? t
+              : 'Obs entrega: $t',
+        );
+      }
+    }
+
+    if (linhas.isEmpty) {
+      linhas.add('Modalidade: ${rotuloTipoEntregaVenda(venda.tipoEntrega)}');
+    }
+
+    return linhas;
+  }
+
+  /// Divisoria + titulo + corpo (estimativa para altura do PDF).
+  static int contarLinhasBlocoEntregaImpressao({
+    required Venda venda,
+    Cliente? cliente,
+    List<ItemVenda>? itens,
+  }) {
+    final corpo = linhasBlocoEntregaImpressao(
+      venda: venda,
+      cliente: cliente,
+      itens: itens,
+    );
+    if (corpo.isEmpty) return 0;
+    return 2 + corpo.length;
+  }
+
   static String resumoContagem(Iterable<String> tiposItens) {
     var retirada = 0;
     var futura = 0;
@@ -422,5 +538,27 @@ class EntregaVendaHelper {
     if (futura > 0) partes.add('$futura retirada futura');
     if (carreto > 0) partes.add('$carreto carreto');
     return partes.join(' · ');
+  }
+
+  static bool statusEntregaEhCotacao(String status) =>
+      status.trim().toLowerCase() == 'cotacao';
+
+  /// Carreto sem endereco — bloqueia finalizacao no caixa (cotacao ou incompleto).
+  static bool orcamentoCarretoSemEnderecoParaFinalizar(
+    Venda venda, {
+    List<ItemVenda>? itens,
+  }) {
+    if (!vendaTemItensCarreto(venda, itens: itens)) return false;
+    return venda.enderecoEntrega.trim().isEmpty;
+  }
+
+  static String mensagemBloqueioFinalizacaoCarretoCotacao(Venda venda) {
+    if (statusEntregaEhCotacao(venda.statusEntrega)) {
+      return 'Este orcamento foi salvo como cotacao (frete estimado sem endereco). '
+          'Abra no PDV, desmarque "So cotacao" e informe o endereco de entrega '
+          'antes de finalizar no caixa.';
+    }
+    return 'Orcamento com carreto exige endereco de entrega. '
+        'Edite no PDV antes de finalizar.';
   }
 }

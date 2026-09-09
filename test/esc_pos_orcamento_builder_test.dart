@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/app_config_repository.dart';
+import 'package:sistema_vendas/model/cliente.dart';
 import 'package:sistema_vendas/model/item_venda.dart';
 import 'package:sistema_vendas/model/produto.dart';
 import 'package:sistema_vendas/model/venda.dart';
@@ -64,6 +65,97 @@ void main() {
     expect(texto, isNot(contains('RETIRA LOGO')));
     expect(texto, isNot(contains('RETIRADA FUTURA')));
     expect(texto, isNot(contains('ENTREGA/CARRETO')));
+  });
+
+  test('montar orcamento ESC/POS inclui bloco de entrega no carreto', () {
+    final item = ItemVenda(
+      nomeProduto: 'Areia',
+      quantidade: 1,
+      precoUnitario: 70,
+      precoCustoUnitario: 50,
+      tipoEntregaItem: 'entrega_loja',
+    );
+    final cliente = Cliente(
+      nomeRazao: 'Joao Silva',
+      telefone: '(21) 99999-8888',
+    );
+    final venda = Venda(
+      numeroOrcamento: 3,
+      total: 120,
+      tipoEntrega: 'entrega_loja',
+      valorFrete: 50,
+      enderecoEntrega: 'Rua A, 10 | Centro | Rio - RJ',
+      observacaoEntrega: 'Entregar ate 12h',
+    );
+    final bytes = EscPosOrcamentoBuilder.montar(
+      OrcamentoEscPosDados(
+        venda: venda,
+        config: const EmpresaConfig(nomeLoja: 'Comprou Levou'),
+        itens: [item],
+        validadeDias: 7,
+        cliente: cliente,
+      ),
+    );
+    final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    expect(texto, contains('DADOS PARA ENTREGA / CARRETO'));
+    expect(texto, contains('Joao Silva'));
+    expect(texto, contains('99999-8888'));
+    expect(texto, contains('Rua A, 10'));
+    expect(texto, contains('Entregar ate 12h'));
+  });
+
+  test('montar orcamento ESC/POS omite bloco de entrega em cotacao', () {
+    final item = ItemVenda(
+      nomeProduto: 'Bloco',
+      quantidade: 1000,
+      precoUnitario: 1.3,
+      precoCustoUnitario: 1,
+      tipoEntregaItem: 'entrega_loja',
+    );
+    final venda = Venda(
+      numeroOrcamento: 16,
+      total: 1633.8,
+      tipoEntrega: 'entrega_loja',
+      statusEntrega: 'cotacao',
+      valorFrete: 50,
+    );
+    final bytes = EscPosOrcamentoBuilder.montar(
+      OrcamentoEscPosDados(
+        venda: venda,
+        config: const EmpresaConfig(nomeLoja: 'Comprou Levou'),
+        itens: [item],
+        validadeDias: 7,
+        cliente: Cliente(nomeRazao: 'comprou levou materiais de construcao'),
+      ),
+    );
+    final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    expect(texto, isNot(contains('DADOS PARA ENTREGA / CARRETO')));
+    expect(texto, contains('Frete'));
+  });
+
+  test('montar orcamento ESC/POS omite bloco de entrega em leva agora', () {
+    final item = ItemVenda(
+      nomeProduto: 'Cimento',
+      quantidade: 1,
+      precoUnitario: 50,
+      precoCustoUnitario: 40,
+      tipoEntregaItem: 'retirada',
+    );
+    final venda = Venda(
+      numeroOrcamento: 4,
+      total: 50,
+      tipoEntrega: 'retirada',
+    );
+    final bytes = EscPosOrcamentoBuilder.montar(
+      OrcamentoEscPosDados(
+        venda: venda,
+        config: const EmpresaConfig(nomeLoja: 'Comprou Levou'),
+        itens: [item],
+        validadeDias: 7,
+      ),
+    );
+    final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    expect(texto, isNot(contains('DADOS PARA ENTREGA / CARRETO')));
   });
 
   test('montar orcamento ESC/POS imprime so o credito escolhido', () {

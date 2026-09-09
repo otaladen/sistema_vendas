@@ -5,25 +5,40 @@ import '../../model/produto.dart';
 import '../item_venda_produto_orfao.dart';
 import '../produto_embalagem.dart';
 
-/// Linha de carreto cujo produto foi excluido do cadastro — saida sem baixa de estoque.
+/// Motivo de saida de carreto sem baixa/reserva de estoque.
+abstract final class CarretoSaidaSemBaixaMotivo {
+  CarretoSaidaSemBaixaMotivo._();
+
+  static const produtoExcluido = 'produto_excluido';
+  static const reservaInconsistente = 'reserva_inconsistente';
+  static const forcaAdmin = 'forca_admin';
+}
+
+/// Linha de carreto sem baixa de estoque (orfao, reserva perdida ou forcada).
 class CarretoSaidaProdutoOrfaoLinha {
   const CarretoSaidaProdutoOrfaoLinha({
     required this.itemVendaId,
     required this.nomeProduto,
     required this.quantidade,
     required this.unidade,
+    this.motivo = CarretoSaidaSemBaixaMotivo.produtoExcluido,
+    this.reservadoCadastro = 0,
   });
 
   final int itemVendaId;
   final String nomeProduto;
   final int quantidade;
   final String unidade;
+  final String motivo;
+  final int reservadoCadastro;
 
   Map<String, dynamic> toJson() => {
         'itemVendaId': itemVendaId,
         'nomeProduto': nomeProduto,
         'quantidade': quantidade,
         'unidade': unidade,
+        'motivo': motivo,
+        'reservadoCadastro': reservadoCadastro,
       };
 }
 
@@ -46,16 +61,24 @@ class CarretoSaidaProdutoOrfaoEvento {
   final List<CarretoSaidaProdutoOrfaoLinha> linhas;
 
   String get textoHumano {
-    final trecho = linhas
-        .map(
-          (l) =>
-              '${l.nomeProduto} ${l.quantidade} ${l.unidade} (cadastro excluido)',
-        )
-        .join('; ');
+    final trecho = linhas.map(_textoLinha).join('; ');
     if (trecho.isEmpty) {
-      return 'Saida carreto sem baixa de estoque — produto excluido do cadastro.';
+      return 'Saida carreto sem baixa de estoque.';
     }
-    return 'Saida carreto (sem estoque): $trecho.';
+    return 'Saida carreto (sem baixa de saldo): $trecho.';
+  }
+
+  static String _textoLinha(CarretoSaidaProdutoOrfaoLinha l) {
+    final base = '${l.nomeProduto} ${l.quantidade} ${l.unidade}';
+    switch (l.motivo) {
+      case CarretoSaidaSemBaixaMotivo.reservaInconsistente:
+        return '$base (reserva ${l.reservadoCadastro} no cadastro)';
+      case CarretoSaidaSemBaixaMotivo.forcaAdmin:
+        return '$base (liberacao forcada)';
+      case CarretoSaidaSemBaixaMotivo.produtoExcluido:
+      default:
+        return '$base (cadastro excluido)';
+    }
   }
 
   String encode() => jsonEncode({
@@ -88,6 +111,10 @@ class CarretoSaidaProdutoOrfaoEvento {
               nomeProduto: (lm['nomeProduto'] ?? '').toString(),
               quantidade: q,
               unidade: (lm['unidade'] ?? 'UN').toString(),
+              motivo: (lm['motivo'] ?? CarretoSaidaSemBaixaMotivo.produtoExcluido)
+                  .toString(),
+              reservadoCadastro:
+                  (lm['reservadoCadastro'] as num?)?.toInt() ?? 0,
             ),
           );
         }

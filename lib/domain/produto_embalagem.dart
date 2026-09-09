@@ -228,22 +228,30 @@ class ProdutoEmbalagem {
     Produto produto,
     int quantidadeArmazenada,
   ) {
-    if (produto.permiteQuantidadeFracionada) return true;
+    if (quantidadeArmazenada <= 0) return false;
     if (QuantidadeVendaUtil.armazenadoEmMilesimos(
       quantidadeArmazenada,
       cadastroFracionado: false,
     )) {
       return true;
     }
-    if (!vendaPodeUsarUnidadeCompra(produto)) return false;
-    if (quantidadeArmazenada < QuantidadeVendaUtil.escalaFracionada) {
-      return false;
+    if (quantidadeArmazenada >= QuantidadeVendaUtil.escalaFracionada) {
+      if (produto.permiteQuantidadeFracionada) return true;
+      final emUnidadeVenda = QuantidadeVendaUtil.valorExibicao(
+        quantidadeArmazenada,
+        fracionada: true,
+      );
+      return exigeQuantidadeDecimalUnidadeVenda(produto, emUnidadeVenda);
     }
-    final emUnidadeVenda = QuantidadeVendaUtil.valorExibicao(
-      quantidadeArmazenada,
-      fracionada: true,
-    );
-    return exigeQuantidadeDecimalUnidadeVenda(produto, emUnidadeVenda);
+    // Abaixo de 1000: 1 m³ legado nao vira 0,001; 500 continua 0,5 m³.
+    if (produto.permiteQuantidadeFracionada &&
+        quantidadeArmazenada >= QuantidadeVendaUtil.passoFracionadoArmazenado &&
+        quantidadeArmazenada % QuantidadeVendaUtil.passoFracionadoArmazenado ==
+            0) {
+      return true;
+    }
+    if (!vendaPodeUsarUnidadeCompra(produto)) return false;
+    return false;
   }
 
   /// Converte [ItemVenda.quantidade] persistido para quantidade do carrinho PDV.

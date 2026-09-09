@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/pdv_tabela_preco_util.dart';
+import 'pdv_mobile_ui.dart';
 
 /// Cabecalho de colunas fixas da lista de consulta PDV.
 class PdvConsultaListaCabecalho extends StatelessWidget {
@@ -23,7 +24,7 @@ class PdvConsultaListaCabecalho extends StatelessWidget {
     final scheme = theme.colorScheme;
     final estilo = theme.textTheme.labelSmall?.copyWith(
       fontWeight: FontWeight.w800,
-      fontSize: 11,
+      fontSize: PdvTipografia.listaCabecalho,
       height: 1.0,
       color: scheme.onSurfaceVariant,
       letterSpacing: 0.2,

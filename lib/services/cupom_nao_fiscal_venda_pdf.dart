@@ -126,11 +126,20 @@ class CupomNaoFiscalVendaPdf {
     return (recebido: t, troco: 0.0);
   }
 
-  static int _contarLinhasCupom(Venda venda, Cliente? cliente, bool segundaVia) {
+  static int _contarLinhasCupom(
+    Venda venda,
+    Cliente? cliente,
+    bool segundaVia, {
+    List<ItemVenda>? itens,
+  }) {
     var n = 14;
     if (cliente?.documento.trim().isNotEmpty ?? false) n++;
     if (cliente?.telefone.trim().isNotEmpty ?? false) n++;
-    if (venda.enderecoEntrega.trim().isNotEmpty) n++;
+    n += EntregaVendaHelper.contarLinhasBlocoEntregaImpressao(
+      venda: venda,
+      cliente: cliente,
+      itens: itens,
+    );
     if (venda.descontoImplicitoTotal > 0) n++;
     if (segundaVia) n += 2;
     final pagamento = rotuloPagamentoCabecalho(venda);
@@ -155,7 +164,10 @@ class CupomNaoFiscalVendaPdf {
         qtdItens: lista.length,
         segundaVia: segundaVia,
         temDesconto: venda.descontoImplicitoTotal > 0,
-        temEntrega: layout.exibirEntrega,
+        temEntrega: EntregaVendaHelper.vendaDeveImprimirBlocoEntrega(
+          venda,
+          itens: itens,
+        ),
         temFiado: PlanoFiadoCodec.vendaTemPlanoQuitacao(venda),
         linhasFiado: PlanoFiadoCodec.contarLinhasPdf(venda),
         linhasRodape: 0,
@@ -164,7 +176,7 @@ class CupomNaoFiscalVendaPdf {
             _vendaNfceEmContingencia(venda),
       );
     }
-    return _contarLinhasCupom(venda, cliente, segundaVia);
+    return _contarLinhasCupom(venda, cliente, segundaVia, itens: itens);
   }
 
   /// ToMany detached (Terminal Leve): nao usar `venda.itens` direto.
@@ -384,6 +396,14 @@ class CupomNaoFiscalVendaPdf {
       ),
       if (exibirAvisoContingencia)
         CupomPdfLayout.faixaContingenciaAposPagamentoLegadoLdv(layout: layout),
+      ...CupomPdfLayout.blocoDadosEntregaCarreto(
+        layout: layout,
+        linhas: EntregaVendaHelper.linhasBlocoEntregaImpressao(
+          venda: venda,
+          cliente: cliente,
+          itens: itensCupom,
+        ),
+      ),
       CupomPdfLayout.rodapeIdentificacaoLegadoLdv(
         layout: layout,
         numero: numeroDocumento,
@@ -443,14 +463,15 @@ class CupomNaoFiscalVendaPdf {
   }) {
     final itensCupom = _itensDaVenda(venda, itens);
     final descontoNota = venda.descontoImplicitoTotal;
-    var temCarreto = venda.tipoEntrega == EntregaVendaHelper.tipoEntregaLoja;
-    if (!temCarreto) {
-      temCarreto = itensCupom.any(
-        (i) =>
-            EntregaVendaHelper.normalizarTipoItem(i.tipoEntregaItem) ==
-            EntregaVendaHelper.tipoEntregaLoja,
-      );
-    }
+    final linhasEntrega = EntregaVendaHelper.linhasBlocoEntregaImpressao(
+      venda: venda,
+      cliente: cliente,
+      itens: itensCupom,
+    );
+    final temCarreto = EntregaVendaHelper.vendaDeveImprimirBlocoEntrega(
+      venda,
+      itens: itensCupom,
+    );
     return [
       ...CupomPdfLayout.cabecalhoEmpresa(
         layout: layout,
@@ -504,38 +525,15 @@ class CupomNaoFiscalVendaPdf {
           'Telefone: ${cliente!.telefone}',
           layout,
         ),
-      if (layout.exibirEntrega)
-        pw.RichText(
-          text: pw.TextSpan(
-            style: CupomPdfLayout.estilo(
-              layout,
-              fontSize: layout.tamanhoFonteCorpo.fontSizeCorpo,
-            ),
-            children: [
-              const pw.TextSpan(text: 'Entrega: '),
-              pw.TextSpan(
-                text: EntregaVendaHelper.textoEntregaCabecalhoVenda(
-                  venda,
-                  itens: itensCupom,
-                ),
-                style: CupomPdfLayout.estilo(
-                  layout,
-                  fontSize: layout.tamanhoFonteCorpo.fontSizeCorpo,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              if (temCarreto)
-                pw.TextSpan(
-                  text: ' | Frete: ${formatarMoeda(venda.valorFrete)}',
-                ),
-            ],
-          ),
-        ),
-      if (layout.exibirEnderecoEntrega &&
-          venda.enderecoEntrega.trim().isNotEmpty)
+      ...CupomPdfLayout.blocoDadosEntregaCarreto(
+        layout: layout,
+        linhas: linhasEntrega,
+      ),
+      if (temCarreto && layout.exibirEntrega && venda.valorFrete > 0)
         CupomPdfLayout.textoCorpo(
-          'Endereco: ${venda.enderecoEntrega}',
+          'Frete carreto: ${formatarMoeda(venda.valorFrete)}',
           layout,
+          fontWeight: pw.FontWeight.bold,
         ),
       CupomPdfLayout.divisoriaSecao(layout: layout),
       CupomPdfLayout.tituloSecao('ITENS', layout),
@@ -683,7 +681,12 @@ class CupomNaoFiscalVendaPdf {
         itens: itensCupom,
       );
     } else {
-      linhasTexto = _contarLinhasCupom(venda, cliente, segundaVia);
+      linhasTexto = _contarLinhasCupom(
+        venda,
+        cliente,
+        segundaVia,
+        itens: itensCupom,
+      );
       linhasExtras = CupomPdfLayout.linhasTexto(config.rodapeNota).length + 2;
       final unidades = CupomPdfLayout.unidadesAlturaItensTermico(
         itensCupom.map(ProdutoNomeExibicao.paraImpressaoItem),

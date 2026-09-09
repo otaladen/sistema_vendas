@@ -6,7 +6,7 @@ import 'pdv_mobile_ui.dart';
 abstract final class PdvCarrinhoLinhaColunas {
   PdvCarrinhoLinhaColunas._();
 
-  static const double paddingHorizontal = 4;
+  static const double paddingHorizontal = 3;
   static const double paddingSubtotalDireita = 2;
   static const double larguraEntrega = 56;
   static const double larguraCodigo = 60;
@@ -14,7 +14,7 @@ abstract final class PdvCarrinhoLinhaColunas {
   static const double larguraUnitario = 86;
   static const double larguraSubtotal = 90;
   static const double larguraBotaoTabela = 28;
-  static const double larguraCampoQuantidade = 26;
+  static const double larguraCampoQuantidade = 40;
   static const int flexProduto = 4;
   static const double larguraProdutoMinimaConfortavel = 140;
 
@@ -50,7 +50,7 @@ abstract final class PdvCarrinhoLinhaColunas {
     return alvosTouchAmplos ? 36 : 32;
   }
 
-  /// Alvos menores que [minAcaoDe] para caber o grupo QTD em ~70px.
+  /// Alvos menores que [minAcaoDe] para caber o grupo QTD em ~84–88px.
   static double minAcaoQuantidadeDe({required bool alvosTouchAmplos}) {
     return alvosTouchAmplos ? 24 : 22;
   }
@@ -104,7 +104,11 @@ abstract final class PdvCarrinhoLinhaColunas {
           width: larguraEntrega,
           child: Align(
             alignment: Alignment.centerLeft,
-            child: entrega,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: entrega,
+            ),
           ),
         ),
         SizedBox(

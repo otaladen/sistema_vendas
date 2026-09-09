@@ -111,6 +111,36 @@ void main() {
     );
   });
 
+  test('nota CX com fator 6 exige opt-in para gravar conversao no cadastro', () {
+    const item = ItemNotaTemporario(
+      numeroItem: 1,
+      codigo: 'CX1',
+      descricao: 'Produto caixa',
+      unidadeComercial: 'CX',
+      quantidadeComercial: 5,
+      valorUnitarioComercial: 30,
+      unidadeTributavel: 'UN',
+      quantidadeTributavel: 30,
+      valorUnitarioTributavel: 5,
+    );
+    expect(
+      NfeEntradaConversaoUtil.notaExigeConfirmacaoEmbalagem(
+        item: item,
+        unidadeInterna: 'UN',
+        fator: 6,
+      ),
+      isTrue,
+    );
+    expect(
+      NfeEntradaConversaoUtil.notaExigeConfirmacaoEmbalagem(
+        item: item,
+        unidadeInterna: 'UN',
+        fator: 1,
+      ),
+      isFalse,
+    );
+  });
+
   test('quantidade nota para estoque soma corretamente ao saldo existente', () {
     final produto = Produto(
       id: 4,

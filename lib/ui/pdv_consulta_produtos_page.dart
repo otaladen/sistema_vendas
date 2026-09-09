@@ -38,6 +38,7 @@ import 'widgets/pdv_consulta_filtros_chips.dart';
 import 'widgets/pdv_consulta_linha_produto.dart';
 import 'widgets/pdv_consulta_lista_cabecalho.dart';
 import 'widgets/pdv_consulta_tabela_preco_chips.dart';
+import 'widgets/pdv_mobile_ui.dart';
 import 'widgets/operacao_feedback.dart';
 
 /// Resultado ao escolher (ou atalho rapido) na consulta de produtos do PDV.
@@ -1004,11 +1005,19 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
                       focusNode: _pesquisaFocus,
                       autofocus: widget.termoInicial.isEmpty,
                       textInputAction: TextInputAction.search,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontSize: PdvTipografia.campoBusca,
+                            height: 1.2,
+                          ),
                       decoration: InputDecoration(
                         labelText: 'Filtrar na consulta',
                         helperText: _dicaBuscaContextual,
                         helperMaxLines: 1,
                         isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         hintText: 'Nome, codigo ou codigo de barras',
                         suffixIcon: SizedBox(
                           width: pdvLeitorCameraDisponivel ? 96 : 48,
@@ -1306,7 +1315,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     PdvPesquisaComando? comando,
     bool adicionarDireto = true,
   }) {
-    final emUnidadeCompra = produto.pdvPodeVenderEmUnidadeCompra;
+    const emUnidadeCompra = false;
     final cmd = comando ?? PdvPesquisaComando.parse(_pesquisaController.text);
     if (cmd.adicaoDireta) {
       Navigator.of(context).pop(

@@ -9,6 +9,7 @@ import '../../model/produto.dart';
 import '../pdv_texto_destaque_busca.dart';
 import 'pdv_consulta_lista_cabecalho.dart';
 import 'pdv_consulta_semaforo_estoque.dart';
+import 'pdv_mobile_ui.dart';
 import 'promocao_badge.dart';
 
 /// Precos formatados das tres tabelas (preco 1 / preco 2 / preco 3).
@@ -65,13 +66,13 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
   final bool selecionado;
   final num quantidadeNoOrcamento;
 
-  static const double alturaLinha = 34;
+  static const double alturaLinha = PdvTipografia.alturaLinhaLista;
   static const double alturaLinhaComBadges = 42;
   static const double alturaLinhaExpandida = 42;
 
-  static const double _fonteNome = 13;
-  static const double _fontePrecoAtivo = 12;
-  static const double _fontePrecoInativo = 11;
+  static const double _fonteNome = PdvTipografia.listaNome;
+  static const double _fontePrecoAtivo = PdvTipografia.listaValor;
+  static const double _fontePrecoInativo = PdvTipografia.listaPrecoInativo;
 
   static const _tiposPreco = ['preco1', 'preco2', 'preco3'];
 
@@ -152,7 +153,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         fontWeight: FontWeight.w800,
-                        fontSize: 11,
+                        fontSize: PdvTipografia.listaMeta,
                         height: 1.0,
                         color: scheme.onSecondaryContainer,
                       ),
@@ -209,7 +210,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
-                      fontSize: 11,
+                      fontSize: PdvTipografia.listaSecundario,
                       height: 1.0,
                     ),
               ),

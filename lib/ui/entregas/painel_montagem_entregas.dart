@@ -178,6 +178,25 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
     );
   }
 
+  Future<void> _forcarSaidaRomaneioViagem() async {
+    final v = _viagemAtual;
+    if (v == null) return;
+    final paraLiberar = v.vendas
+        .where(
+          (venda) =>
+              EntregaFluxoService.podeLiberarSaida(venda) || !venda.cargaSaiu,
+        )
+        .toList();
+    if (paraLiberar.isEmpty) return;
+    for (final venda in paraLiberar) {
+      if (venda.cargaSaiu && venda.statusEntrega == 'saiu_entrega') continue;
+      final ok = await widget.callbacks.forcarSaidaRomaneio(venda);
+      if (!ok) return;
+    }
+    if (!mounted) return;
+    await widget.callbacks.recarregar();
+  }
+
   Future<void> _liberarSaidaViagem() async {
     final v = _viagemAtual;
     if (v == null) return;
@@ -795,6 +814,8 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                     unawaited(_abrirMapaRota(ordenadas));
                   case 'liberar':
                     unawaited(_liberarSaidaViagem());
+                  case 'forcar_saida':
+                    unawaited(_forcarSaidaRomaneioViagem());
                   case 'motorista':
                     if (viagem.ehGrupo) {
                       widget.callbacks.editarMotoristaGrupo(
@@ -811,6 +832,11 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                   const PopupMenuItem(
                     value: 'liberar',
                     child: Text('Liberar saida (se o motorista nao fez)'),
+                  ),
+                if (widget.podeGerenciarStatus && !jaSaiu)
+                  const PopupMenuItem(
+                    value: 'forcar_saida',
+                    child: Text('Forcar saida do romaneio'),
                   ),
                 const PopupMenuItem(
                   value: 'separacao',

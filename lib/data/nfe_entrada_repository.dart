@@ -706,6 +706,8 @@ class NfeEntradaRepository {
           final uVenda = ProdutoEmbalagem.normalizarUnidade(unidadeEstoque);
           final converteEmbalagem =
               uNota != uVenda && fator > 0 && (fator - 1).abs() > 0.0001;
+          final gravarEmbalagemCadastro =
+              converteEmbalagem && linha.confirmarConversaoEmbalagem;
           produto = Produto(
             codigoInterno: codigoInterno,
             nome: linha.item.descricao.length > 120
@@ -713,8 +715,8 @@ class NfeEntradaRepository {
                 : linha.item.descricao,
             descricao: linha.item.descricao,
             unidade: unidadeEstoque,
-            unidadeCompra: converteEmbalagem ? uNota : '',
-            quantidadePorEmbalagem: converteEmbalagem ? fator : 1,
+            unidadeCompra: gravarEmbalagemCadastro ? uNota : '',
+            quantidadePorEmbalagem: gravarEmbalagemCadastro ? fator : 1,
             embalagemMultiplica: embalagemMultiplica,
             codigoBarras: linha.item.codigoBarras,
             ncm: linha.item.ncm,

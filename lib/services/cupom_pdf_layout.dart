@@ -202,6 +202,27 @@ class CupomPdfLayout {
     );
   }
 
+  /// Secao destacada de entrega/carreto (termica 58/80 mm e A4).
+  static List<pw.Widget> blocoDadosEntregaCarreto({
+    required ConfigLayoutImpressao layout,
+    required List<String> linhas,
+  }) {
+    if (linhas.isEmpty) return const [];
+    return [
+      divisoriaSecao(layout: layout),
+      tituloSecao(
+        '--- DADOS PARA ENTREGA / CARRETO ---',
+        layout,
+      ),
+      ...linhas.map(
+        (linha) => textoCorpo(
+          textoTermicoAscii(linha),
+          layout,
+        ),
+      ),
+    ];
+  }
+
   static pw.Widget linhaColunas({
     required ConfigLayoutImpressao layout,
     required String esquerda,
