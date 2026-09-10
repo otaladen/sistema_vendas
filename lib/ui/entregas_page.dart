@@ -24,6 +24,7 @@ import '../services/lote_fefo_service.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/motorista_lista_safe.dart';
+import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/venda_relacao_safe.dart';
 import '../model/historico_entrega.dart';
 import '../model/item_venda.dart';
@@ -1355,7 +1356,7 @@ class _EntregasPageState extends State<EntregasPage>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${venda.numeroOrcamento} · ${_nomeCliente(venda)}',
+          '${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)} · ${_nomeCliente(venda)}',
           style: Theme.of(context).textTheme.titleSmall,
         ),
         const SizedBox(height: 2),
@@ -1594,8 +1595,8 @@ class _EntregasPageState extends State<EntregasPage>
     final endereco = enderecoExibicaoRomaneio(venda);
     final estilo = _estiloPdfRomaneio();
     final tituloPedido = parada != null && parada > 0
-        ? 'Parada #$parada — ${venda.numeroOrcamento} - $cliente'
-        : '${venda.numeroOrcamento} - $cliente';
+        ? 'Parada #$parada — ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)} - $cliente'
+        : '${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)} - $cliente';
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 8),
       padding: const pw.EdgeInsets.only(bottom: 6),
@@ -1670,8 +1671,8 @@ class _EntregasPageState extends State<EntregasPage>
     const fsItens = 6.5;
     final estiloCorpo = _estiloPdfRomaneio(fontSize: fsCorpo);
     final tituloPedido = parada != null && parada > 0
-        ? 'P#$parada ${venda.numeroOrcamento} $cliente'
-        : '${venda.numeroOrcamento} $cliente';
+        ? 'P#$parada ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)} $cliente'
+        : '${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)} $cliente';
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 5),
       padding: const pw.EdgeInsets.only(bottom: 4),
@@ -2362,7 +2363,7 @@ class _EntregasPageState extends State<EntregasPage>
       nome = await showSelecionarMotoristaDialog(
         context,
         widget.motoristaRepository,
-        titulo: 'Motorista ${venda.numeroOrcamento}',
+        titulo: 'Motorista ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)}',
         rotuloConfirmar: 'Salvar',
         motoristaSugerido: venda.motoristaEntrega,
         permitirLimpar: true,
@@ -2466,7 +2467,7 @@ class _EntregasPageState extends State<EntregasPage>
       builder: (context) => AlertDialog(
         title: const Text('Limpar data de entrega'),
         content: Text(
-          'Remover a data marcada da venda ${venda.numeroOrcamento}?',
+          'Remover a data marcada da venda ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)}?',
         ),
         actions: [
           TextButton(
@@ -2665,7 +2666,9 @@ class _EntregasPageState extends State<EntregasPage>
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Historico da entrega ${venda.numeroOrcamento}'),
+          title: Text(
+            'Historico da entrega ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)}',
+          ),
           content: SizedBox(
             width: 620,
             child: historico.isEmpty
@@ -3041,7 +3044,9 @@ class _EntregasPageState extends State<EntregasPage>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Concluir complemento ${venda.numeroOrcamento}'),
+        title: Text(
+          'Concluir complemento ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)}',
+        ),
         content: const Text(
           'Confirma que os itens em falta ja foram entregues ao cliente? '
           'O status passara para Entregue e o registro de complemento sera limpo. '
@@ -3103,7 +3108,9 @@ class _EntregasPageState extends State<EntregasPage>
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: Text('Faltou item na ida — ${venda.numeroOrcamento}'),
+          title: Text(
+            'Faltou item na ida — ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)}',
+          ),
           content: SizedBox(
             width: 520,
             child: SingleChildScrollView(
@@ -3458,7 +3465,7 @@ class _EntregasPageState extends State<EntregasPage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Saida liberada — pedido ${venda.numeroOrcamento} em rota ($origemTxt).',
+            'Saida liberada — ${VendaDocumentoRotuloHelper.rotuloPedidoEntrega(venda)} em rota ($origemTxt).',
           ),
         ),
       );
@@ -3486,7 +3493,7 @@ class _EntregasPageState extends State<EntregasPage>
       builder: (ctx) => AlertDialog(
         title: const Text('Forcar saida do romaneio?'),
         content: Text(
-          'Pedido ${venda.numeroOrcamento}: libera "Saiu" ignorando reserva '
+          '${VendaDocumentoRotuloHelper.rotuloPedidoEntrega(venda)}: libera "Saiu" ignorando reserva '
           'de estoque e conferencia de patio. Use apenas para romaneios antigos '
           'com pendencia de saldo ou cadastro inconsistente.\n\n'
           'A acao fica registrada no historico da entrega.',
@@ -3563,9 +3570,10 @@ class _EntregasPageState extends State<EntregasPage>
                 vertical: 24,
               ),
               title: Text(
-                usaMigrado
-                    ? 'Itens para entrega ${exibir.numeroOrcamento}'
-                    : 'Itens do pedido ${exibir.numeroOrcamento}',
+                VendaDocumentoRotuloHelper.tituloItensPedidoEntrega(
+                  exibir,
+                  paraEntrega: usaMigrado,
+                ),
               ),
               content: SizedBox(
                 width: 620,
@@ -3784,7 +3792,9 @@ class _EntregasPageState extends State<EntregasPage>
             final podeLiberar = EntregaFluxoService.podeLiberarSaida(venda) &&
                 widget.podeGerenciarStatusEntrega;
             return AlertDialog(
-              title: Text('Carga ${venda.numeroOrcamento}'),
+              title: Text(
+                'Carga ${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)}',
+              ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4449,7 +4459,7 @@ class _EntregasPageState extends State<EntregasPage>
                 children: [
                   Expanded(
                     child: Text(
-                      'Venda ${venda.numeroOrcamento}',
+                      VendaDocumentoRotuloHelper.rotuloPedidoEntrega(venda),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700),

@@ -66,6 +66,30 @@ void main() {
     expect(VendaDocumentoRotuloHelper.badgeNumeroCurto(orc), '452');
   });
 
+  test('entregas usa hash do controle interno', () {
+    final venda = Venda()
+      ..status = 'finalizada'
+      ..numeroOrcamento = 452
+      ..numeroControle = 310;
+
+    expect(
+      VendaDocumentoRotuloHelper.tituloItensPedidoEntrega(venda),
+      'Itens do pedido #310',
+    );
+    expect(
+      VendaDocumentoRotuloHelper.vendaAtendeBuscaNumeroEntrega(venda, 310),
+      isTrue,
+    );
+    expect(
+      VendaDocumentoRotuloHelper.vendaAtendeBuscaNumeroEntrega(venda, 452),
+      isTrue,
+    );
+    expect(
+      VendaDocumentoRotuloHelper.vendaAtendeBuscaNumeroEntrega(venda, 999),
+      isFalse,
+    );
+  });
+
   test('venda finalizada usa numeroControle e nao o numero do orcamento', () {
     final venda = Venda()
       ..status = 'finalizada'

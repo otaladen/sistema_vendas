@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../model/venda.dart';
 import 'entrega_insucesso_faixa.dart';
@@ -342,7 +343,7 @@ class _FaixaSemMotorista extends StatelessWidget {
                     side: BorderSide(color: scheme.outlineVariant),
                   ),
                   title: Text(
-                    '#${v.numeroOrcamento} · ${VendaRelacaoSafe.nomeCliente(v)}',
+                    '${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(v)} · ${VendaRelacaoSafe.nomeCliente(v)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -478,7 +479,7 @@ class _ColunaMotorista extends StatelessWidget {
                                   children: [
                                     Expanded(
                                       child: Text(
-                                        '#${v.numeroOrcamento}',
+                                        VendaDocumentoRotuloHelper.hashIdentificadorEntrega(v),
                                         style: theme.textTheme.titleSmall
                                             ?.copyWith(
                                           fontWeight: FontWeight.w700,

@@ -995,6 +995,7 @@ class VendaApiRepository extends ChangeNotifier {
       listarEntregas(),
       filtro,
       vendedorRepository: _resolverVendedorComoRepo(),
+      clienteRepository: _resolverClienteComoRepo(),
     );
   }
 
@@ -1002,6 +1003,12 @@ class VendaApiRepository extends ChangeNotifier {
     final resolver = resolverVendedor;
     if (resolver == null) return null;
     return _VendedorResolverAdapter(resolver);
+  }
+
+  dynamic _resolverClienteComoRepo() {
+    final resolver = resolverCliente;
+    if (resolver == null) return null;
+    return _ClienteResolverAdapter(resolver);
   }
 
   ResultadoListagemEntregas carregarListagemEntregasComResumo({
@@ -1013,6 +1020,7 @@ class VendaApiRepository extends ChangeNotifier {
       base,
       filtroContagem,
       vendedorRepository: _resolverVendedorComoRepo(),
+      clienteRepository: _resolverClienteComoRepo(),
     );
     var atrasadas = 0;
     var pendentesHoje = 0;
@@ -1024,6 +1032,7 @@ class VendaApiRepository extends ChangeNotifier {
       base,
       filtroLista,
       vendedorRepository: _resolverVendedorComoRepo(),
+      clienteRepository: _resolverClienteComoRepo(),
     );
     entregas.sort((a, b) {
       int peso(String p) => switch (p) {
@@ -3133,4 +3142,11 @@ class _VendedorResolverAdapter {
   _VendedorResolverAdapter(this._resolver);
   final Vendedor? Function(int id) _resolver;
   Vendedor? obterPorId(int id) => _resolver(id);
+}
+
+/// Adapta `resolverCliente` ao contrato `obterPorId` de [VendaRelacaoSafe].
+class _ClienteResolverAdapter {
+  _ClienteResolverAdapter(this._resolver);
+  final Cliente? Function(int id) _resolver;
+  Cliente? obterPorId(int id) => _resolver(id);
 }

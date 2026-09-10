@@ -219,6 +219,35 @@ abstract final class VendaDocumentoRotuloHelper {
     return n > 0 ? '$n' : '${numeroOrcamentoExibido(venda)}';
   }
 
+  /// Identificador visivel ao cliente na aba Entregas (ex.: `#712`).
+  static String hashIdentificadorEntrega(Venda venda) =>
+      '#${badgeNumeroCurto(venda)}';
+
+  static String rotuloPedidoEntrega(Venda venda) =>
+      'Pedido ${hashIdentificadorEntrega(venda)}';
+
+  static String tituloItensPedidoEntrega(
+    Venda venda, {
+    bool paraEntrega = false,
+  }) {
+    final id = hashIdentificadorEntrega(venda);
+    return paraEntrega ? 'Itens para entrega $id' : 'Itens do pedido $id';
+  }
+
+  /// Busca por numero na aba Entregas (controle, orcamento legado, id interno).
+  static bool vendaAtendeBuscaNumeroEntrega(Venda venda, int numero) {
+    if (numero <= 0) return false;
+    if (venda.numeroControle > 0 && venda.numeroControle == numero) {
+      return true;
+    }
+    final controle = numeroControleInterno(venda);
+    if (controle > 0 && controle == numero) return true;
+    if (venda.numeroOrcamento > 0 && venda.numeroOrcamento == numero) {
+      return true;
+    }
+    return venda.id == numero;
+  }
+
   /// Subtitulo com nota fiscal quando existir (ultimas vendas do caixa).
   static String subtituloListaComDocumentos(Venda venda) {
     final partes = <String>[];

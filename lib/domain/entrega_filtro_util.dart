@@ -1,4 +1,5 @@
 import 'filtro_listagem_entregas.dart';
+import 'venda_documento_rotulo_helper.dart';
 import 'venda_relacao_safe.dart';
 import '../model/venda.dart';
 
@@ -80,10 +81,7 @@ abstract final class EntregaFiltroUtil {
     final n = int.tryParse(raw);
     if (n == null) return <Venda>[];
     return entregas
-        .where(
-          (v) =>
-              (v.numeroOrcamento > 0 && v.numeroOrcamento == n) || v.id == n,
-        )
+        .where((v) => VendaDocumentoRotuloHelper.vendaAtendeBuscaNumeroEntrega(v, n))
         .toList();
   }
 
@@ -92,6 +90,7 @@ abstract final class EntregaFiltroUtil {
     List<Venda> candidatas,
     FiltroListagemEntregas filtro, {
     dynamic vendedorRepository,
+    dynamic clienteRepository,
   }) {
     final termo = filtro.bairroTermo.trim().toLowerCase();
     final motorista = filtro.filtroMotorista.trim().toLowerCase();
@@ -127,9 +126,24 @@ abstract final class EntregaFiltroUtil {
           !atendeFiltroDataMarcada(venda, filtro.filtroDataMarcada)) {
         return false;
       }
-      if (termo.isNotEmpty &&
-          !venda.enderecoEntrega.toLowerCase().contains(termo)) {
-        return false;
+      if (termo.isNotEmpty) {
+        final enderecoOk =
+            venda.enderecoEntrega.toLowerCase().contains(termo);
+        final clienteOk = VendaRelacaoSafe.nomeCliente(
+          venda,
+          clienteRepository: clienteRepository,
+          fallback: '',
+        ).trim().toLowerCase().contains(termo);
+        var numeroOk = false;
+        final termoNumero = termo.startsWith('#') ? termo.substring(1) : termo;
+        final parsed = int.tryParse(termoNumero);
+        if (parsed != null) {
+          numeroOk = VendaDocumentoRotuloHelper.vendaAtendeBuscaNumeroEntrega(
+            venda,
+            parsed,
+          );
+        }
+        if (!enderecoOk && !clienteOk && !numeroOk) return false;
       }
       if (motorista != 'todos' && motorista.isNotEmpty) {
         final m = venda.motoristaEntrega.trim().toLowerCase();

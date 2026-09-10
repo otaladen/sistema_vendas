@@ -1,4 +1,5 @@
 import '../../domain/entregas/romaneio_carga_merge.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../model/item_venda.dart';
 import '../../model/produto.dart';
@@ -36,15 +37,14 @@ MensagemCargaConsolidadaVazia explicarCargaConsolidadaSemItens(
   List<Venda> vendasGrupo,
   int Function(Venda venda, ItemVenda item) quantidadeEntrega,
 ) {
-  final nums = vendasGrupo
-      .map((v) => v.numeroOrcamento)
-      .where((n) => n > 0)
+  final refs = vendasGrupo
+      .map(VendaDocumentoRotuloHelper.hashIdentificadorEntrega)
       .toList();
-  final rotuloPedidos = nums.isEmpty
+  final rotuloPedidos = refs.isEmpty
       ? '${vendasGrupo.length} pedido(s)'
-      : nums.length == 1
-          ? 'Pedido ${nums.first}'
-          : 'Pedidos ${nums.join(', ')}';
+      : refs.length == 1
+          ? 'Pedido ${refs.first}'
+          : 'Pedidos ${refs.join(', ')}';
 
   var itensCarreto = 0;
   var itensComQtd = 0;

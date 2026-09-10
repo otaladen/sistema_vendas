@@ -294,14 +294,14 @@ Future<void> showFiltrosEntregaSheet({
                   const SizedBox(height: 10),
                   TextField(
                     controller: numeroNotaController,
-                    decoration: _dec('N. da nota'),
+                    decoration: _dec('Controle / # pedido'),
                     keyboardType: TextInputType.number,
                     textInputAction: TextInputAction.next,
                   ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: bairroController,
-                    decoration: _dec('Bairro / endereco'),
+                    decoration: _dec('Cliente / bairro / endereco'),
                     textInputAction: TextInputAction.done,
                     onSubmitted: (_) {
                       onAplicarTexto();

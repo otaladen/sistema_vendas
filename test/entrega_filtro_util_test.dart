@@ -24,6 +24,17 @@ void main() {
     expect(r.first.id, 42);
   });
 
+  test('filtrarPorNumeroNota encontra numero de controle', () {
+    final v = Venda()
+      ..id = 647
+      ..status = 'finalizada'
+      ..numeroOrcamento = 452
+      ..numeroControle = 712;
+    final r = EntregaFiltroUtil.filtrarPorNumeroNota([v], '712');
+    expect(r, hasLength(1));
+    expect(r.first.id, 647);
+  });
+
   test('filtro Pendente inclui roteirizada (mesmo balde do patio)', () {
     expect(EntregaFiltroUtil.atendeStatusFiltro('pendente', 'pendente'), isTrue);
     expect(

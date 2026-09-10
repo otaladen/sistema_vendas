@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../domain/entrega_venda_helper.dart';
 import '../../domain/entregas/loja_origem_mercadoria.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../model/venda.dart';
 import 'entrega_insucesso_faixa.dart';
@@ -160,7 +161,7 @@ class EntregaCardLista extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '#${venda.numeroOrcamento} · $cliente',
+                          '${VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda)} · $cliente',
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),

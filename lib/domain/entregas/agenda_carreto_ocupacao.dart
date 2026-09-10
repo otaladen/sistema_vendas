@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../model/item_venda.dart';
 import '../../model/venda.dart';
 import '../entrega_venda_helper.dart';
+import '../venda_documento_rotulo_helper.dart';
 import '../venda_relacao_safe.dart';
 
 /// Ocupacao da agenda de carretos (PDV checkout + API).
@@ -290,7 +291,10 @@ abstract final class AgendaCarretoOcupacaoHelper {
     return AgendaCarretoOcupacaoItem(
       dataChave: AgendaCarretoOcupacaoMes.chaveDia(marcada),
       vendaId: venda.id,
-      numero: venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id,
+      numero: int.tryParse(
+            VendaDocumentoRotuloHelper.badgeNumeroCurto(venda),
+          ) ??
+          venda.id,
       clienteNome: VendaRelacaoSafe.nomeCliente(
         venda,
         clienteRepository: clienteRepository,

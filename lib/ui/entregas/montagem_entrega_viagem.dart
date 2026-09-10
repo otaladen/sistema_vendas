@@ -1,3 +1,4 @@
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../model/venda.dart';
 import 'logistica_entregas.dart';
 
@@ -24,7 +25,7 @@ class MontagemEntregaViagem {
 
   String get rotulo => ehGrupo
       ? rotuloGrupoLogistica(vendas)
-      : 'Pedido ${vendas.first.numeroOrcamento}';
+      : VendaDocumentoRotuloHelper.rotuloPedidoEntrega(vendas.first);
 
   String get motorista => nomeMotoristaEntrega(vendas.first);
 

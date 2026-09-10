@@ -1,4 +1,5 @@
 import '../../domain/venda_relacao_safe.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../model/venda.dart';
 
 /// Ordena paradas do mesmo carro: [ordemEntrega] crescente; 0 ou igual vai ao desempate por id.
@@ -77,10 +78,9 @@ bool agrupamentoTemClientesDistintos(List<Venda> vendas) {
 }
 
 String rotuloGrupoLogistica(List<Venda> bloco) {
-  final nums = bloco.map((v) {
-    if (v.numeroOrcamento > 0) return '${v.numeroOrcamento}';
-    return 'id ${v.id}';
-  }).join(', ');
+  final nums = bloco
+      .map(VendaDocumentoRotuloHelper.hashIdentificadorEntrega)
+      .join(', ');
   final mot = nomeMotoristaEntrega(bloco.first);
   final prefixo = mot == 'Nao definido' ? 'Viagem' : '$mot — viagem';
   return '$prefixo · $nums';

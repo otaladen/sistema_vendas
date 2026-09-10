@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../model/venda.dart';
 import 'logistica_entregas.dart';
 import 'selecionar_motorista_dialog.dart';
@@ -15,7 +16,7 @@ Future<String?> showAgruparViagemMotoristaDialog(
   final resumoPedidos = vendasSelecionadas.isEmpty
       ? null
       : vendasSelecionadas
-          .map((v) => '#${v.numeroOrcamento}')
+          .map(VendaDocumentoRotuloHelper.hashIdentificadorEntrega)
           .join(', ');
 
   final buffer = StringBuffer();

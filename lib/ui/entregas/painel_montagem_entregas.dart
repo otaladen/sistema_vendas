@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entrega_venda_helper.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../model/item_venda.dart';
 import '../../model/produto.dart';
@@ -644,7 +645,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
           value: _idsSelecionadas.contains(v.id),
           onChanged: (_) => _alternarSelecaoAgrupar(v.id),
           title: Text(
-            'Pedido ${v.numeroOrcamento} · $cliente',
+            VendaDocumentoRotuloHelper.rotuloPedidoEntrega(v) + ' · $cliente',
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
           subtitle: Text(
@@ -1003,7 +1004,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Pedido ${v.numeroOrcamento} · '
+                      '${VendaDocumentoRotuloHelper.rotuloPedidoEntrega(v)} · '
                       '${VendaRelacaoSafe.nomeCliente(v, fallback: 'Cliente')}',
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
@@ -1135,7 +1136,7 @@ class _PainelMontagemEntregasState extends State<PainelMontagemEntregas> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Pedido ${v.numeroOrcamento} · '
+                    '${VendaDocumentoRotuloHelper.rotuloPedidoEntrega(v)} · '
                     '${VendaRelacaoSafe.nomeCliente(v, fallback: 'Cliente')}',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
