@@ -209,6 +209,58 @@ class VendaApiRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Baixa todas as vendas finalizadas da sessao de caixa (paginado no servidor).
+  Future<void> hidratarVendasFinalizadasSessaoCaixa({
+    required DateTime inicioSessao,
+  }) async {
+    _exigirServidorOnline();
+    const pageSize = 500;
+    var offset = 0;
+    final porId = <int, Venda>{};
+    while (true) {
+      final pagina = await _client.listarVendasPagina(
+        status: 'finalizada',
+        limit: pageSize,
+        offset: offset,
+        desde: inicioSessao,
+        filtroCancelamento: 'ativas',
+      );
+      for (final v in pagina.vendas) {
+        _porId[v.id] = v;
+        _cacheItensDaVenda(v);
+        porId[v.id] = v;
+      }
+      if (pagina.vendas.isEmpty || offset + pagina.vendas.length >= pagina.total) {
+        break;
+      }
+      offset += pagina.vendas.length;
+    }
+    final corte = inicioSessao.toUtc();
+    _vendasFinalizadas = porId.values
+        .where((v) => v.status == 'finalizada' && !v.cancelada)
+        .where(
+          (v) => !VendaFinalizacaoCaixaHelper.momentoFinalizacao(v)
+              .isBefore(corte),
+        )
+        .toList();
+    notifyListeners();
+  }
+
+  /// Lista em cache (apos hidratar) todas as vendas da sessao aberta, sem limite.
+  List<Venda> listarVendasFinalizadasSessaoCaixa({
+    required DateTime inicioSessao,
+    DateTime? fimSessao,
+    UltimasVendasFinalizadasOrdenacao ordenacao =
+        UltimasVendasFinalizadasOrdenacao.padrao,
+  }) {
+    return listarUltimasVendasFinalizadas(
+      limit: 0,
+      desde: inicioSessao,
+      ate: fimSessao,
+      ordenacao: ordenacao,
+    );
+  }
+
   ListagemVendasPagina? _listagemRemota;
   Object? _listagemFiltroAssinatura;
 

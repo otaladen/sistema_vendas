@@ -498,9 +498,8 @@ class _CaixaPageState extends State<CaixaPage> {
       return;
     }
     try {
-      await repo.hidratarVendasFinalizadas(
-        limit: 40,
-        desde: _aberturaCaixaEm,
+      await repo.hidratarVendasFinalizadasSessaoCaixa(
+        inicioSessao: _aberturaCaixaEm!,
       );
     } catch (e) {
       debugPrint('Caixa: hidratar vendas finalizadas: $e');
@@ -6197,8 +6196,6 @@ class _CaixaPageState extends State<CaixaPage> {
     return null;
   }
 
-  static const int _ultimasVendasFinalizadasLimite = 20;
-
   Future<void> _carregarOrdenacaoUltimasVendas() async {
     final prefs = await SharedPreferences.getInstance();
     final salva = UltimasVendasFinalizadasOrdenacao.fromChave(
@@ -6237,10 +6234,23 @@ class _CaixaPageState extends State<CaixaPage> {
     if (!_caixaAberto || _aberturaCaixaEm == null) {
       return const [];
     }
-    return widget.vendaRepository.listarUltimasVendasFinalizadas(
-      limit: _ultimasVendasFinalizadasLimite,
+    final inicio = _aberturaCaixaEm!;
+    final repo = widget.vendaRepository;
+    if (repo is VendaApiRepository) {
+      return repo.listarVendasFinalizadasSessaoCaixa(
+        inicioSessao: inicio,
+        ordenacao: _ordenacaoUltimasVendas,
+      );
+    }
+    if (repo is VendaRepository) {
+      return repo.listarVendasFinalizadasSessaoCaixa(
+        inicioSessao: inicio,
+        ordenacao: _ordenacaoUltimasVendas,
+      );
+    }
+    return repo.listarVendasFinalizadasSessaoCaixa(
+      inicioSessao: inicio,
       ordenacao: _ordenacaoUltimasVendas,
-      desde: _aberturaCaixaEm,
     );
   }
 
@@ -8335,6 +8345,11 @@ class _CaixaPageState extends State<CaixaPage> {
 
   Widget _buildPainelStatusCaixa(BuildContext context) {
     final theme = Theme.of(context);
+    final vendasSessao = _ultimasVendasFinalizadasParaCaixa();
+    final tituloVendasSessao = _caixaAberto
+        ? 'Vendas finalizadas nesta sessao (${vendasSessao.length} '
+            '${vendasSessao.length == 1 ? 'venda' : 'vendas'})'
+        : 'Ultimas vendas finalizadas';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -8354,7 +8369,7 @@ class _CaixaPageState extends State<CaixaPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Ultimas vendas finalizadas',
+                              tituloVendasSessao,
                               style: theme.textTheme.titleSmall?.copyWith(
                                 fontWeight: FontWeight.w600,
                               ),
@@ -8413,7 +8428,10 @@ class _CaixaPageState extends State<CaixaPage> {
                   ),
                   const SizedBox(height: 8),
                   Expanded(
-                    child: _buildListaUltimasVendasFinalizadasCaixa(context),
+                    child: _buildListaUltimasVendasFinalizadasCaixa(
+                      context,
+                      vendasSessao,
+                    ),
                   ),
                 ],
               ),
@@ -8424,9 +8442,12 @@ class _CaixaPageState extends State<CaixaPage> {
     );
   }
 
-  Widget _buildListaUltimasVendasFinalizadasCaixa(BuildContext context) {
+  Widget _buildListaUltimasVendasFinalizadasCaixa(
+    BuildContext context,
+    List<Venda> vendas,
+  ) {
     return CaixaUltimasVendasList(
-      vendas: _ultimasVendasFinalizadasParaCaixa(),
+      vendas: vendas,
       clienteDaVenda: _clienteDaVenda,
       formatarMoeda: _formatarMoeda,
       onVendaTap: _abrirAcoesVendaFinalizada,

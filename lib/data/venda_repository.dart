@@ -894,6 +894,63 @@ class VendaRepository {
     );
   }
 
+  /// Vendas finalizadas da sessao de caixa aberta (desde [inicioSessao] ate [fimSessao]).
+  ///
+  /// Sem limite de quantidade — usado no painel lateral do caixa ate o fechamento.
+  List<Venda> listarVendasFinalizadasSessaoCaixa({
+    required DateTime inicioSessao,
+    DateTime? fimSessao,
+    UltimasVendasFinalizadasOrdenacao ordenacao =
+        UltimasVendasFinalizadasOrdenacao.padrao,
+  }) {
+    final query = _db.vendaBox
+        .query(
+          _condicaoCandidatasCaixaPeriodo(inicio: inicioSessao, fim: fimSessao),
+        )
+        .build();
+    try {
+      final filtradas = <Venda>[];
+      for (final venda in query.find()) {
+        if (!_vendaFinalizadaNoPeriodoCaixa(
+          venda,
+          inicio: inicioSessao,
+          fim: fimSessao,
+        )) {
+          continue;
+        }
+        filtradas.add(venda);
+      }
+      return _ordenarVendasFinalizadasCaixa(filtradas, ordenacao);
+    } finally {
+      query.close();
+    }
+  }
+
+  List<Venda> _ordenarVendasFinalizadasCaixa(
+    List<Venda> lista,
+    UltimasVendasFinalizadasOrdenacao ordenacao,
+  ) {
+    final out = List<Venda>.from(lista);
+    switch (ordenacao) {
+      case UltimasVendasFinalizadasOrdenacao.porControle:
+        out.sort((a, b) {
+          final na = _numeroControleParaOrdenacao(a);
+          final nb = _numeroControleParaOrdenacao(b);
+          final cmp = nb.compareTo(na);
+          if (cmp != 0) return cmp;
+          return b.id.compareTo(a.id);
+        });
+      case UltimasVendasFinalizadasOrdenacao.porFinalizacao:
+        out.sort((a, b) {
+          final cmp = VendaFinalizacaoCaixaHelper.momentoFinalizacao(b)
+              .compareTo(VendaFinalizacaoCaixaHelper.momentoFinalizacao(a));
+          if (cmp != 0) return cmp;
+          return b.id.compareTo(a.id);
+        });
+    }
+    return out;
+  }
+
   /// Janela larga no ObjectBox; o corte fino e [_vendaFinalizadaNoPeriodoCaixa].
   Condition<Venda> _condicaoCandidatasCaixaPeriodo({
     DateTime? inicio,
