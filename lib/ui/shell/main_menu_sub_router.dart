@@ -21,6 +21,7 @@ import '../fiscal/exportar_fechamento_page.dart';
 import '../fiscal/fiscal_importar_nfe_page.dart';
 import '../fiscal/nfe_devolucao_fornecedor_page.dart';
 import '../fiscal/nfe_gerenciamento_page.dart';
+import '../fiscal/notas_recebidas_page.dart';
 import '../fiscal/pendencias_fiscais_page.dart';
 import '../fiscal/relatorio_fiscal_mensal_page.dart';
 import '../fornecedores_page.dart';
@@ -187,6 +188,12 @@ class MainMenuSubRouter {
         return NfeImportadasPage(
           produtoRepository: deps.produtoRepository,
           nfeImportadaRepository: deps.nfeImportadaRepository,
+        );
+      case MainMenuSubDestino.fiscalNotasRecebidas:
+        return NotasRecebidasPage(
+          produtoRepository: deps.produtoRepository,
+          appConfigRepository: deps.appConfigRepository,
+          lanApiClient: deps.lanApiClient,
         );
       case MainMenuSubDestino.fiscalDevolucaoFornecedor:
         if (_fiscalMutacaoLocalIndisponivel(deps) &&

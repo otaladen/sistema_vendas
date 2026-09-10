@@ -79,6 +79,17 @@ class NotasFiscaisPage extends StatelessWidget {
             ),
           ),
           HubNavButton(
+            icon: Icons.move_to_inbox_outlined,
+            corDestaque: HubNavColors.menuNotasFiscais(context),
+            titulo: 'NF-e recebidas (Focus)',
+            subtitulo:
+                'Notas emitidas contra o CNPJ da loja: sync Focus, manifestacao MDe, XML e importacao.',
+            onTap: () => _abrirSub(
+              context,
+              MainMenuSubDestino.fiscalNotasRecebidas,
+            ),
+          ),
+          HubNavButton(
             icon: Icons.assignment_return_outlined,
             corDestaque: HubNavColors.menuNotasFiscais(context),
             titulo: 'Devolucao ao fornecedor',

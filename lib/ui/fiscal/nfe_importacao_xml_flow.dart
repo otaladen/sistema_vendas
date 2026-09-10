@@ -18,6 +18,24 @@ import '../widgets/lan_api_feedback.dart';
 abstract final class NfeImportacaoXmlFlow {
   NfeImportacaoXmlFlow._();
 
+  /// Importa a partir do conteudo XML (ex.: download Focus NF-e recebida).
+  static Future<void> executarComConteudoXml(
+    BuildContext context, {
+    required String xml,
+    required dynamic produtoRepository,
+    required AppConfigRepository appConfigRepository,
+    LanApiClient? lanApiClient,
+  }) async {
+    if (xml.trim().isEmpty) return;
+    await _processarXml(
+      context,
+      xml: xml,
+      produtoRepository: produtoRepository,
+      appConfigRepository: appConfigRepository,
+      lanApiClient: lanApiClient,
+    );
+  }
+
   static Future<void> executar(
     BuildContext context, {
     required dynamic produtoRepository,
@@ -42,58 +60,12 @@ abstract final class NfeImportacaoXmlFlow {
     try {
       final xml = await File(path).readAsString();
       if (!context.mounted) return;
-
-      final NfeXmlParseResult nfe;
-      final dynamic repo;
-      List<SugestaoLinhaConferencia>? sugestoes;
-      if (viaApi) {
-        // Terminal Leve / rede: parse e de-para no PC1 (:8788).
-        final api = NfeEntradaApiRepository(client, produtoRepository);
-        final parse = await api.lerXmlRemoto(xml);
-        if (!context.mounted) return;
-        if (parse.jaImportada) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              duration: Duration(seconds: 7),
-              content: Text(
-                'Esta NF-e ja foi importada antes. Use "Notas ja importadas" para ver o registro.',
-              ),
-            ),
-          );
-          return;
-        }
-        nfe = parse.nfe;
-        sugestoes = parse.sugestoes.isEmpty ? null : parse.sugestoes;
-        repo = api;
-      } else {
-        nfe = XmlParserService.parseNfeXmlString(xml);
-        repo = NfeEntradaRepository(produtoRepository.objectBox);
-        final jaImportada = repo.chaveNfeJaImportada(nfe.chaveAcesso) as bool;
-        if (jaImportada) {
-          if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              duration: Duration(seconds: 7),
-              content: Text(
-                'Esta NF-e ja foi importada antes. Use "Notas ja importadas" para ver o registro.',
-              ),
-            ),
-          );
-          return;
-        }
-      }
-
-      await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => ConferenciaXmlScreen(
-            nfe: nfe,
-            nfeRepository: repo,
-            produtoRepository: produtoRepository,
-            appConfigRepository: appConfigRepository,
-            xmlOriginal: xml,
-            sugestoesIniciais: sugestoes,
-          ),
-        ),
+      await _processarXml(
+        context,
+        xml: xml,
+        produtoRepository: produtoRepository,
+        appConfigRepository: appConfigRepository,
+        lanApiClient: lanApiClient,
       );
     } on LanApiException catch (e) {
       if (!context.mounted) return;
@@ -111,5 +83,72 @@ abstract final class NfeImportacaoXmlFlow {
         prefixo: 'Nao foi possivel ler a NF-e',
       );
     }
+  }
+
+  static Future<void> _processarXml(
+    BuildContext context, {
+    required String xml,
+    required dynamic produtoRepository,
+    required AppConfigRepository appConfigRepository,
+    LanApiClient? lanApiClient,
+  }) async {
+    final client =
+        lanApiClient ?? MainMenuDeps.maybeOf(context)?.lanApiClient;
+    final viaApi = client != null;
+    if (viaApi && !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
+      return;
+    }
+
+    final NfeXmlParseResult nfe;
+    final dynamic repo;
+    List<SugestaoLinhaConferencia>? sugestoes;
+    if (viaApi) {
+      final api = NfeEntradaApiRepository(client, produtoRepository);
+      final parse = await api.lerXmlRemoto(xml);
+      if (!context.mounted) return;
+      if (parse.jaImportada) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 7),
+            content: Text(
+              'Esta NF-e ja foi importada antes. Use "Notas ja importadas" para ver o registro.',
+            ),
+          ),
+        );
+        return;
+      }
+      nfe = parse.nfe;
+      sugestoes = parse.sugestoes.isEmpty ? null : parse.sugestoes;
+      repo = api;
+    } else {
+      nfe = XmlParserService.parseNfeXmlString(xml);
+      repo = NfeEntradaRepository(produtoRepository.objectBox);
+      final jaImportada = repo.chaveNfeJaImportada(nfe.chaveAcesso) as bool;
+      if (jaImportada) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 7),
+            content: Text(
+              'Esta NF-e ja foi importada antes. Use "Notas ja importadas" para ver o registro.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ConferenciaXmlScreen(
+          nfe: nfe,
+          nfeRepository: repo,
+          produtoRepository: produtoRepository,
+          appConfigRepository: appConfigRepository,
+          xmlOriginal: xml,
+          sugestoesIniciais: sugestoes,
+        ),
+      ),
+    );
   }
 }

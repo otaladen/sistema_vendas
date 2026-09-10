@@ -36,6 +36,7 @@ import '../model/item_nota_temporario.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
+import '../domain/fiscal/nfe_recebida.dart';
 import 'fiscal_service.dart';
 
 /// Ambiente da API Focus NFe.
@@ -646,6 +647,46 @@ class FocusNfePreviaDanfeResultado {
   bool get sucesso =>
       (pdfBytes != null && pdfBytes!.isNotEmpty) ||
       (html != null && html!.trim().isNotEmpty);
+}
+
+/// Resultado da listagem paginada de NF-e recebidas (Focus).
+class FocusNfeRecebidasListResult {
+  const FocusNfeRecebidasListResult({
+    required this.notas,
+    this.totalCount,
+    this.maxVersion,
+    this.mensagemErro = '',
+    this.httpStatusCode = 0,
+  });
+
+  final List<NfeRecebida> notas;
+  final int? totalCount;
+  final int? maxVersion;
+  final String mensagemErro;
+  final int httpStatusCode;
+
+  bool get sucesso => mensagemErro.isEmpty;
+}
+
+/// Resultado de manifestacao do destinatario (MDe).
+class FocusNfeManifestacaoResultado {
+  const FocusNfeManifestacaoResultado({
+    required this.sucesso,
+    this.mensagem = '',
+    this.statusFocus = '',
+    this.statusSefaz = '',
+    this.protocolo = '',
+  });
+
+  final bool sucesso;
+  final String mensagem;
+  final String statusFocus;
+  final String statusSefaz;
+  final String protocolo;
+
+  factory FocusNfeManifestacaoResultado.erro(String mensagem) {
+    return FocusNfeManifestacaoResultado(sucesso: false, mensagem: mensagem);
+  }
 }
 
 /// Integracao HTTP com a API Focus NFe (NFC-e modelo 65 e NF-e modelo 55).
@@ -1439,6 +1480,309 @@ class FocusNfeService {
       }
       final body = utf8.decode(response.bodyBytes);
       return body.trim().startsWith('<') ? body : null;
+    } catch (_) {}
+    return null;
+  }
+
+  /// Lista NF-e recebidas (destinadas ao CNPJ) — GET /v2/nfes_recebidas.
+  Future<FocusNfeRecebidasListResult> listarNfesRecebidas({
+    String? cnpjDestinatario,
+    int? versaoMinima,
+  }) async {
+    validarConfiguracao();
+    final cnpj = (cnpjDestinatario ?? _config.cnpjEmitente)
+        .replaceAll(RegExp(r'\D'), '');
+    if (cnpj.length != 14) {
+      return const FocusNfeRecebidasListResult(
+        notas: [],
+        mensagemErro: 'CNPJ destinatario invalido para consulta de NF-e recebidas.',
+      );
+    }
+    final base = _config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final params = <String, String>{'cnpj': cnpj};
+    if (versaoMinima != null && versaoMinima > 0) {
+      params['versao'] = versaoMinima.toString();
+    }
+    final uri = Uri.parse('$base/v2/nfes_recebidas').replace(queryParameters: params);
+    try {
+      final response = await _http
+          .get(uri, headers: _headers())
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        return FocusNfeRecebidasListResult(
+          notas: const [],
+          mensagemErro: 'Focus NFe: acesso negado (token ou CNPJ).',
+          httpStatusCode: response.statusCode,
+        );
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final msg = _extrairErroJson(response.body) ??
+            'Falha ao listar NF-e recebidas (HTTP ${response.statusCode}).';
+        return FocusNfeRecebidasListResult(
+          notas: const [],
+          mensagemErro: msg,
+          httpStatusCode: response.statusCode,
+        );
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! List) {
+        return FocusNfeRecebidasListResult(
+          notas: const [],
+          mensagemErro: 'Resposta inesperada da Focus ao listar NF-e recebidas.',
+          httpStatusCode: response.statusCode,
+        );
+      }
+      final notas = <NfeRecebida>[];
+      for (final item in decoded) {
+        if (item is Map<String, dynamic>) {
+          notas.add(NfeRecebida.fromJson(item));
+        } else if (item is Map) {
+          notas.add(NfeRecebida.fromJson(item.cast<String, dynamic>()));
+        }
+      }
+      return FocusNfeRecebidasListResult(
+        notas: notas,
+        totalCount: _parseHeaderInt(response.headers['x-total-count']),
+        maxVersion: _parseHeaderInt(response.headers['x-max-version']),
+        httpStatusCode: response.statusCode,
+      );
+    } catch (e) {
+      return FocusNfeRecebidasListResult(
+        notas: const [],
+        mensagemErro: 'Falha ao consultar NF-e recebidas na Focus: $e',
+      );
+    }
+  }
+
+  /// Sincroniza todas as NF-e recebidas novas/alteradas desde [versaoArmazenada].
+  Future<({List<NfeRecebida> notas, int novaVersaoMax, String? erro})>
+      sincronizarNfesRecebidas({
+    required int versaoArmazenada,
+    String? cnpjDestinatario,
+  }) async {
+    var cursor = versaoArmazenada;
+    final acumulado = <NfeRecebida>[];
+    var maxVersao = versaoArmazenada;
+    for (var i = 0; i < 50; i++) {
+      final r = await listarNfesRecebidas(
+        cnpjDestinatario: cnpjDestinatario,
+        versaoMinima: cursor > 0 ? cursor : null,
+      );
+      if (!r.sucesso) {
+        return (notas: acumulado, novaVersaoMax: maxVersao, erro: r.mensagemErro);
+      }
+      if (r.notas.isEmpty) break;
+      acumulado.addAll(r.notas);
+      var batchMax = 0;
+      for (final n in r.notas) {
+        if (n.versao > batchMax) batchMax = n.versao;
+      }
+      final headerMax = r.maxVersion ?? 0;
+      final prox = [batchMax, headerMax, cursor].reduce((a, b) => a > b ? a : b);
+      if (prox <= cursor) break;
+      cursor = prox;
+      if (prox > maxVersao) maxVersao = prox;
+      if (r.notas.length < 100) break;
+    }
+    return (notas: acumulado, novaVersaoMax: maxVersao, erro: null);
+  }
+
+  /// Busca todo o historico disponivel na Focus (lotes de 100, desde versao 0).
+  Future<({List<NfeRecebida> notas, int novaVersaoMax, String? erro})>
+      sincronizarNfesRecebidasHistoricoCompleto({
+    String? cnpjDestinatario,
+  }) async {
+    var cursor = 0;
+    final acumulado = <NfeRecebida>[];
+    var maxVersao = 0;
+    for (var i = 0; i < 200; i++) {
+      final r = await listarNfesRecebidas(
+        cnpjDestinatario: cnpjDestinatario,
+        versaoMinima: cursor > 0 ? cursor : null,
+      );
+      if (!r.sucesso) {
+        return (notas: acumulado, novaVersaoMax: maxVersao, erro: r.mensagemErro);
+      }
+      if (r.notas.isEmpty) break;
+      acumulado.addAll(r.notas);
+      var batchMax = 0;
+      for (final n in r.notas) {
+        if (n.versao > batchMax) batchMax = n.versao;
+      }
+      final headerMax = r.maxVersion ?? 0;
+      final prox = batchMax > headerMax ? batchMax : headerMax;
+      if (prox > maxVersao) maxVersao = prox;
+      if (r.notas.length < 100) break;
+      if (prox <= cursor) break;
+      cursor = prox;
+    }
+    return (notas: acumulado, novaVersaoMax: maxVersao, erro: null);
+  }
+
+  /// XML da NF-e recebida — GET /v2/nfes_recebidas/{chave}.xml
+  Future<String?> baixarNfeRecebidaXml(String chaveAcesso) async {
+    validarConfiguracao();
+    final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44) return null;
+    final base = _config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final uri = Uri.parse('$base/v2/nfes_recebidas/$chave.xml');
+    try {
+      final response = await _http
+          .get(
+            uri,
+            headers: {
+              ..._headers(),
+              'Accept': 'application/xml, text/xml, */*',
+            },
+          )
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+      final body = utf8.decode(response.bodyBytes);
+      return body.trim().startsWith('<') ? body : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// DANFE da NF-e recebida — GET /v2/nfes_recebidas/{chave}.pdf (redirect).
+  Future<Uint8List?> baixarNfeRecebidaDanfePdf(String chaveAcesso) async {
+    validarConfiguracao();
+    final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44) return null;
+    final base = _config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final uri = Uri.parse('$base/v2/nfes_recebidas/$chave.pdf');
+    return _baixarPdfComRedirectFocus(uri);
+  }
+
+  /// Manifestacao do destinatario — POST /v2/nfes_recebidas/{chave}/manifesto
+  Future<FocusNfeManifestacaoResultado> manifestarNfeRecebida({
+    required String chaveAcesso,
+    required String tipo,
+    String justificativa = '',
+  }) async {
+    validarConfiguracao();
+    final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44) {
+      return FocusNfeManifestacaoResultado.erro('Chave de acesso invalida.');
+    }
+    final base = _config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final uri = Uri.parse('$base/v2/nfes_recebidas/$chave/manifesto');
+    final tipoNorm = tipo.trim().toLowerCase();
+    if (tipoNorm == 'nao_realizada') {
+      final j = justificativa.trim();
+      if (j.length < 15 || j.length > 255) {
+        return FocusNfeManifestacaoResultado.erro(
+          'Justificativa obrigatoria (15 a 255 caracteres) para operacao nao realizada.',
+        );
+      }
+    }
+    final body = <String, dynamic>{'tipo': tipoNorm};
+    if (tipoNorm == 'nao_realizada') {
+      body['justificativa'] = justificativa.trim();
+    }
+    try {
+      final response = await _http
+          .post(
+            uri,
+            headers: _headers(),
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 120));
+      Map<String, dynamic>? jsonBody;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          jsonBody = decoded;
+        } else if (decoded is Map) {
+          jsonBody = decoded.cast<String, dynamic>();
+        }
+      } catch (_) {}
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final msg = jsonBody != null
+            ? _extrairMensagemErroApi(jsonBody, jsonBody['erros'])
+            : 'Manifestacao rejeitada (HTTP ${response.statusCode}).';
+        return FocusNfeManifestacaoResultado.erro(msg);
+      }
+      if (jsonBody == null) {
+        return FocusNfeManifestacaoResultado.erro('Resposta invalida da Focus.');
+      }
+      final status = (jsonBody['status'] ?? '').toString();
+      final sefaz = (jsonBody['status_sefaz'] ?? '').toString();
+      final msgSefaz = (jsonBody['mensagem_sefaz'] ?? '').toString();
+      final ok = status == 'evento_registrado' ||
+          status == 'aceita' ||
+          sefaz == '135';
+      if (!ok && status == 'erro') {
+        return FocusNfeManifestacaoResultado(
+          sucesso: false,
+          mensagem: msgSefaz.isNotEmpty ? msgSefaz : 'Manifestacao nao registrada.',
+          statusFocus: status,
+          statusSefaz: sefaz,
+        );
+      }
+      return FocusNfeManifestacaoResultado(
+        sucesso: ok || status.isNotEmpty,
+        mensagem: msgSefaz.isNotEmpty ? msgSefaz : 'Manifestacao enviada.',
+        statusFocus: status,
+        statusSefaz: sefaz,
+        protocolo: (jsonBody['protocolo'] ?? '').toString(),
+      );
+    } catch (e) {
+      return FocusNfeManifestacaoResultado.erro(
+        'Falha ao manifestar NF-e na Focus: $e',
+      );
+    }
+  }
+
+  Future<Uint8List?> _baixarPdfComRedirectFocus(Uri uri) async {
+    try {
+      final response = await _http
+          .get(
+            uri,
+            headers: {
+              ..._headers(),
+              'Accept': 'application/pdf, */*',
+            },
+          )
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode >= 300 && response.statusCode < 400) {
+        final loc = response.headers['location'];
+        if (loc != null && loc.trim().isNotEmpty) {
+          final redirect = Uri.parse(loc.trim());
+          final r2 = await _http
+              .get(redirect, headers: const {'Accept': 'application/pdf'})
+              .timeout(const Duration(seconds: 90));
+          if (r2.statusCode >= 200 &&
+              r2.statusCode < 300 &&
+              _parecePdf(r2.bodyBytes)) {
+            return Uint8List.fromList(r2.bodyBytes);
+          }
+        }
+      }
+      if (response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          _parecePdf(response.bodyBytes)) {
+        return Uint8List.fromList(response.bodyBytes);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static int? _parseHeaderInt(String? raw) {
+    if (raw == null) return null;
+    return int.tryParse(raw.trim());
+  }
+
+  static String? _extrairErroJson(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final m = decoded.cast<String, dynamic>();
+        final msg = (m['mensagem'] ?? m['message'] ?? '').toString();
+        if (msg.isNotEmpty) return msg;
+      }
     } catch (_) {}
     return null;
   }
