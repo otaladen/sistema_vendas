@@ -1,5 +1,6 @@
 import '../../config/fiscal_config.dart';
 import 'fiscal_regime_padrao.dart';
+import '../../services/configuracoes_service.dart';
 import '../../services/fiscal_config_store.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../model/cliente.dart';
@@ -77,6 +78,7 @@ abstract final class NfePreEmissaoService {
     String? deviceIdAtual,
     /// Terminal leve: Focus/SEFAZ rodam no PC servidor.
     bool emissaoNoServidor = false,
+    FiscalConfigDados? fiscal,
     List<ItemVenda>? itens,
     Produto? Function(int produtoId)? resolverProduto,
   }) {
@@ -87,7 +89,10 @@ abstract final class NfePreEmissaoService {
     final listaItens =
         itens ?? RomaneioCargaMerge.itensDaVendaSafe(venda);
 
-    if (!FiscalConfigStore.configurado) {
+    final fiscalCfg = fiscal ??
+        ConfiguracoesService.tryGlobal?.fiscalEmCache ??
+        FiscalConfigStore.efetivo;
+    if (!fiscalCfg.configurado) {
       if (emissaoNoServidor) {
         checklist.add(
           const NfeChecklistItem(
@@ -107,15 +112,16 @@ abstract final class NfePreEmissaoService {
         );
       }
     } else {
+      final regime = FiscalRegimePadrao.regimeEfetivo(fiscalCfg);
       checklist.add(
         NfeChecklistItem(
           titulo:
-              'Focus NFe (${FiscalConfigStore.efetivo.homologacao ? "homologacao" : "producao"})',
+              'Focus NFe (${fiscalCfg.homologacao ? "homologacao" : "producao"})',
           detalhe:
-              'Emitente ${FiscalConfigStore.efetivo.cnpjEmitente} · '
-              'UF ${FiscalConfigStore.efetivo.ufEmitente} · '
-              '${FiscalRegimePadrao.rotuloRegime(FiscalRegimePadrao.regimeEfetivo())} · '
-              '${FiscalRegimePadrao.resumoPadroesEmissao(FiscalRegimePadrao.regimeEfetivo())}',
+              'Emitente ${fiscalCfg.cnpjEmitente} · '
+              'UF ${fiscalCfg.ufEmitente} · '
+              '${FiscalRegimePadrao.rotuloRegime(regime)} · '
+              '${FiscalRegimePadrao.resumoPadroesEmissao(regime)}',
           severidade: NfeChecklistSeveridade.ok,
         ),
       );

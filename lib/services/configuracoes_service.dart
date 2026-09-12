@@ -90,6 +90,13 @@ class ConfiguracoesService {
 
   static ConfiguracoesService? get tryGlobal => _instanciaGlobal;
 
+  /// Fiscal global da loja (via servico registrado ou prefs locais em testes/headless).
+  static Future<FiscalConfigDados> resolverFiscalGlobal() async {
+    final g = tryGlobal;
+    if (g != null) return g.carregarFiscalGlobal();
+    return FiscalConfigStore.carregar();
+  }
+
   /// Leitura de config no servidor/API quando [registrar] ja rodou no mesmo processo.
   static AppConfigRepository repositoryFallback() =>
       tryGlobal?.repository ?? AppConfigRepository();
@@ -116,13 +123,13 @@ class ConfiguracoesService {
   Future<EmpresaConfig> inicializarNaAbertura({
     required bool terminalLeve,
   }) async {
-    await FiscalConfigStore.carregar();
     var cfg = await carregarEfetiva();
-    await FiscalConfigStore.aplicarRegimeEmpresa(cfg.regimeTributarioEmitente);
+    await carregarFiscalGlobal();
     if (terminalLeve) {
       final client = lanApiClient;
       if (client != null && client.configurado) {
         cfg = await carregarGlobalDoServidor();
+        await carregarFiscalGlobal();
       }
     }
     return cfg;
@@ -197,7 +204,76 @@ class ConfiguracoesService {
     }
   }
 
-  /// Dados fiscais globais (Focus) — sempre do servidor de emissao / prefs locais do PC 1.
-  Future<FiscalConfigDados> carregarFiscalGlobal() =>
-      FiscalConfigStore.carregar();
+  /// Ultimo snapshot fiscal em memoria (apos [carregarFiscalGlobal]).
+  FiscalConfigDados get fiscalEmCache => FiscalConfigStore.efetivo;
+
+  Future<bool> fiscalEstaConfigurado() async =>
+      (await carregarFiscalGlobal()).configurado;
+
+  /// Dados fiscais globais da loja (Focus): prefs no PC servidor ou API no terminal leve.
+  Future<FiscalConfigDados> carregarFiscalGlobal() async {
+    final empresa = await carregarEfetiva();
+    await FiscalConfigStore.aplicarRegimeEmpresa(
+      empresa.regimeTributarioEmitente,
+    );
+
+    final client = lanApiClient;
+    if (client is LanApiClient && client.configurado) {
+      try {
+        final m = await client.obterEmpresaFiscal();
+        final raw = m['fiscal'];
+        if (raw is Map) {
+          final dados = FiscalConfigDados.fromApiRemoto(
+            Map<String, dynamic>.from(raw),
+            regimeEmpresaConfig: empresa.regimeTributarioEmitente,
+          );
+          FiscalConfigStore.aplicarCache(dados);
+          return dados;
+        }
+      } catch (_) {
+        // Cache local / prefs abaixo.
+      }
+    }
+
+    return FiscalConfigStore.carregar();
+  }
+
+  /// Persiste configuracao fiscal no PC servidor (token, ambiente, SMTP).
+  Future<void> salvarFiscalGlobal({
+    required String apiToken,
+    required String ambiente,
+    String? cnpjEmitente,
+    String? inscricaoEstadualEmitente,
+    int? regimeTributarioEmitente,
+    String? emailContador,
+    String? smtpHost,
+    int? smtpPort,
+    String? smtpUser,
+    String? smtpPassword,
+    String? smtpFromEmail,
+    bool? smtpSsl,
+  }) async {
+    await FiscalConfigStore.salvar(
+      apiToken: apiToken,
+      ambiente: ambiente,
+      cnpjEmitente: cnpjEmitente,
+      inscricaoEstadualEmitente: inscricaoEstadualEmitente,
+      regimeTributarioEmitente: regimeTributarioEmitente,
+      emailContador: emailContador,
+      smtpHost: smtpHost,
+      smtpPort: smtpPort,
+      smtpUser: smtpUser,
+      smtpPassword: smtpPassword,
+      smtpFromEmail: smtpFromEmail,
+      smtpSsl: smtpSsl,
+    );
+    if (regimeTributarioEmitente != null) {
+      final empresa = await carregarEfetiva();
+      await salvarEfetiva(
+        empresa.copyWith(
+          regimeTributarioEmitente: regimeTributarioEmitente,
+        ),
+      );
+    }
+  }
 }

@@ -36,7 +36,6 @@ import '../../domain/fiscal/nfe_painel_resumo.dart';
 import '../../domain/fiscal/nfe_pendencias_filtro.dart';
 import '../../domain/fiscal/nfe_pendencias_service.dart';
 import '../../domain/fiscal/nfe_xml_local_service.dart';
-import '../../services/fiscal_config_store.dart';
 import '../../domain/fiscal/nfe_pre_emissao_service.dart';
 import '../../domain/fiscal/nfe_referencia_resolver.dart';
 import '../../domain/fiscal/nfe_registro_focus_merge.dart';
@@ -290,11 +289,12 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   Future<void> _recarregarConfigFocus() async {
-    await FiscalConfigStore.carregar();
+    await widget.configuracoesService.carregarFiscalGlobal();
     if (!mounted) return;
     setState(() {
       _focusNfe = FocusNfeService(config: criarFocusNfeConfigPadrao());
     });
+    _atualizarPreEmissao();
   }
 
   void _persistirRegistro(NfeSaidaFiscalRegistro registro) {
@@ -620,6 +620,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
         nfeUltima: nfeUltima,
         deviceIdAtual: _deviceIdSync,
         emissaoNoServidor: _viaApi,
+        fiscal: widget.configuracoesService.fiscalEmCache,
         itens: itens,
         resolverProduto: prodRepo == null
             ? null
@@ -1342,7 +1343,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
 
   Future<void> _enviarEmailNfe(NfeSaidaFiscalRegistro reg) async {
     if (!reg.autorizada) return;
-    if (_viaApi && !FiscalConfigStore.configurado) {
+    if (_viaApi && !widget.configuracoesService.fiscalEmCache.configurado) {
       _snack(
         'Envio de e-mail da NF-e pelo Focus exige configuracao fiscal '
         'local ou use o PC servidor.',

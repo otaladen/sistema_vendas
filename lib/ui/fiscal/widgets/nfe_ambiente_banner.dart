@@ -1,19 +1,49 @@
 import 'package:flutter/material.dart';
 
 import '../../../domain/fiscal/fiscal_regime_padrao.dart';
+import '../../../services/configuracoes_service.dart';
 import '../../../services/fiscal_config_store.dart';
+import '../../configuracoes/configuracoes_scope.dart';
 
 /// Alerta de ambiente Focus (homologacao vs producao).
-class NfeAmbienteBanner extends StatelessWidget {
+class NfeAmbienteBanner extends StatefulWidget {
   const NfeAmbienteBanner({super.key});
 
   @override
+  State<NfeAmbienteBanner> createState() => _NfeAmbienteBannerState();
+}
+
+class _NfeAmbienteBannerState extends State<NfeAmbienteBanner> {
+  FiscalConfigDados? _fiscal;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregar());
+  }
+
+  Future<void> _carregar() async {
+    if (!mounted) return;
+    final svc = ConfiguracoesScope.maybeOf(context);
+    final cfg = svc != null
+        ? await svc.carregarFiscalGlobal()
+        : await ConfiguracoesService.resolverFiscalGlobal();
+    if (!mounted) return;
+    setState(() => _fiscal = cfg);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final fiscal = _fiscal;
+    if (fiscal == null) {
+      return const SizedBox.shrink();
+    }
     final theme = Theme.of(context);
-    final homolog = FiscalConfigStore.efetivo.homologacao;
+    final homolog = fiscal.homologacao;
+    final regime = FiscalRegimePadrao.regimeEfetivo(fiscal);
     final regimeTxt =
-        '${FiscalRegimePadrao.rotuloRegime(FiscalRegimePadrao.regimeEfetivo())} · '
-        '${FiscalRegimePadrao.resumoPadroesEmissao(FiscalRegimePadrao.regimeEfetivo())}';
+        '${FiscalRegimePadrao.rotuloRegime(regime)} · '
+        '${FiscalRegimePadrao.resumoPadroesEmissao(regime)}';
     if (!homolog) {
       return Material(
         color: Colors.green.shade50,

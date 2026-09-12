@@ -7,7 +7,7 @@ import '../../data/nfe_saida_fiscal_store.dart';
 import '../../domain/fiscal/nfe_numeracao_fiscal_helper.dart';
 import '../../services/auditoria_registrar.dart';
 import '../../domain/auditoria_catalogo.dart';
-import '../../services/fiscal_config_store.dart';
+import '../../services/configuracoes_service.dart';
 import '../../services/focus_nfe_service.dart';
 import '../layout/app_layout.dart';
 
@@ -147,16 +147,18 @@ class _NfeInutilizacaoDialogState extends State<_NfeInutilizacaoDialog> {
     if (ok != true || !mounted) return;
 
     setState(() => _processando = true);
+    final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
+    final cnpj = fiscal.cnpjEmitente;
     final r = _modelo == '65'
         ? await widget.focusNfe.inutilizarNumeracaoNfce(
-            cnpjEmitente: FiscalConfigStore.efetivo.cnpjEmitente,
+            cnpjEmitente: cnpj,
             serie: _serie.text,
             numeroInicial: ini,
             numeroFinal: fim,
             justificativa: just,
           )
         : await widget.focusNfe.inutilizarNumeracaoNfe(
-            cnpjEmitente: FiscalConfigStore.efetivo.cnpjEmitente,
+            cnpjEmitente: cnpj,
             serie: _serie.text,
             numeroInicial: ini,
             numeroFinal: fim,

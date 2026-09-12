@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
 
-import 'fiscal_config_store.dart';
+import 'configuracoes_service.dart';
 
 class FechamentoEmailException implements Exception {
   FechamentoEmailException(this.message);
@@ -25,8 +25,7 @@ abstract final class FechamentoEmailService {
     required String nomeBaseArquivo,
     String? destinatarioOverride,
   }) async {
-    await FiscalConfigStore.carregar();
-    final cfg = FiscalConfigStore.efetivo;
+    final cfg = await ConfiguracoesService.resolverFiscalGlobal();
     final para = (destinatarioOverride ?? cfg.emailContador).trim();
     if (!para.contains('@') || para.length < 5) {
       throw FechamentoEmailException(

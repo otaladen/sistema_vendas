@@ -16,7 +16,7 @@ import '../../data/sync/sync_refresh_hub.dart';
 import '../../domain/produto_nome_exibicao.dart';
 import '../../model/nfe_importada_registro.dart';
 import '../../services/devolucao_fornecedor_fiscal_service.dart';
-import '../../services/fiscal_config_store.dart';
+import '../../services/configuracoes_service.dart';
 import '../shell/main_menu_deps.dart';
 import '../widgets/lan_api_feedback.dart';
 import 'abrir_documento_fiscal.dart';
@@ -106,6 +106,7 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
         };
         SyncRefreshHub.instance.addListener(_syncHubListener!);
       }
+      unawaited(ConfiguracoesService.resolverFiscalGlobal());
       unawaited(_carregarNotas());
       unawaited(_reconsultarPendentes(silencioso: true));
     });
@@ -629,7 +630,8 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
     if (nota == null) return;
     if (_terminalLeve) {
       if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
-    } else if (!FiscalConfigStore.configurado) {
+    } else if (!(ConfiguracoesService.tryGlobal?.fiscalEmCache.configurado ??
+        false)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Configure o Focus NFe em Configuracoes.'),
@@ -790,7 +792,8 @@ class _NfeDevolucaoFornecedorPageState extends State<NfeDevolucaoFornecedorPage>
           !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
         return;
       }
-    } else if (!FiscalConfigStore.configurado) {
+    } else if (!(ConfiguracoesService.tryGlobal?.fiscalEmCache.configurado ??
+        false)) {
       return;
     }
     setState(() => _reconsultando = true);

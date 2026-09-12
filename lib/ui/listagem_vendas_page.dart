@@ -111,7 +111,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   final DateFormat _dataDia = DateFormat('dd/MM/yyyy');
   final _buscaController = TextEditingController();
   late dynamic _usuarioRepository;
-  late final FocusNfeService _focusNfeService = FocusNfeService(
+  late FocusNfeService _focusNfeService = FocusNfeService(
     config: criarFocusNfeConfigPadrao(),
   );
 
@@ -150,6 +150,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     }
     _usuarioRepository =
         MainMenuDeps.resolverUsuarioRepository(context);
+    unawaited(_recarregarFocusFiscal());
     try {
       _distintosCanceladaPor = (widget.vendaRepository
                   .listarDistintosCanceladaPor() as List?)
@@ -170,6 +171,14 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     _debounceFiltros?.cancel();
     _buscaController.dispose();
     super.dispose();
+  }
+
+  Future<void> _recarregarFocusFiscal() async {
+    await widget.configuracoesService.carregarFiscalGlobal();
+    if (!mounted) return;
+    setState(() {
+      _focusNfeService = FocusNfeService(config: criarFocusNfeConfigPadrao());
+    });
   }
 
   void _agendarPesquisa() {

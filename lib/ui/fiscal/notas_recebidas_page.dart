@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -12,7 +13,6 @@ import '../../data/api/lan_api_client.dart';
 import '../../data/nfe_recebidas_cache_store.dart';
 import '../../domain/fiscal/nfe_recebida.dart';
 import '../../domain/fiscal/nfe_recebidas_filtro.dart';
-import '../../services/fiscal_config_store.dart';
 import '../../services/focus_nfe_service.dart';
 import 'nfe_importacao_xml_flow.dart';
 import 'widgets/nfe_ambiente_banner.dart';
@@ -45,14 +45,23 @@ class _NotasRecebidasPageState extends State<NotasRecebidasPage> {
 
   static final _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   static final _dataHora = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR');
-  String get _cnpjLoja =>
-      FiscalConfigStore.efetivo.cnpjEmitente.replaceAll(RegExp(r'\D'), '');
+  String _cnpjLoja = '';
 
   @override
   void initState() {
     super.initState();
     _focus = FocusNfeService(config: criarFocusNfeConfigPadrao());
-    _carregarCache();
+    unawaited(_inicializarFiscal());
+  }
+
+  Future<void> _inicializarFiscal() async {
+    final cfg = await widget.configuracoesService.carregarFiscalGlobal();
+    if (!mounted) return;
+    setState(() {
+      _cnpjLoja = cfg.cnpjEmitente.replaceAll(RegExp(r'\D'), '');
+      _focus = FocusNfeService(config: criarFocusNfeConfigPadrao());
+    });
+    await _carregarCache();
   }
 
   @override

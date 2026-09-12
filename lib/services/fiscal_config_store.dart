@@ -20,6 +20,7 @@ class FiscalConfigDados {
     this.smtpPassword = '',
     this.smtpFromEmail = '',
     this.smtpSsl = false,
+    this.tokenConfiguradoNoServidor = false,
   });
 
   factory FiscalConfigDados.fromConstantes() {
@@ -50,6 +51,9 @@ class FiscalConfigDados {
   final String smtpFromEmail;
   final bool smtpSsl;
 
+  /// Terminal leve: token Focus existe no PC servidor (nao replica o segredo localmente).
+  final bool tokenConfiguradoNoServidor;
+
   bool get homologacao => ambiente.trim().toLowerCase() != 'producao';
 
   bool get emailContadorConfigurado {
@@ -75,12 +79,43 @@ class FiscalConfigDados {
   bool get configurado {
     final cnpj = cnpjEmitente.replaceAll(RegExp(r'\D'), '');
     final ie = inscricaoEstadualEmitente.replaceAll(RegExp(r'\D'), '');
+    final tokenOk = tokenConfiguradoNoServidor ||
+        (apiToken.trim().isNotEmpty && !apiToken.contains('SEU_TOKEN'));
     return apiBaseUrl.trim().isNotEmpty &&
-        apiToken.trim().isNotEmpty &&
-        !apiToken.contains('SEU_TOKEN') &&
+        tokenOk &&
         cnpj.length == 14 &&
         cnpj != '00000000000000' &&
         ie.isNotEmpty;
+  }
+
+  /// Resposta de `GET /api/empresa/fiscal` (terminal leve).
+  factory FiscalConfigDados.fromApiRemoto(
+    Map<String, dynamic> raw, {
+    int? regimeEmpresaConfig,
+  }) {
+    final padrao = FiscalConfigDados.fromConstantes();
+    final cnpj =
+        (raw['cnpjEmitente'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+    final ie = (raw['inscricaoEstadualEmitente'] ?? '')
+        .toString()
+        .replaceAll(RegExp(r'\D'), '');
+    final regimeApi = (raw['regimeTributarioEmitente'] as num?)?.toInt();
+    final regime = regimeApi ?? regimeEmpresaConfig ?? padrao.regimeTributarioEmitente;
+    final amb = (raw['ambiente'] ?? padrao.ambiente).toString().trim().toLowerCase();
+    return FiscalConfigDados(
+      apiBaseUrl: (raw['apiBaseUrl'] ?? padrao.apiBaseUrl).toString(),
+      apiToken: '',
+      cnpjEmitente:
+          cnpj.length == 14 ? cnpj : padrao.cnpjEmitente,
+      inscricaoEstadualEmitente:
+          ie.isNotEmpty ? ie : padrao.inscricaoEstadualEmitente,
+      regimeTributarioEmitente: regime.clamp(1, 3),
+      ufEmitente: (raw['ufEmitente'] ?? padrao.ufEmitente).toString(),
+      ambiente: amb == 'producao' ? 'producao' : 'homologacao',
+      razaoSocialEmitente:
+          (raw['razaoSocialEmitente'] ?? padrao.razaoSocialEmitente).toString(),
+      tokenConfiguradoNoServidor: raw['tokenConfigurado'] == true,
+    );
   }
 }
 
@@ -252,4 +287,9 @@ abstract final class FiscalConfigStore {
 
   /// Configuracao pronta para emissao (preferir apos [carregar] no boot).
   static bool get configurado => efetivo.configurado;
+
+  /// Atualiza cache em memoria (ex.: snapshot da API no terminal leve).
+  static void aplicarCache(FiscalConfigDados dados) {
+    _cache = dados;
+  }
 }

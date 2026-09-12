@@ -220,7 +220,7 @@ class _CaixaPageState extends State<CaixaPage> {
   int? _ultimoTrocoVendaId;
   int _ultimoTrocoNumeroOrcamento = 0;
   double _ultimoTrocoValor = 0;
-  late final FocusNfeService _focusNfeService;
+  late FocusNfeService _focusNfeService;
   NfceReconciliacaoService? _nfceReconciliacao;
   Timer? _timerReconciliacaoNfce;
   Timer? _debounceSyncOrcamentos;
@@ -332,6 +332,7 @@ class _CaixaPageState extends State<CaixaPage> {
     } catch (_) {}
     _usuarioRepository = MainMenuDeps.resolverUsuarioRepository(context);
     _focusNfeService = FocusNfeService(config: criarFocusNfeConfigPadrao());
+    unawaited(_recarregarFocusFiscal());
     if (widget.vendaRepository is VendaRepository) {
       _nfceReconciliacao = NfceReconciliacaoService(
         vendaRepository: widget.vendaRepository as VendaRepository,
@@ -458,6 +459,19 @@ class _CaixaPageState extends State<CaixaPage> {
       _iniciarPollReconciliacaoNfce();
     } else {
       _pararPollReconciliacaoNfce();
+    }
+  }
+
+  Future<void> _recarregarFocusFiscal() async {
+    await widget.configuracoesService.carregarFiscalGlobal();
+    if (!mounted) return;
+    _focusNfeService = FocusNfeService(config: criarFocusNfeConfigPadrao());
+    final repo = widget.vendaRepository;
+    if (repo is VendaRepository) {
+      _nfceReconciliacao = NfceReconciliacaoService(
+        vendaRepository: repo,
+        focusNfe: _focusNfeService,
+      );
     }
   }
 

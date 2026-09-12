@@ -9,6 +9,7 @@ import '../../domain/fiscal/venda_documento_fiscal_mutex.dart';
 import '../../domain/item_venda_produto_orfao.dart';
 import '../../model/cliente.dart';
 import '../../model/venda.dart';
+import '../../services/configuracoes_service.dart';
 import '../../services/focus_nfe_reconsulta_helper.dart';
 import '../../services/focus_nfe_service.dart';
 import 'revincular_produto_item_venda_flow.dart';
@@ -90,6 +91,7 @@ abstract final class NfceEmissaoPendenteFlow {
       return _EmissaoPendenteResultado.falhaDefinitiva;
     }
 
+    await ConfiguracoesService.resolverFiscalGlobal();
     final focus = FocusNfeService(config: criarFocusNfeConfigPadrao());
     try {
       focus.validarConfiguracao();

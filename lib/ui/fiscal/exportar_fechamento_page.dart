@@ -17,7 +17,7 @@ import '../../domain/fiscal/fechamento_fiscal_resumo.dart';
 import '../../domain/fiscal/fiscal_bloqueios_fechamento.dart';
 import '../../services/fechamento_contabil_service.dart';
 import '../../services/fechamento_email_service.dart';
-import '../../services/fiscal_config_store.dart';
+import '../../services/configuracoes_service.dart';
 import '../shell/main_menu_deps.dart';
 import '../widgets/lan_api_feedback.dart';
 import 'widgets/fiscal_bloqueios_banner.dart';
@@ -618,7 +618,7 @@ class _ExportarFechamentoPageState extends State<ExportarFechamentoPage> {
         if (service == null) {
           throw StateError('Servico de fechamento indisponivel.');
         }
-        await FiscalConfigStore.carregar();
+        final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
         final resultado = await service.gerarFechamento(mes: _mes, ano: _ano);
         await FechamentoEmailService.enviarParaContador(
           mes: resultado.mes,
@@ -636,7 +636,7 @@ class _ExportarFechamentoPageState extends State<ExportarFechamentoPage> {
             backgroundColor: Colors.green.shade700,
             content: Text(
               'Fechamento enviado para '
-              '${FiscalConfigStore.efetivo.emailContador}.',
+              '${fiscal.emailContador}.',
             ),
           ),
         );

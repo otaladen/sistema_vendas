@@ -1,5 +1,5 @@
-import '../services/fiscal_config_store.dart';
 import '../config/focus_nfe_runtime.dart';
+import 'configuracoes_service.dart';
 import '../data/cliente_repository.dart';
 import '../data/devolucao_fiscal_store.dart';
 import '../data/nfe_saida_fiscal_store.dart';
@@ -81,11 +81,22 @@ class VendaFiscalService {
     required this.vendaRepository,
     required this.clienteRepository,
     FocusNfeService? focusNfe,
-  }) : _focus = focusNfe ?? FocusNfeService(config: criarFocusNfeConfigPadrao());
+  })  : _focusInjetado = focusNfe,
+        _focus = focusNfe ?? FocusNfeService(config: criarFocusNfeConfigPadrao());
 
   final VendaRepository vendaRepository;
   final ClienteRepository clienteRepository;
-  final FocusNfeService _focus;
+  final FocusNfeService? _focusInjetado;
+  late FocusNfeService _focus;
+
+  Future<bool> _prepararFocus() async {
+    final cfg = await ConfiguracoesService.resolverFiscalGlobal();
+    if (!cfg.configurado) return false;
+    if (_focusInjetado == null) {
+      _focus = FocusNfeService(config: criarFocusNfeConfigDe(cfg));
+    }
+    return true;
+  }
 
   NfeSaidaFiscalStore get _nfeStore =>
       NfeSaidaFiscalStore(vendaRepository.objectBox.storeDirectoryPath);
@@ -116,7 +127,7 @@ class VendaFiscalService {
     required Venda venda,
     required String justificativa,
   }) async {
-    if (!FiscalConfigStore.configurado) {
+    if (!await _prepararFocus()) {
       return VendaFiscalOperacaoResultado.erro(
         'Focus NFe nao configurada. Configure em Configuracoes antes de cancelar '
         'venda com nota fiscal.',
@@ -249,7 +260,7 @@ class VendaFiscalService {
     required String motivo,
     required int registroDevolucaoId,
   }) async {
-    if (!FiscalConfigStore.configurado) {
+    if (!await _prepararFocus()) {
       return VendaFiscalOperacaoResultado.erro(
         'Focus NFe nao configurada. Configure em Configuracoes.',
       );

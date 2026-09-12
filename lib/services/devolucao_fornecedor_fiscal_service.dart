@@ -13,7 +13,7 @@ import '../model/nfe_importada_registro.dart';
 import '../model/produto.dart';
 import '../data/sync/estoque_local_refresh_hub.dart';
 import '../data/sync/sync_write_trigger.dart';
-import '../services/fiscal_config_store.dart';
+import 'configuracoes_service.dart';
 import '../services/focus_nfe_reconsulta_helper.dart';
 import '../services/focus_nfe_service.dart';
 import '../services/gerenciador_estoque_service.dart';
@@ -179,10 +179,21 @@ class DevolucaoFornecedorFiscalService {
   DevolucaoFornecedorFiscalService({
     required this.produtoRepository,
     FocusNfeService? focusNfe,
-  }) : _focus = focusNfe ?? FocusNfeService(config: criarFocusNfeConfigPadrao());
+  })  : _focusInjetado = focusNfe,
+        _focus = focusNfe ?? FocusNfeService(config: criarFocusNfeConfigPadrao());
 
   final ProdutoRepository produtoRepository;
-  final FocusNfeService _focus;
+  final FocusNfeService? _focusInjetado;
+  late FocusNfeService _focus;
+
+  Future<bool> _prepararFocus() async {
+    final cfg = await ConfiguracoesService.resolverFiscalGlobal();
+    if (!cfg.configurado) return false;
+    if (_focusInjetado == null) {
+      _focus = FocusNfeService(config: criarFocusNfeConfigDe(cfg));
+    }
+    return true;
+  }
 
   NfeEntradaRepository get _entradaRepo =>
       NfeEntradaRepository(produtoRepository.objectBox);
@@ -347,7 +358,7 @@ class DevolucaoFornecedorFiscalService {
     required List<DevolucaoFornecedorLinha> linhasSelecionadas,
     required String motivo,
   }) async {
-    if (!FiscalConfigStore.configurado) {
+    if (!await _prepararFocus()) {
       return DevolucaoFornecedorOperacaoResultado.erro(
         'Focus NFe nao configurada. Configure em Configuracoes.',
       );

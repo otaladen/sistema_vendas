@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../config/fiscal_config.dart';
 import '../config/focus_nfe_runtime.dart';
+import '../services/configuracoes_service.dart';
 import '../services/fiscal_config_store.dart';
 import '../data/fechamento_fiscal_local_source.dart';
 import '../data/nfe_inutilizacao_store.dart';
@@ -109,6 +110,7 @@ class FechamentoContabilService {
     required int ano,
     FechamentoContabilProgressoCallback? onProgresso,
   }) async {
+    final fiscalEmitente = await ConfiguracoesService.resolverFiscalGlobal();
     final pacote = listarPacoteFiscal(mes, ano);
     if (pacote.saidas.isEmpty && pacote.entradas.isEmpty) {
       throw FechamentoContabilException(
@@ -329,6 +331,7 @@ class FechamentoContabilService {
     final excelBytes = _montarPlanilhaExcel(
       mes: mes,
       ano: ano,
+      fiscalEmitente: fiscalEmitente,
       saidas: saidasEnriquecidas,
       entradas: pacote.entradas,
       inutilizacoes: inutilizacoes,
@@ -425,10 +428,12 @@ class FechamentoContabilService {
   Future<NotaFiscalFechamentoItem> _enriquecerSaidaComFocus(
     NotaFiscalFechamentoItem nota,
   ) async {
-    if (!FiscalConfigStore.configurado || nota.referenciaFocus.trim().isEmpty) {
+    final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
+    if (!fiscal.configurado || nota.referenciaFocus.trim().isEmpty) {
       return nota;
     }
-    final focus = _focusNfe ?? FocusNfeService(config: criarFocusNfeConfigPadrao());
+    final focus = _focusNfe ??
+        FocusNfeService(config: criarFocusNfeConfigDe(fiscal));
     try {
       final r = nota.modelo == '65'
           ? await focus.consultarNfce(nota.referenciaFocus)
@@ -471,10 +476,12 @@ class FechamentoContabilService {
 
   Future<String> _resolverUrlXmlSaida(NotaFiscalFechamentoItem nota) async {
     if (nota.urlXml.trim().isNotEmpty) return nota.urlXml.trim();
-    if (!FiscalConfigStore.configurado || nota.referenciaFocus.trim().isEmpty) {
+    final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
+    if (!fiscal.configurado || nota.referenciaFocus.trim().isEmpty) {
       return '';
     }
-    final focus = _focusNfe ?? FocusNfeService(config: criarFocusNfeConfigPadrao());
+    final focus = _focusNfe ??
+        FocusNfeService(config: criarFocusNfeConfigDe(fiscal));
     try {
       final r = nota.modelo == '65'
           ? await focus.consultarNfce(nota.referenciaFocus)
@@ -537,6 +544,7 @@ class FechamentoContabilService {
   Uint8List _montarPlanilhaExcel({
     required int mes,
     required int ano,
+    required FiscalConfigDados fiscalEmitente,
     required List<NotaFiscalFechamentoItem> saidas,
     required List<NotaFiscalEntradaFechamentoItem> entradas,
     required List<NfeInutilizacaoRegistro> inutilizacoes,
@@ -546,6 +554,7 @@ class FechamentoContabilService {
     final inutRows = _linhasAbaInutilizacoes(
       mes: mes,
       ano: ano,
+      fiscalEmitente: fiscalEmitente,
       inutilizacoes: inutilizacoes,
     );
     return FechamentoXlsxBuilder.build(
@@ -553,6 +562,7 @@ class FechamentoContabilService {
       sheet1Rows: _linhasAbaSaidas(
         mes: mes,
         ano: ano,
+        fiscalEmitente: fiscalEmitente,
         saidas: saidas,
         totais: totais,
         errosDownload: errosDownload,
@@ -561,6 +571,7 @@ class FechamentoContabilService {
       sheet2Rows: _linhasAbaEntradas(
         mes: mes,
         ano: ano,
+        fiscalEmitente: fiscalEmitente,
         entradas: entradas,
         totais: totais,
       ),
@@ -572,10 +583,13 @@ class FechamentoContabilService {
   List<List<String>> _linhasAbaInutilizacoes({
     required int mes,
     required int ano,
+    required FiscalConfigDados fiscalEmitente,
     required List<NfeInutilizacaoRegistro> inutilizacoes,
   }) {
     if (inutilizacoes.isEmpty) return const [];
-    final rows = <List<String>>[..._cabecalhoEmitenteRows(mes, ano)];
+    final rows = <List<String>>[
+      ..._cabecalhoEmitenteRows(mes, ano, fiscalEmitente),
+    ];
     rows.add([
       'Data',
       'Modelo',
@@ -613,10 +627,15 @@ class FechamentoContabilService {
     return rows;
   }
 
-  List<List<String>> _cabecalhoEmitenteRows(int mes, int ano) => [
-        ['Emitente', FiscalConfigStore.efetivo.razaoSocialEmitente],
-        ['CNPJ', FiscalConfigStore.efetivo.cnpjEmitente],
-        ['Inscricao Estadual', FiscalConfigStore.efetivo.inscricaoEstadualEmitente],
+  List<List<String>> _cabecalhoEmitenteRows(
+    int mes,
+    int ano,
+    FiscalConfigDados fiscal,
+  ) =>
+      [
+        ['Emitente', fiscal.razaoSocialEmitente],
+        ['CNPJ', fiscal.cnpjEmitente],
+        ['Inscricao Estadual', fiscal.inscricaoEstadualEmitente],
         ['Periodo', _rotuloMesAno(mes, ano)],
         [],
       ];
@@ -624,11 +643,14 @@ class FechamentoContabilService {
   List<List<String>> _linhasAbaSaidas({
     required int mes,
     required int ano,
+    required FiscalConfigDados fiscalEmitente,
     required List<NotaFiscalFechamentoItem> saidas,
     required FechamentoContabilTotais totais,
     required List<String> errosDownload,
   }) {
-    final rows = <List<String>>[..._cabecalhoEmitenteRows(mes, ano)];
+    final rows = <List<String>>[
+      ..._cabecalhoEmitenteRows(mes, ano, fiscalEmitente),
+    ];
     rows.add([
       'Data de Emissao',
       'Numero',
@@ -705,10 +727,13 @@ class FechamentoContabilService {
   List<List<String>> _linhasAbaEntradas({
     required int mes,
     required int ano,
+    required FiscalConfigDados fiscalEmitente,
     required List<NotaFiscalEntradaFechamentoItem> entradas,
     required FechamentoContabilTotais totais,
   }) {
-    final rows = <List<String>>[..._cabecalhoEmitenteRows(mes, ano)];
+    final rows = <List<String>>[
+      ..._cabecalhoEmitenteRows(mes, ano, fiscalEmitente),
+    ];
     rows.add([
       'Data de Emissao',
       'Chave de Acesso',

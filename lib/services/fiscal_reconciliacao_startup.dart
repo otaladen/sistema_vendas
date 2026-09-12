@@ -8,7 +8,7 @@ import '../domain/fiscal/nfce_xml_local_service.dart';
 import '../domain/fiscal/nfe_cce_xml_local_service.dart';
 import '../domain/fiscal/nfe_xml_local_service.dart';
 import '../services/devolucao_fornecedor_fiscal_service.dart';
-import '../services/fiscal_config_store.dart';
+import '../services/configuracoes_service.dart';
 import '../services/focus_nfe_service.dart';
 import '../services/nfce_reconciliacao_service.dart';
 import '../services/nfe_reconciliacao_service.dart';
@@ -20,10 +20,11 @@ abstract final class FiscalReconciliacaoStartup {
   static Future<void> executarSeConfigurado({
     required ObjectBox objectBox,
   }) async {
-    if (!FiscalConfigStore.configurado) return;
+    final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
+    if (!fiscal.configurado) return;
 
     final vendaRepository = VendaRepository(objectBox);
-    final focus = FocusNfeService(config: criarFocusNfeConfigPadrao());
+    final focus = FocusNfeService(config: criarFocusNfeConfigDe(fiscal));
     final storePath = objectBox.storeDirectoryPath;
 
     try {

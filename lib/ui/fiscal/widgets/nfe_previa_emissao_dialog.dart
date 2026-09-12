@@ -9,7 +9,7 @@ import '../../../domain/fiscal/nfe_pre_emissao_service.dart';
 import '../../../domain/fiscal/nfe_previa_resumo.dart';
 import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../../model/venda.dart';
-import '../../../services/fiscal_config_store.dart';
+import '../../../services/configuracoes_service.dart';
 import '../../../services/focus_nfe_service.dart';
 
 /// Etapa 2: conferencia do payload, JSON e DANFe antes de transmitir a SEFAZ.
@@ -92,7 +92,8 @@ class _NfePreviaEmissaoDialogState extends State<NfePreviaEmissaoDialog>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final homolog = FiscalConfigStore.efetivo.homologacao;
+    final homolog =
+        ConfiguracoesService.tryGlobal?.fiscalEmCache.homologacao ?? true;
 
     return AlertDialog(
       title: Row(

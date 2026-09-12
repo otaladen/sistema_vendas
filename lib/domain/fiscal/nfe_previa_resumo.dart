@@ -1,4 +1,4 @@
-import '../../config/fiscal_config.dart';
+import '../../services/configuracoes_service.dart';
 import '../../services/fiscal_config_store.dart';
 
 /// Resumo legivel do payload NF-e para conferencia antes do envio.
@@ -79,7 +79,11 @@ abstract final class NfePreviaResumoBuilder {
   static NfePreviaResumo fromPayload(
     Map<String, dynamic> payload, {
     required String referencia,
+    FiscalConfigDados? fiscal,
   }) {
+    final fiscalCfg = fiscal ??
+        ConfiguracoesService.tryGlobal?.fiscalEmCache ??
+        FiscalConfigStore.efetivo;
     final doc = (payload['cnpj_destinatario'] ?? payload['cpf_destinatario'] ?? '')
         .toString();
     final dups = payload['duplicatas'];
@@ -87,9 +91,8 @@ abstract final class NfePreviaResumoBuilder {
 
     return NfePreviaResumo(
       referencia: referencia,
-      ambiente: FiscalConfigStore.efetivo.ambiente,
-      emitenteCnpj: (payload['cnpj_emitente'] ??
-              FiscalConfigStore.efetivo.cnpjEmitente)
+      ambiente: fiscalCfg.ambiente,
+      emitenteCnpj: (payload['cnpj_emitente'] ?? fiscalCfg.cnpjEmitente)
           .toString(),
       destinatarioNome: (payload['nome_destinatario'] ?? '').toString(),
       destinatarioDocumento: doc,

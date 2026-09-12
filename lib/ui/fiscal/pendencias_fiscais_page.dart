@@ -69,6 +69,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
     super.initState();
     if (!_terminalApi) {
       _focusNfe = FocusNfeService(config: criarFocusNfeConfigPadrao());
+      unawaited(_recarregarFocusFiscal());
       _reconciliacao = NfceReconciliacaoService(
         vendaRepository: widget.vendaRepository as VendaRepository,
         focusNfe: _focusNfe!,
@@ -121,6 +122,18 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
     final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     setState(() => _permitirVendaSemEstoque = config.permitirVendaSemEstoque);
+  }
+
+  Future<void> _recarregarFocusFiscal() async {
+    await widget.configuracoesService.carregarFiscalGlobal();
+    if (!mounted || _terminalApi) return;
+    setState(() {
+      _focusNfe = FocusNfeService(config: criarFocusNfeConfigPadrao());
+      _reconciliacao = NfceReconciliacaoService(
+        vendaRepository: widget.vendaRepository as VendaRepository,
+        focusNfe: _focusNfe!,
+      );
+    });
   }
 
   Future<void> _recarregar({bool silencioso = false}) async {

@@ -28,7 +28,6 @@ import '../config/fiscal_config.dart';
 import '../domain/pod_foto_retencao.dart';
 import '../services/entrega_pod_retencao_service.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
-import '../services/fiscal_config_store.dart';
 import '../services/gemini_config.dart';
 import '../services/print_service.dart';
 import 'widgets/rede_sincronizacao_card.dart';
@@ -184,37 +183,22 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   }
 
   Future<void> _carregarConfigFiscal() async {
-    if (widget.terminalLeve) {
-      final client = widget.lanApiClient;
-      if (client is LanApiClient && client.configurado) {
-        try {
-          final m = await client.obterEmpresaFiscal();
-          final raw = m['fiscal'];
-          if (raw is Map && mounted) {
-            final f = Map<String, dynamic>.from(raw);
-            setState(() {
-              final tokenOk = f['tokenConfigurado'] == true;
-              _fiscalTokenController.text = tokenOk ? '********' : '';
-              _fiscalCnpjController.text =
-                  (f['cnpjEmitente'] ?? '').toString();
-              _fiscalIeController.text =
-                  (f['inscricaoEstadualEmitente'] ?? '').toString();
-              final amb = (f['ambiente'] ?? 'homologacao').toString();
-              _fiscalAmbiente =
-                  amb == 'producao' ? 'producao' : 'homologacao';
-              final regime = (f['regimeTributarioEmitente'] as num?)?.toInt();
-              if (regime != null && regime >= 1 && regime <= 3) {
-                _fiscalRegime = regime;
-              }
-            });
-            return;
-          }
-        } catch (e) {
-          debugPrint('Config fiscal remoto: $e');
-        }
-      }
+    final client = widget.lanApiClient;
+    if (client is LanApiClient && client.configurado) {
+      widget.configuracoesService.vincularLanApiClient(client);
     }
-    final cfg = await FiscalConfigStore.carregar();
+    final cfg = await widget.configuracoesService.carregarFiscalGlobal();
+    if (widget.terminalLeve && mounted) {
+      setState(() {
+        _fiscalTokenController.text =
+            cfg.tokenConfiguradoNoServidor ? '********' : '';
+        _fiscalCnpjController.text = cfg.cnpjEmitente;
+        _fiscalIeController.text = cfg.inscricaoEstadualEmitente;
+        _fiscalAmbiente = cfg.homologacao ? 'homologacao' : 'producao';
+        _fiscalRegime = FiscalRegimePadrao.regimeEfetivo(cfg);
+      });
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _fiscalTokenController.text = cfg.apiToken;
@@ -253,7 +237,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
     final smtpPort =
         int.tryParse(_smtpPortController.text.trim()) ?? 587;
-    await FiscalConfigStore.salvar(
+    await widget.configuracoesService.salvarFiscalGlobal(
       apiToken: token,
       ambiente: _fiscalAmbiente,
       cnpjEmitente: _fiscalCnpjController.text,
@@ -266,10 +250,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       smtpPassword: _smtpPasswordController.text,
       smtpFromEmail: _smtpFromController.text,
       smtpSsl: _smtpSsl,
-    );
-    final empresa = await widget.configuracoesService.carregarEfetiva();
-    await widget.configuracoesService.salvarEfetiva(
-      empresa.copyWith(regimeTributarioEmitente: _fiscalRegime),
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
