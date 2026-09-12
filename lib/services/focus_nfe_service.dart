@@ -29,7 +29,7 @@ import '../domain/fiscal/nfe_cfop_resolver.dart';
 import '../domain/fiscal/nfe_cobranca_helper.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
 import '../domain/produto_nome_exibicao.dart';
-import '../domain/pagamento_orcamento.dart';
+import 'focus_nfe_payload_builder.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../model/cliente.dart';
 import '../model/item_nota_temporario.dart';
@@ -1925,7 +1925,7 @@ class FocusNfeService {
       'valor_frete': _formatarDecimal(frete),
       'valor_total': _formatarDecimal(valorTotal),
       'items': itensPayload,
-      ..._camposPagamentoFocus(venda, valorTotal),
+      ...FocusNfePayloadBuilder.camposPagamento(venda, valorTotal),
       'informacoes_adicionais_contribuinte': _observacaoVenda(venda),
     };
 
@@ -2041,7 +2041,7 @@ class FocusNfeService {
       'valor_frete': _formatarDecimal(frete),
       'valor_total': _formatarDecimal(valorTotal),
       'items': itens,
-      ..._camposPagamentoFocus(venda, valorTotal),
+      ...FocusNfePayloadBuilder.camposPagamento(venda, valorTotal),
       'informacoes_adicionais_contribuinte': _observacaoVenda(venda),
       ...NfeCobrancaHelper.montarCamposFocus(venda),
     };
@@ -2617,6 +2617,7 @@ class FocusNfeService {
     required String referencia,
     bool contingenciaOffline = false,
   }) async {
+    FocusNfePayloadBuilder.validarReconciliarPagamentosNoPayload(payload);
     try {
       final bodyJson = const JsonEncoder.withIndent('  ').convert(payload);
       debugPrint(
@@ -2903,85 +2904,6 @@ class FocusNfeService {
       return digits;
     }
     return 'SEM GTIN';
-  }
-
-  /// Monta [formas_pagamento] e [valor_troco] (Focus) quando a soma dos
-  /// pagamentos excede o total da nota (rejeicao SEFAZ 866).
-  Map<String, dynamic> _camposPagamentoFocus(Venda venda, double valorTotal) {
-    final pagamentos = _pagamentosFocusDeVenda(venda, valorTotal);
-    final out = <String, dynamic>{
-      'formas_pagamento': pagamentos.formas,
-    };
-    if (pagamentos.troco > 0.009) {
-      out['valor_troco'] = _formatarDecimal(pagamentos.troco);
-    }
-    return out;
-  }
-
-  ({List<Map<String, dynamic>> formas, double troco}) _pagamentosFocusDeVenda(
-    Venda venda,
-    double valorTotal,
-  ) {
-    final linhas = <Map<String, dynamic>>[];
-    var somaPagamentos = 0.0;
-
-    if (venda.formaPagamento == 'misto' &&
-        venda.pagamentosJson.trim().isNotEmpty) {
-      for (final l in PagamentoOrcamentoCodec.decode(venda.pagamentosJson)) {
-        linhas.add({
-          'forma_pagamento': _codigoFormaPagamentoFocus(l.meio),
-          'valor_pagamento': _formatarDecimal(l.valor),
-        });
-        somaPagamentos += l.valor;
-      }
-    } else {
-      somaPagamentos = valorTotal;
-      linhas.add({
-        'forma_pagamento': _codigoFormaPagamentoFocus(venda.formaPagamento),
-        'valor_pagamento': _formatarDecimal(valorTotal),
-      });
-    }
-
-    if (linhas.isEmpty) {
-      somaPagamentos = valorTotal;
-      linhas.add({
-        'forma_pagamento': '01',
-        'valor_pagamento': _formatarDecimal(valorTotal),
-      });
-    }
-
-    final troco = somaPagamentos > valorTotal + 0.009
-        ? (somaPagamentos - valorTotal)
-        : 0.0;
-    return (formas: linhas, troco: troco);
-  }
-
-  static String _codigoFormaPagamentoFocus(String meio) {
-    switch (meio.trim().toLowerCase()) {
-      case 'dinheiro':
-        return '01';
-      case 'cheque':
-        return '02';
-      case 'cartao_credito':
-        return '03';
-      case 'cartao_debito':
-        return '04';
-      case 'fiado':
-      case 'credito_loja':
-      // Vale de devolucao e credito da propria loja (05), nao "outros".
-      case 'vale':
-        return '05';
-      case 'pix':
-        return '17';
-      case 'vale_alimentacao':
-        return '10';
-      case 'vale_refeicao':
-        return '11';
-      case 'boleto':
-        return '15';
-      default:
-        return '99';
-    }
   }
 
   static String? _documentoDestinatario(Cliente? cliente) {
