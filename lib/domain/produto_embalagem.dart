@@ -202,7 +202,6 @@ class ProdutoEmbalagem {
     Produto produto,
     double quantidadeUnidadeVenda,
   ) {
-    if (produto.permiteQuantidadeFracionada) return true;
     if (quantidadeUnidadeVenda != quantidadeUnidadeVenda.roundToDouble()) {
       return true;
     }
@@ -231,26 +230,18 @@ class ProdutoEmbalagem {
     if (quantidadeArmazenada <= 0) return false;
     if (QuantidadeVendaUtil.armazenadoEmMilesimos(
       quantidadeArmazenada,
-      cadastroFracionado: false,
+      legadoCadastroFracionado: produto.permiteQuantidadeFracionada,
     )) {
       return true;
     }
     if (quantidadeArmazenada >= QuantidadeVendaUtil.escalaFracionada) {
-      if (produto.permiteQuantidadeFracionada) return true;
       final emUnidadeVenda = QuantidadeVendaUtil.valorExibicao(
         quantidadeArmazenada,
         fracionada: true,
       );
       return exigeQuantidadeDecimalUnidadeVenda(produto, emUnidadeVenda);
     }
-    // Abaixo de 1000: 1 m³ legado nao vira 0,001; 500 continua 0,5 m³.
-    if (produto.permiteQuantidadeFracionada &&
-        quantidadeArmazenada >= QuantidadeVendaUtil.passoFracionadoArmazenado &&
-        quantidadeArmazenada % QuantidadeVendaUtil.passoFracionadoArmazenado ==
-            0) {
-      return true;
-    }
-    if (!vendaPodeUsarUnidadeCompra(produto)) return false;
+    if (vendaPodeUsarUnidadeCompra(produto)) return false;
     return false;
   }
 
@@ -284,8 +275,7 @@ class ProdutoEmbalagem {
       final digitada = comercial.round().clamp(1, 1 << 30);
       return (quantidadeDigitada: digitada, emUnidadeCompra: true);
     }
-    if (produto.permiteQuantidadeFracionada ||
-        leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
+    if (leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
       return (
         quantidadeDigitada: quantidadeArmazenada,
         emUnidadeCompra: false,
@@ -442,8 +432,7 @@ class ProdutoEmbalagem {
   }) {
     if (quantidadeArmazenada <= 0) return 0;
     if (produto == null) return quantidadeArmazenada;
-    if (produto.permiteQuantidadeFracionada ||
-        leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
+    if (leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
       return quantidadeArmazenada;
     }
     return QuantidadeVendaUtil.paraEstoqueInteiro(produto, quantidadeArmazenada);
@@ -492,8 +481,7 @@ class ProdutoEmbalagem {
         emUnidadeCompra: true,
       );
     }
-    if (produto.permiteQuantidadeFracionada ||
-        leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
+    if (leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
       return QuantidadeVendaUtil.passoFracionadoArmazenado;
     }
     return 1;

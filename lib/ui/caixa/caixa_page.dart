@@ -4499,7 +4499,6 @@ class _CaixaPageState extends State<CaixaPage> {
     final qEstoquePromo = qExibicao.ceil();
     final fracionada = QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
       emUnidadeCompra: false,
-      cadastroFracionado: produto.permiteQuantidadeFracionada,
       quantidadeVenda: qExibicao,
     );
     final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(

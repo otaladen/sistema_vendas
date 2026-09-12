@@ -166,8 +166,13 @@ class Produto {
   /// true: 1 CX com fator 12 = +12 UN no estoque; false: divide.
   bool embalagemMultiplica;
 
-  /// Permite quantidade decimal no PDV (m, m², kg, etc.).
+  /// Legado (ObjectBox/sync). O PDV aceita decimal na unidade de venda
+  /// automaticamente; quando `true`, dados antigos em milésimos (ex.: 5 un. = 5000)
+  /// continuam sendo lidos corretamente.
   bool permiteQuantidadeFracionada;
+
+  /// Quantidade decimal na unidade de venda no PDV/orcamento (nao depende do cadastro).
+  bool get pdvPermiteQuantidadeDecimal => true;
 
   @Property(type: PropertyType.dateUtc)
   DateTime? ultimaVendaEm;

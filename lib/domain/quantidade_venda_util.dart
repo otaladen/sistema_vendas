@@ -2,8 +2,9 @@ import '../model/produto.dart';
 
 /// Conversao entre quantidade digitada no PDV e [ItemVenda.quantidade] (int).
 ///
-/// Produtos com [Produto.permiteQuantidadeFracionada] armazenam milésimos
-/// (ex.: 4,5 -> 4500) para manter compatibilidade com estoque inteiro e NF-e.
+/// Decimais na unidade de venda gravam milésimos (ex.: 0,5 -> 500; 4,5 -> 4500).
+/// Inteiros continuam literais (ex.: 5 -> 5). [Produto.permiteQuantidadeFracionada]
+/// e legado de cadastro e so afeta leitura de dados antigos.
 class QuantidadeVendaUtil {
   QuantidadeVendaUtil._();
 
@@ -19,50 +20,83 @@ class QuantidadeVendaUtil {
   static bool pdvAceitaDecimalDigitacao({required bool emUnidadeCompra}) =>
       !emUnidadeCompra;
 
-  /// Grava milésimos quando o cadastro e fracionado ou a qtd nao e inteira.
+  /// Grava milésimos quando a quantidade de venda tem parte decimal.
   static bool pdvArmazenaEmMilesimos({
     required bool emUnidadeCompra,
-    required bool cadastroFracionado,
     required double quantidadeVenda,
+    bool legadoCadastroFracionado = false,
   }) {
     if (emUnidadeCompra) return false;
-    if (cadastroFracionado) return true;
+    if (legadoCadastroFracionado) return true;
     return quantidadeVenda != quantidadeVenda.roundToDouble();
   }
 
-  /// Inteiro persistido em milésimos (ex.: 4500 = 4,50), sem o flag do cadastro.
+  /// Inteiro persistido usa escala de milésimos (ex.: 500 = 0,5 un.).
   static bool armazenadoEmMilesimos(
     int armazenado, {
-    required bool cadastroFracionado,
+    bool legadoCadastroFracionado = false,
   }) {
     if (armazenado <= 0) return false;
     if (armazenado >= escalaFracionada) {
-      if (cadastroFracionado) return true;
-      return armazenado % escalaFracionada != 0;
+      if (armazenado % escalaFracionada != 0) return true;
+      return legadoCadastroFracionado;
     }
-    // Abaixo de 1000: ex. 500 = 0,5 na unidade de venda; 5 legado continua inteiro.
-    if (cadastroFracionado &&
-        armazenado >= passoFracionadoArmazenado &&
+    if (armazenado >= passoFracionadoArmazenado &&
         armazenado % passoFracionadoArmazenado == 0) {
-      return true;
+      if (legadoCadastroFracionado) return true;
+      final emUnidade = armazenado / escalaFracionada;
+      if (emUnidade > 0 && emUnidade < 1) return true;
     }
     return false;
   }
 
+  /// Parse PT-BR da coluna QTD do carrinho (`0,50` / `0.5` → 0.5).
+  static double parseQuantidadeTextoCarrinho(String inputTexto) {
+    final textoLimpo = inputTexto
+        .trim()
+        .replaceAll(RegExp(r'[\s\u00A0\u202F]'), '')
+        .replaceAll(',', '.');
+    return double.tryParse(textoLimpo) ?? 1.0;
+  }
+
+  /// Texto digitado no carrinho → quantidade na unidade de venda (nao milésimos).
+  static double? parseEntradaCarrinho(
+    String inputTexto, {
+    required bool aceitaDecimal,
+  }) {
+    if (inputTexto.trim().isEmpty) return null;
+    final v = parseQuantidadeTextoCarrinho(inputTexto);
+    if (!v.isFinite || v <= 0) return null;
+    if (!aceitaDecimal && v != v.roundToDouble()) return null;
+    return v;
+  }
+
+  /// Quantidade de venda (ex.: 0,5) → inteiro persistido no item (ex.: 500).
+  static ({int armazenado, bool gravadoEmMilesimosPdv})
+      armazenarQuantidadeVendaNoCarrinho({
+    required Produto produto,
+    required double quantidadeVenda,
+    required bool emUnidadeCompra,
+  }) {
+    if (emUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra) {
+      return (
+        armazenado: quantidadeVenda.round(),
+        gravadoEmMilesimosPdv: false,
+      );
+    }
+    final emMilesimos = pdvArmazenaEmMilesimos(
+      emUnidadeCompra: false,
+      quantidadeVenda: quantidadeVenda,
+    );
+    return (
+      armazenado: paraArmazenamento(quantidadeVenda, fracionada: emMilesimos),
+      gravadoEmMilesimosPdv: emMilesimos,
+    );
+  }
+
   /// Interpreta texto do PDV (aceita vírgula ou ponto).
   static double? parseEntradaPdv(String texto, {required bool fracionada}) {
-    var t = texto.trim();
-    if (t.isEmpty) return null;
-    t = t.replaceAll(RegExp(r'[\s\u00A0\u202F]'), '');
-    if (t.contains(',') && t.contains('.')) {
-      t = t.replaceAll('.', '').replaceAll(',', '.');
-    } else {
-      t = t.replaceAll(',', '.');
-    }
-    final v = double.tryParse(t);
-    if (v == null || !v.isFinite || v <= 0) return null;
-    if (!fracionada && v != v.roundToDouble()) return null;
-    return v;
+    return parseEntradaCarrinho(texto, aceitaDecimal: fracionada);
   }
 
   static String formatarExibicao(
@@ -93,22 +127,17 @@ class QuantidadeVendaUtil {
 
   /// Quantidade inteira para baixa de estoque / promocao.
   static int paraEstoqueInteiro(Produto produto, int quantidadeArmazenada) {
-    final q = valorExibicao(
-      quantidadeArmazenada,
-      fracionada: produto.permiteQuantidadeFracionada ||
-          armazenadoEmMilesimos(
-            quantidadeArmazenada,
-            cadastroFracionado: false,
-          ) ||
-          _leituraEmbalagemUsaEscala(produto, quantidadeArmazenada),
-    );
-    if (q <= 0) return 0;
-    final milesimos = produto.permiteQuantidadeFracionada ||
-        armazenadoEmMilesimos(
+    final escala = armazenadoEmMilesimos(
           quantidadeArmazenada,
-          cadastroFracionado: false,
+          legadoCadastroFracionado: produto.permiteQuantidadeFracionada,
         ) ||
         _leituraEmbalagemUsaEscala(produto, quantidadeArmazenada);
+    final q = valorExibicao(
+      quantidadeArmazenada,
+      fracionada: escala,
+    );
+    if (q <= 0) return 0;
+    final milesimos = escala;
     if (milesimos) {
       // round(0,24) virava 0 e o PDV descartava a linha em silencio.
       if (q < 1) return 1;

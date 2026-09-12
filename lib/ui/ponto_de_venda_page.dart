@@ -858,7 +858,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _pesquisaController.addListener(_onPesquisaPdvTextoChanged);
     _focusClientePdV.addListener(_onFocoClientePdvChanged);
     _focusQuantidadeCarrinhoInline.onKeyEvent = _onKeyQuantidadeCarrinhoInline;
+    _focusQuantidadeCarrinhoInline.addListener(_onFocusQuantidadeCarrinhoInline);
     _aplicarFocoInicialPdv();
+  }
+
+  void _onFocusQuantidadeCarrinhoInline() {
+    if (_focusQuantidadeCarrinhoInline.hasFocus) return;
+    if (_indiceLinhaEdicaoQuantidade == null) return;
+    _confirmarQuantidadeCarrinhoInline();
   }
 
   KeyEventResult _onKeyQuantidadeCarrinhoInline(FocusNode node, KeyEvent event) {
@@ -1277,6 +1284,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwarePdv);
     _checkoutF7BurstId = 0;
     _carrinhoFocus.dispose();
+    _focusQuantidadeCarrinhoInline.removeListener(_onFocusQuantidadeCarrinhoInline);
     _focusQuantidadeCarrinhoInline.dispose();
     _qtdCarrinhoInlineController.dispose();
     _focusClientePdV.removeListener(_onFocoClientePdvChanged);
@@ -2050,7 +2058,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
     final fracionada = QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
       emUnidadeCompra: emEmbalagem,
-      cadastroFracionado: produto.permiteQuantidadeFracionada,
       quantidadeVenda: qVenda,
     );
     final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(
@@ -2242,38 +2249,35 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       return;
     }
     final item = _carrinho[index];
-    final fracionada = !item.quantidadeEmUnidadeCompra;
-    final digitada = QuantidadeVendaUtil.parseEntradaPdv(
-          _qtdCarrinhoInlineController.text,
-          fracionada: fracionada,
+    final aceitaDecimal = QuantidadeVendaUtil.pdvAceitaDecimalDigitacao(
+      emUnidadeCompra: item.quantidadeEmUnidadeCompra,
+    );
+    final inputTexto = _qtdCarrinhoInlineController.text;
+    final quantidadeVenda = QuantidadeVendaUtil.parseEntradaCarrinho(
+          inputTexto,
+          aceitaDecimal: aceitaDecimal,
         ) ??
-        1.0;
-    if (digitada <= 0) {
+        QuantidadeVendaUtil.parseQuantidadeTextoCarrinho(inputTexto);
+    if (quantidadeVenda <= 0) {
       _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
       return;
     }
-    final novaArmazenada = item.quantidadeEmUnidadeCompra &&
-            item.produto.pdvPodeVenderEmUnidadeCompra
-        ? digitada.round()
-        : QuantidadeVendaUtil.paraArmazenamento(
-            digitada,
-            fracionada: QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
-              emUnidadeCompra: false,
-              cadastroFracionado: item.produto.permiteQuantidadeFracionada,
-              quantidadeVenda: digitada,
-            ),
-          );
+    final armazenamento = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: item.produto,
+      quantidadeVenda: quantidadeVenda,
+      emUnidadeCompra: item.quantidadeEmUnidadeCompra,
+    );
+    final novaArmazenada = armazenamento.armazenado;
     if (novaArmazenada <= 0) {
       _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
       return;
     }
-    final delta = novaArmazenada - item.quantidade;
-    if (delta == 0) {
+    if (novaArmazenada == item.quantidade) {
       _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
       return;
     }
     final qtdAntes = item.quantidade;
-    _alterarQuantidadeCarrinho(index, delta);
+    _alterarQuantidadeCarrinho(index, novaArmazenada - item.quantidade);
     final falhou = index < _carrinho.length &&
         _carrinho[index].quantidade == qtdAntes;
     if (falhou) return;
@@ -2281,7 +2285,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   bool _quantidadeFracionadaCarrinho(_OrcamentoItemDraft item) =>
-      !item.quantidadeEmUnidadeCompra;
+      QuantidadeVendaUtil.pdvAceitaDecimalDigitacao(
+        emUnidadeCompra: item.quantidadeEmUnidadeCompra,
+      );
 
   Future<void> _inserirKitPorId(int kitId, int quantidadeKits) async {
     if (kitId <= 0 || quantidadeKits <= 0) return;
@@ -2588,19 +2594,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       ),
     );
     if (!mounted || digitada == null) return;
-    final novaArmazenada = item.quantidadeEmUnidadeCompra &&
-            item.produto.pdvPodeVenderEmUnidadeCompra
-        ? digitada.round()
-        : QuantidadeVendaUtil.paraArmazenamento(
-            digitada,
-            fracionada: QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
-              emUnidadeCompra: false,
-              cadastroFracionado: item.produto.permiteQuantidadeFracionada,
-              quantidadeVenda: digitada,
-            ),
-          );
-    if (novaArmazenada <= 0) return;
-    _alterarQuantidadeCarrinho(index, novaArmazenada - item.quantidade);
+    final armazenamento = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: item.produto,
+      quantidadeVenda: digitada,
+      emUnidadeCompra: item.quantidadeEmUnidadeCompra,
+    );
+    if (armazenamento.armazenado <= 0) return;
+    _alterarQuantidadeCarrinho(
+      index,
+      armazenamento.armazenado - item.quantidade,
+    );
   }
 
   void _removerItemCarrinho(int index) {
@@ -4295,7 +4298,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         rotuloPreco: _rotuloPreco,
         formatarMoeda: _formatarMoeda,
         onAlterarQuantidade: _alterarQuantidadeCarrinho,
-        onEditarQuantidade: (index) => unawaited(_editarQuantidadeCarrinho(index)),
+        onEditarQuantidade: _iniciarEdicaoQuantidadeCarrinho,
         passoQuantidadeCarrinho: _passoQuantidadeCarrinho,
         onRemoverItem: _removerItemCarrinho,
         onAlternarTipoEntrega: _alternarTipoEntregaLinhaCarrinho,
@@ -9699,9 +9702,9 @@ class _EditarQuantidadeCarrinhoDialogState
   }
 
   void _confirmar() {
-    final q = QuantidadeVendaUtil.parseEntradaPdv(
+    final q = QuantidadeVendaUtil.parseEntradaCarrinho(
       _qtdController.text,
-      fracionada: widget.fracionada,
+      aceitaDecimal: widget.fracionada,
     );
     if (q == null) {
       setState(() {

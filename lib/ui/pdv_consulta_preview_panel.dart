@@ -341,15 +341,13 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
               ),
         ),
       ],
-      if (produto.permiteQuantidadeFracionada) ...[
-        const SizedBox(height: 4),
-        Text(
-          'Quantidade decimal liberada no PDV (ex.: 4,50)',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-        ),
-      ],
+      const SizedBox(height: 4),
+      Text(
+        'Quantidade decimal no PDV (ex.: 0,50 ou 4,50)',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+      ),
       const SizedBox(height: 8),
       PdvEstoqueResumoPanel(
         produto: produto,

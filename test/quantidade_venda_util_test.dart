@@ -1,9 +1,46 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:sistema_vendas/domain/produto_embalagem.dart';
 import 'package:sistema_vendas/domain/quantidade_venda_util.dart';
 import 'package:sistema_vendas/model/produto.dart';
 
 void main() {
+  test('parseQuantidadeTextoCarrinho PT-BR na coluna QTD', () {
+    expect(
+      QuantidadeVendaUtil.parseQuantidadeTextoCarrinho('0,50'),
+      closeTo(0.5, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.parseEntradaCarrinho('0,50', aceitaDecimal: true),
+      closeTo(0.5, 0.0001),
+    );
+    final produto = Produto(
+      id: 10,
+      codigoInterno: 'TUBO',
+      nome: 'Tubo',
+      unidade: 'M',
+      quantidadeMinima: 0,
+      precoCusto: 50,
+      precoVenda: 85,
+      permiteQuantidadeFracionada: true,
+    );
+    expect(
+      QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+        produto: produto,
+        quantidadeVenda: 0.5,
+        emUnidadeCompra: false,
+      ).armazenado,
+      500,
+    );
+    expect(
+      QuantidadeVendaUtil.valorExibicao(
+        500,
+        fracionada: true,
+      ),
+      closeTo(0.5, 0.0001),
+    );
+  });
+
   test('parseEntradaPdv aceita quantidades fracionadas PT-BR', () {
     expect(
       QuantidadeVendaUtil.parseEntradaPdv('0,50', fracionada: true),
@@ -54,7 +91,6 @@ void main() {
     expect(
       QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
         emUnidadeCompra: false,
-        cadastroFracionado: false,
         quantidadeVenda: 4.5,
       ),
       isTrue,
@@ -64,23 +100,16 @@ void main() {
       4500,
     );
     expect(
-      QuantidadeVendaUtil.armazenadoEmMilesimos(
-        4500,
-        cadastroFracionado: false,
-      ),
+      QuantidadeVendaUtil.armazenadoEmMilesimos(4500),
       isTrue,
     );
     expect(
-      QuantidadeVendaUtil.armazenadoEmMilesimos(
-        5,
-        cadastroFracionado: false,
-      ),
+      QuantidadeVendaUtil.armazenadoEmMilesimos(5),
       isFalse,
     );
     expect(
       QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
         emUnidadeCompra: false,
-        cadastroFracionado: false,
         quantidadeVenda: 107,
       ),
       isFalse,
@@ -125,44 +154,34 @@ void main() {
     expect(QuantidadeVendaUtil.paraEstoqueInteiro(produto, arm), 1);
   });
 
-  test('500 milesimos exibe 0,5 e nao 500 unidades no PDV', () {
+  test('500 milesimos exibe 0,5 sem flag de cadastro (tubo PDV)', () {
     final produto = Produto(
       id: 3,
       codigoInterno: 'TUBO',
       nome: 'Tubo',
-      unidade: 'M',
+      unidade: 'UN',
       quantidadeMinima: 0,
       precoCusto: 50,
       precoVenda: 85,
-      permiteQuantidadeFracionada: true,
+      permiteQuantidadeFracionada: false,
     );
+    expect(produto.pdvPermiteQuantidadeDecimal, isTrue);
     const armazenado = 500;
     expect(
-      QuantidadeVendaUtil.armazenadoEmMilesimos(
-        armazenado,
-        cadastroFracionado: true,
-      ),
+      QuantidadeVendaUtil.armazenadoEmMilesimos(armazenado),
       isTrue,
     );
     expect(
-      QuantidadeVendaUtil.valorExibicao(armazenado, fracionada: true),
-      closeTo(0.5, 0.0001),
+      ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, armazenado),
+      isTrue,
     );
-    final qEfetiva = QuantidadeVendaUtil.valorExibicao(
-      armazenado,
-      fracionada: QuantidadeVendaUtil.armazenadoEmMilesimos(
-        armazenado,
-        cadastroFracionado: produto.permiteQuantidadeFracionada,
-      ),
+    final qEfetiva = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+      produto: produto,
+      quantidadeArmazenada: armazenado,
     );
+    expect(qEfetiva, closeTo(0.5, 0.0001));
     expect(qEfetiva * produto.precoVenda, closeTo(42.5, 0.01));
-    expect(
-      QuantidadeVendaUtil.armazenadoEmMilesimos(
-        5,
-        cadastroFracionado: true,
-      ),
-      isFalse,
-    );
+    expect(QuantidadeVendaUtil.armazenadoEmMilesimos(5), isFalse);
   });
 
   test('paraEstoqueInteiro inteira continua igual', () {

@@ -456,6 +456,32 @@ void main() {
     );
   });
 
+  test('PDV le 0,50 (500) sem venda fracionada no cadastro', () {
+    final produto = Produto(
+      id: 10,
+      codigoInterno: 'TUBO',
+      nome: 'Tubo',
+      unidade: 'UN',
+      quantidadeMinima: 0,
+      precoCusto: 50,
+      precoVenda: 85,
+      permiteQuantidadeFracionada: false,
+    );
+    const armazenado = 500;
+    expect(
+      ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, armazenado),
+      isTrue,
+    );
+    expect(
+      ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+        produto: produto,
+        quantidadeArmazenada: armazenado,
+      ),
+      closeTo(0.5, 0.001),
+    );
+    expect(0.5 * produto.precoVenda, closeTo(42.5, 0.01));
+  });
+
   test('PDV le 4,50 persistido sem flag de venda fracionada', () {
     final produto = Produto(
       id: 9,

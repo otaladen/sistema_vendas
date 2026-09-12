@@ -3518,34 +3518,15 @@ class _ProdutosPageState extends State<ProdutosPage>
                 setState(() => _embalagemMultiplica = s.first);
               },
             );
-            final fracao = SwitchListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              visualDensity: VisualDensity.compact,
-              title: const Text('Venda fracionada'),
-              subtitle: const Text('Qtd. decimal no PDV (m, m², kg…)'),
-              value: _permiteQuantidadeFracionada,
-              onChanged: (v) =>
-                  setState(() => _permiteQuantidadeFracionada = v),
-            );
             if (empilhar) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   fatorBtn,
-                  const SizedBox(height: _erpGap8),
-                  fracao,
                 ],
               );
             }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                fatorBtn,
-                const SizedBox(width: _erpGap16),
-                Expanded(child: fracao),
-              ],
-            );
+            return fatorBtn;
           },
         ),
         const SizedBox(height: 4),
