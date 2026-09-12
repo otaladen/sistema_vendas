@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -23,6 +24,9 @@ class LanApiEventHub extends ChangeNotifier {
   Timer? _healthTimer;
   Timer? _registerTimer;
   Timer? _notifyDebounce;
+  Timer? _reconnectWsTimer;
+  int _reconnectWsTentativa = 0;
+  int _healthIntervaloSegundos = 15;
   LanApiClient? _client;
   String _ultimaEntidade = '';
   List<int> _ultimaEntidadeIds = const [];
@@ -65,6 +69,8 @@ class LanApiEventHub extends ChangeNotifier {
   void entrarStandby() {
     if (_standby) return;
     _standby = true;
+    _reconnectWsTimer?.cancel();
+    _reconnectWsTimer = null;
     _fecharStream();
     _healthTimer?.cancel();
     _healthTimer = null;
@@ -77,9 +83,10 @@ class LanApiEventHub extends ChangeNotifier {
   void sairStandby() {
     if (!_standby) return;
     _standby = false;
+    _reconnectWsTentativa = 0;
     final client = _client;
     if (client != null) {
-      _iniciarStream(client);
+      _agendarIniciarStream(client, imediato: true);
       _reiniciarHealthTimer();
     }
   }
@@ -89,15 +96,43 @@ class LanApiEventHub extends ChangeNotifier {
     _client = client;
     _modoTerminal = terminalLeve;
     _standby = false;
-    _iniciarStream(client);
+    _reconnectWsTentativa = 0;
+    _healthIntervaloSegundos = 15;
+    _agendarIniciarStream(client, imediato: true);
     unawaited(_pingHealth());
     _reiniciarHealthTimer();
+  }
+
+  static const _backoffWsSegundos = <int>[5, 10, 30];
+
+  void _agendarIniciarStream(LanApiClient client, {bool imediato = false}) {
+    if (_standby || !identical(_client, client)) return;
+    _reconnectWsTimer?.cancel();
+    if (imediato) {
+      _iniciarStream(client);
+      return;
+    }
+    final idx = math.min(_reconnectWsTentativa, _backoffWsSegundos.length - 1);
+    final delay = Duration(seconds: _backoffWsSegundos[idx]);
+    _reconnectWsTentativa++;
+    _reconnectWsTimer = Timer(delay, () {
+      if (_standby || !identical(_client, client)) return;
+      _iniciarStream(client);
+    });
   }
 
   void _iniciarStream(LanApiClient client) {
     // Evita subscription/canal orfaos apos queda silenciosa do WS.
     _fecharStream();
-    final ch = client.abrirStream();
+    WebSocketChannel? ch;
+    try {
+      ch = client.abrirStream();
+    } catch (e) {
+      debugPrint('[LanApiEventHub] abrirStream falhou (${client.configurado}): $e');
+      _wsAtivo = false;
+      _agendarIniciarStream(client);
+      return;
+    }
     if (ch == null) return;
     _channel = ch;
     _sub = ch.stream.listen(
@@ -113,6 +148,9 @@ class LanApiEventHub extends ChangeNotifier {
               type == 'autorizacao_pdv_resposta' ||
               type == 'presence') {
             _wsAtivo = true;
+            _reconnectWsTentativa = 0;
+            _healthIntervaloSegundos = 45;
+            _reiniciarHealthTimer();
             _setOnline(true);
           }
           if (type == 'hello') {
@@ -149,18 +187,25 @@ class LanApiEventHub extends ChangeNotifier {
           _agendarNotifyListeners(prioridade: _ultimaEntidade == 'produto');
         } catch (_) {}
       },
-      onError: (_) {
+      onError: (e) {
         // Ignora erro do canal antigo apos reconexao.
         if (!identical(_channel, ch)) return;
+        debugPrint('[LanApiEventHub] WebSocket erro: $e');
         _wsAtivo = false;
         _fecharStream();
         _setOnline(false);
+        _healthIntervaloSegundos = 15;
+        _reiniciarHealthTimer();
+        _agendarIniciarStream(client);
       },
       onDone: () {
         if (!identical(_channel, ch)) return;
         _wsAtivo = false;
         _fecharStream();
         _setOnline(false);
+        _healthIntervaloSegundos = 15;
+        _reiniciarHealthTimer();
+        _agendarIniciarStream(client);
       },
       cancelOnError: false,
     );
@@ -184,13 +229,11 @@ class LanApiEventHub extends ChangeNotifier {
 
   void _reiniciarHealthTimer() {
     _healthTimer?.cancel();
-    _healthTimer = Timer.periodic(_intervaloHealth, (_) {
-      unawaited(_pingHealth());
-    });
+    _healthTimer = Timer.periodic(
+      Duration(seconds: _healthIntervaloSegundos),
+      (_) => unawaited(_pingHealth()),
+    );
   }
-
-  Duration get _intervaloHealth =>
-      _wsAtivo ? const Duration(seconds: 45) : const Duration(seconds: 15);
 
   void _agendarNotifyListeners({bool prioridade = false}) {
     _notifyDebounce?.cancel();
@@ -207,6 +250,10 @@ class LanApiEventHub extends ChangeNotifier {
     _standby = false;
     _notifyDebounce?.cancel();
     _notifyDebounce = null;
+    _reconnectWsTimer?.cancel();
+    _reconnectWsTimer = null;
+    _reconnectWsTentativa = 0;
+    _healthIntervaloSegundos = 15;
     _healthTimer?.cancel();
     _healthTimer = null;
     _registerTimer?.cancel();
@@ -283,13 +330,20 @@ class LanApiEventHub extends ChangeNotifier {
       _setOnline(ok);
     }
     if (ok) {
+      _reconnectWsTentativa = 0;
+      if (_wsAtivo) {
+        _healthIntervaloSegundos = 45;
+      }
       unawaited(_atualizarPresenca());
+    } else {
+      _healthIntervaloSegundos = math.min(_healthIntervaloSegundos + 5, 30);
+      _reiniciarHealthTimer();
     }
     // Celular: WS cai com frequencia; HTTP continua. Sem limpar o canal na
     // queda, o health nunca reconectava — preco/estoque no PDV so atualizavam
     // ao abrir Cadastro (hidratar HTTP).
     if (ok && !_wsAtivo && _channel == null && !_standby) {
-      _iniciarStream(client);
+      _agendarIniciarStream(client);
     }
   }
 

@@ -451,7 +451,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   Future<void> _dividirLinhaCarrinho(int index) async {
     if (index < 0 || index >= _carrinho.length) return;
     final orig = _carrinho[index];
-    if (orig.quantidade <= 1) {
+    final totalEfetivo = orig.quantidadeVendaEfetiva;
+    if (totalEfetivo < 2) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -467,14 +468,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       context: context,
       builder: (ctx) => _DividirLinhaCarrinhoDialog(
         nomeProduto: orig.produto.nome,
-        quantidadeTotal: orig.quantidade,
+        quantidadeTotalEfetiva: totalEfetivo,
+        unidade: orig.unidadeMedidaExibicao,
         tipoAtual: orig.tipoEntregaItem,
       ),
     );
     if (result == null || !mounted) return;
 
-    final qNova = result.quantidadeNovaLinha;
-    if (qNova <= 0 || qNova >= orig.quantidade) {
+    final qNovaEfetiva = result.quantidadeNovaLinhaEfetiva;
+    if (qNovaEfetiva <= 0 || qNovaEfetiva >= totalEfetivo) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -485,17 +487,39 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       return;
     }
 
+    final qRestanteEfetiva = totalEfetivo - qNovaEfetiva;
+    final armRestante = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: orig.produto,
+      quantidadeVenda: qRestanteEfetiva,
+      emUnidadeCompra: orig.quantidadeEmUnidadeCompra,
+    );
+    final armNova = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: orig.produto,
+      quantidadeVenda: qNovaEfetiva,
+      emUnidadeCompra: orig.quantidadeEmUnidadeCompra,
+    );
+    if (armRestante.armazenado <= 0 || armNova.armazenado <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Quantidade invalida para dividir este item.'),
+        ),
+      );
+      return;
+    }
+
     setState(() {
-      orig.quantidade -= qNova;
+      orig.quantidade = armRestante.armazenado;
+      orig.gravadoEmMilesimosPdv = armRestante.gravadoEmMilesimosPdv;
       _carrinho.insert(
         index + 1,
         _OrcamentoItemDraft(
           produto: orig.produto,
-          quantidade: qNova,
+          quantidade: armNova.armazenado,
           precoTipo: orig.precoTipo,
           precoUnitario: orig.precoUnitario,
           tipoEntregaItem: result.tipoEntregaItem,
           quantidadeEmUnidadeCompra: orig.quantidadeEmUnidadeCompra,
+          gravadoEmMilesimosPdv: armNova.gravadoEmMilesimosPdv,
           precoUnitarioManual: orig.precoUnitarioManual,
           promocaoId: orig.promocaoId,
           promocaoNome: orig.promocaoNome,
@@ -2056,15 +2080,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       );
       emEmbalagem = false;
     }
-    final fracionada = QuantidadeVendaUtil.pdvArmazenaEmMilesimos(
-      emUnidadeCompra: emEmbalagem,
+    final armazenamento = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: produto,
       quantidadeVenda: qVenda,
+      emUnidadeCompra: emEmbalagem,
     );
-    final qArmazenada = QuantidadeVendaUtil.paraArmazenamento(
-      qVenda,
-      fracionada: fracionada,
-    );
+    final qArmazenada = armazenamento.armazenado;
+    final gravadoEmMilesimosPdv = armazenamento.gravadoEmMilesimosPdv;
     if (qArmazenada <= 0) return false;
+    final fracionada = gravadoEmMilesimosPdv;
     final precoLista = precoTipo ?? _precoListaAtivo;
     final qUnidadeVenda = emEmbalagem
         ? ProdutoEmbalagem.quantidadeComercialParaUnidadeVenda(
@@ -2191,6 +2215,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             precoUnitario: unit,
             tipoEntregaItem: tipoNovo,
             quantidadeEmUnidadeCompra: emEmbalagem,
+            gravadoEmMilesimosPdv: gravadoEmMilesimosPdv,
             promocaoId: resPreco.promocaoId,
             promocaoNome: resPreco.promocaoNome,
             botaForaAplicado: botaForaAplicado,
@@ -2272,11 +2297,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
       return;
     }
-    if (novaArmazenada == item.quantidade) {
+    if (novaArmazenada == item.quantidade &&
+        (quantidadeVenda - item.quantidadeVendaEfetiva).abs() < 0.000001) {
       _encerrarEdicaoQuantidadeCarrinho(voltarPesquisa: true);
       return;
     }
     final qtdAntes = item.quantidade;
+    item.gravadoEmMilesimosPdv = armazenamento.gravadoEmMilesimosPdv;
     _alterarQuantidadeCarrinho(index, novaArmazenada - item.quantidade);
     final falhou = index < _carrinho.length &&
         _carrinho[index].quantidade == qtdAntes;
@@ -2600,6 +2627,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       emUnidadeCompra: item.quantidadeEmUnidadeCompra,
     );
     if (armazenamento.armazenado <= 0) return;
+    item.gravadoEmMilesimosPdv = armazenamento.gravadoEmMilesimosPdv;
     _alterarQuantidadeCarrinho(
       index,
       armazenamento.armazenado - item.quantidade,
@@ -7431,6 +7459,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           precoUnitarioManual: item.precoUnitarioManual,
           tipoEntregaItem: tipoItem,
           quantidadeEmUnidadeCompra: qCarrinho.emUnidadeCompra,
+          gravadoEmMilesimosPdv: ProdutoEmbalagem.leituraUsaEscalaFracionada(
+            produto,
+            item.quantidade,
+          ),
           promocaoId: item.promocaoId,
           promocaoNome: item.promocaoNomeSnapshot,
           botaForaAplicado: item.botaForaAplicado,
@@ -9338,23 +9370,25 @@ class _AdicionarOrcamentoResult {
 
 class _DividirLinhaCarrinhoResult {
   const _DividirLinhaCarrinhoResult({
-    required this.quantidadeNovaLinha,
+    required this.quantidadeNovaLinhaEfetiva,
     required this.tipoEntregaItem,
   });
 
-  final int quantidadeNovaLinha;
+  final double quantidadeNovaLinhaEfetiva;
   final String tipoEntregaItem;
 }
 
 class _DividirLinhaCarrinhoDialog extends StatefulWidget {
   const _DividirLinhaCarrinhoDialog({
     required this.nomeProduto,
-    required this.quantidadeTotal,
+    required this.quantidadeTotalEfetiva,
+    required this.unidade,
     required this.tipoAtual,
   });
 
   final String nomeProduto;
-  final int quantidadeTotal;
+  final double quantidadeTotalEfetiva;
+  final String unidade;
   final String tipoAtual;
 
   @override
@@ -9382,17 +9416,24 @@ class _DividirLinhaCarrinhoDialogState
   }
 
   void _confirmar() {
-    final q = int.tryParse(_qtdController.text.trim());
-    if (q == null || q <= 0 || q >= widget.quantidadeTotal) {
+    final q = QuantidadeVendaUtil.parseEntradaCarrinho(
+      _qtdController.text,
+      aceitaDecimal: false,
+    );
+    final total = widget.quantidadeTotalEfetiva;
+    if (q == null || q <= 0 || q >= total) {
+      final maxNova = total > 1 ? total - 1 : 0.0;
+      final maxTxt = maxNova == maxNova.roundToDouble()
+          ? maxNova.toStringAsFixed(0)
+          : QuantidadeVendaUtil.formatarExibicao(maxNova, fracionada: true);
       setState(() {
-        _erroQtd =
-            'Informe de 1 a ${widget.quantidadeTotal - 1} unidades para o novo item.';
+        _erroQtd = 'Informe de 1 a $maxTxt ${widget.unidade} para o novo item.';
       });
       return;
     }
     Navigator.of(context).pop(
       _DividirLinhaCarrinhoResult(
-        quantidadeNovaLinha: q,
+        quantidadeNovaLinhaEfetiva: q,
         tipoEntregaItem: _tipoNovaLinha,
       ),
     );
@@ -9400,9 +9441,24 @@ class _DividirLinhaCarrinhoDialogState
 
   @override
   Widget build(BuildContext context) {
-    final restante =
-        widget.quantidadeTotal -
-        (int.tryParse(_qtdController.text.trim()) ?? 0);
+    final qDigitada =
+        QuantidadeVendaUtil.parseEntradaCarrinho(
+          _qtdController.text,
+          aceitaDecimal: false,
+        ) ??
+        0;
+    final restante = (widget.quantidadeTotalEfetiva - qDigitada)
+        .clamp(0.0, widget.quantidadeTotalEfetiva);
+    final totalTxt = widget.quantidadeTotalEfetiva ==
+            widget.quantidadeTotalEfetiva.roundToDouble()
+        ? widget.quantidadeTotalEfetiva.toStringAsFixed(0)
+        : QuantidadeVendaUtil.formatarExibicao(
+            widget.quantidadeTotalEfetiva,
+            fracionada: true,
+          );
+    final restanteTxt = restante == restante.roundToDouble()
+        ? restante.toStringAsFixed(0)
+        : QuantidadeVendaUtil.formatarExibicao(restante, fracionada: true);
     return AlertDialog(
       title: const Text('Dividir Item'),
       content: AdaptiveDialogPane(
@@ -9417,7 +9473,7 @@ class _DividirLinhaCarrinhoDialogState
             ),
             const SizedBox(height: 8),
             Text(
-              'Neste item: ${widget.quantidadeTotal} un. · '
+              'Neste item: $totalTxt ${widget.unidade} · '
               'atual: ${EntregaVendaHelper.rotuloTipoItem(widget.tipoAtual)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -9428,7 +9484,7 @@ class _DividirLinhaCarrinhoDialogState
               decoration: InputDecoration(
                 labelText: 'Quantidade no novo item',
                 helperText:
-                    'Este item ficara com ${restante.clamp(0, widget.quantidadeTotal)} un.',
+                    'Este item ficara com $restanteTxt ${widget.unidade}.',
                 errorText: _erroQtd,
               ),
               keyboardType: TextInputType.number,
@@ -10093,6 +10149,7 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
     required this.precoUnitario,
     this.tipoEntregaItem = EntregaVendaHelper.tipoRetirada,
     this.quantidadeEmUnidadeCompra = false,
+    this.gravadoEmMilesimosPdv = false,
     this.promocaoId = 0,
     this.promocaoNome = '',
     this.precoUnitarioManual = false,
@@ -10109,6 +10166,7 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
   double precoUnitario;
   String tipoEntregaItem;
   final bool quantidadeEmUnidadeCompra;
+  bool gravadoEmMilesimosPdv;
   @override
   int promocaoId;
   @override
@@ -10122,6 +10180,7 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
 
   bool get usaArmazenamentoFracionado {
     if (quantidadeEmUnidadeCompra) return false;
+    if (gravadoEmMilesimosPdv) return true;
     return ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, quantidade);
   }
 

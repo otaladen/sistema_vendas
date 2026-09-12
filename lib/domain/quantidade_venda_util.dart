@@ -16,6 +16,21 @@ class QuantidadeVendaUtil {
   /// Passo dos botoes +/- no PDV: 0,01 na unidade de venda (10 milésimos).
   static const int passoFracionadoArmazenado = escalaFracionada ~/ 100;
 
+  /// Inteiros comerciais 10..999 (multiplos de 10) colidem com subunidade
+  /// em milésimos (10 armazenado = 0,01 ou 10 un.).
+  static bool inteiroComercialColideComMilesimosSubUnidade(int quantidade) {
+    return quantidade >= passoFracionadoArmazenado &&
+        quantidade < escalaFracionada &&
+        quantidade % passoFracionadoArmazenado == 0;
+  }
+
+  static bool _deveGravarInteiroComercialEmMilesimos(double quantidadeVenda) {
+    if (quantidadeVenda != quantidadeVenda.roundToDouble()) return false;
+    final q = quantidadeVenda.round();
+    return q >= passoFracionadoArmazenado &&
+        inteiroComercialColideComMilesimosSubUnidade(q);
+  }
+
   /// PDV/orcamento: digitacao decimal na unidade de venda (nao na embalagem CX).
   static bool pdvAceitaDecimalDigitacao({required bool emUnidadeCompra}) =>
       !emUnidadeCompra;
@@ -84,10 +99,13 @@ class QuantidadeVendaUtil {
         gravadoEmMilesimosPdv: false,
       );
     }
-    final emMilesimos = pdvArmazenaEmMilesimos(
+    var emMilesimos = pdvArmazenaEmMilesimos(
       emUnidadeCompra: false,
       quantidadeVenda: quantidadeVenda,
     );
+    if (!emMilesimos && _deveGravarInteiroComercialEmMilesimos(quantidadeVenda)) {
+      emMilesimos = true;
+    }
     return (
       armazenado: paraArmazenamento(quantidadeVenda, fracionada: emMilesimos),
       gravadoEmMilesimosPdv: emMilesimos,

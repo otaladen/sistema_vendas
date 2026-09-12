@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/configuracoes_service.dart';
+import '../../services/servidor_config_service.dart';
 import '../../data/api/lan_api_url.dart';
 import '../../data/api/lan_conexao_perfis.dart';
 
@@ -97,6 +98,10 @@ class _TerminalConfigPageState extends State<TerminalConfigPage> {
       var url = _urlCtrl.text.trim();
       if (url.isEmpty) {
         throw StateError('Informe o endereco do PC servidor.');
+      }
+      final invalidoMobile = ServidorConfigService.validarUrlParaDispositivo(url);
+      if (invalidoMobile != null) {
+        throw StateError(invalidoMobile);
       }
       // Sempre normaliza para http://host:8788
       final apiUrl = LanApiUrl.fromSyncUrl(url);

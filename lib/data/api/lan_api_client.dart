@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -96,13 +97,24 @@ class LanApiClient {
   static const msgRedeInstavelMotorista =
       'Sinal instavel. Verifique se o Tailscale esta ativo e tente novamente.';
 
+  void _logFalhaHttp(String verbo, String path, Object e) {
+    final url = _uri(path);
+    debugPrint('[LanApiClient] $verbo $url falhou: $e');
+  }
+
   Never _rethrowRede(
     Object e,
     String path,
     String verbo, {
     bool sinalizarRede = true,
   }) {
+    if (e is! LanApiException) {
+      _logFalhaHttp(verbo, path, e);
+    }
     if (e is LanApiException) {
+      debugPrint(
+        '[LanApiClient] $verbo ${_uri(path)}: ${e.message}',
+      );
       if (sinalizarRede) _sinalizarOfflineSeRede(e.cause);
       throw e;
     }
@@ -349,7 +361,8 @@ class LanApiClient {
         onFalhaRede?.call();
       }
       return ok;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[LanApiClient] GET ${_uri('/api/health')} falhou: $e');
       onFalhaRede?.call();
       return false;
     }

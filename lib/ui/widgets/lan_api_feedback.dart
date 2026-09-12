@@ -15,6 +15,22 @@ import 'operacao_feedback.dart';
 abstract final class LanApiFeedback {
   LanApiFeedback._();
 
+  static DateTime? _ultimoSnackRedeEm;
+  static String? _ultimoSnackRedeChave;
+
+  static bool _deveSuprimirSnackRede(String chave) {
+    final agora = DateTime.now();
+    final ultimo = _ultimoSnackRedeEm;
+    if (ultimo != null &&
+        agora.difference(ultimo) < const Duration(seconds: 20) &&
+        _ultimoSnackRedeChave == chave) {
+      return true;
+    }
+    _ultimoSnackRedeEm = agora;
+    _ultimoSnackRedeChave = chave;
+    return false;
+  }
+
   /// Mensagem legivel para o usuario.
   static String mensagem(Object erro, {String? fallback}) {
     if (erro is LanApiException) {
@@ -43,6 +59,7 @@ abstract final class LanApiFeedback {
     final texto = (prefixo != null && prefixo.trim().isNotEmpty)
         ? '${prefixo.trim()}: $body'
         : body;
+    if (ehFalhaRede(erro) && _deveSuprimirSnackRede(texto)) return;
     try {
       OperacaoFeedback.erro(context, texto);
     } catch (_) {
@@ -67,6 +84,7 @@ abstract final class LanApiFeedback {
     final texto = (prefixo != null && prefixo.trim().isNotEmpty)
         ? '${prefixo.trim()}: $body'
         : body;
+    if (ehFalhaRede(erro) && _deveSuprimirSnackRede(texto)) return;
     try {
       OperacaoFeedback.aviso(context, texto);
     } catch (_) {

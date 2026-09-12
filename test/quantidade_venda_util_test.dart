@@ -196,4 +196,82 @@ void main() {
     );
     expect(QuantidadeVendaUtil.paraEstoqueInteiro(produto, 2), 2);
   });
+
+  test('10 SC inteiro nao colide com 0,01 em milésimos', () {
+    final produto = Produto(
+      id: 939,
+      codigoInterno: '939',
+      nome: 'Cimento Poty 50kg',
+      unidade: 'SC',
+      quantidadeMinima: 0,
+      precoCusto: 40,
+      precoVenda: 55,
+    );
+    final arm = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: produto,
+      quantidadeVenda: 10,
+      emUnidadeCompra: false,
+    );
+    expect(arm.gravadoEmMilesimosPdv, isTrue);
+    expect(arm.armazenado, 10000);
+    expect(
+      ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, arm.armazenado),
+      isTrue,
+    );
+    expect(
+      ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+        produto: produto,
+        quantidadeArmazenada: arm.armazenado,
+      ),
+      closeTo(10, 0.0001),
+    );
+    final sub = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: produto,
+      quantidadeVenda: 0.01,
+      emUnidadeCompra: false,
+    );
+    expect(sub.armazenado, 10);
+    expect(
+      ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+        produto: produto,
+        quantidadeArmazenada: sub.armazenado,
+      ),
+      closeTo(0.01, 0.0001),
+    );
+  });
+
+  test('dividir 10 SC em 2 + 8 regrava armazenamento coerente', () {
+    final produto = Produto(
+      id: 939,
+      codigoInterno: '939',
+      nome: 'Cimento Poty 50kg',
+      unidade: 'SC',
+      quantidadeMinima: 0,
+      precoCusto: 40,
+      precoVenda: 55,
+    );
+    const totalEfetivo = 10.0;
+    const qNova = 2.0;
+    final armNova = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: produto,
+      quantidadeVenda: qNova,
+      emUnidadeCompra: false,
+    );
+    final armRestante = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
+      produto: produto,
+      quantidadeVenda: totalEfetivo - qNova,
+      emUnidadeCompra: false,
+    );
+    final efNova = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+      produto: produto,
+      quantidadeArmazenada: armNova.armazenado,
+    );
+    final efRest = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+      produto: produto,
+      quantidadeArmazenada: armRestante.armazenado,
+    );
+    expect(efNova, closeTo(2, 0.0001));
+    expect(efRest, closeTo(8, 0.0001));
+    expect(efNova + efRest, closeTo(10, 0.0001));
+  });
 }

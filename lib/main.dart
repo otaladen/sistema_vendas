@@ -51,6 +51,7 @@ import 'services/entrega_pod_retencao_service.dart';
 import 'services/lan_servidor_bootstrap.dart';
 import 'services/lan_servidor_headless_service.dart';
 import 'services/configuracoes_service.dart';
+import 'services/servidor_config_service.dart';
 import 'services/print_service.dart';
 import 'ui/configuracoes/configuracoes_scope.dart';
 import 'services/estoque_diagnostico_startup.dart';
@@ -504,6 +505,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         _terminalHidratando = false;
         _terminalErro = null;
       });
+      return;
+    }
+    final urlInvalidaMobile = ServidorConfigService.validarUrlParaDispositivo(url);
+    if (urlInvalidaMobile != null) {
+      if (!mounted) return;
+      setState(() {
+        _terminalPrecisaConfig = true;
+        _terminalHidratando = false;
+        _terminalErro = urlInvalidaMobile;
+        _apiClient = null;
+        _produtoApi = null;
+      });
+      EntregaBaixaSyncService.instance.desligar();
       return;
     }
     setState(() {

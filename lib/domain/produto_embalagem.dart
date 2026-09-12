@@ -235,6 +235,11 @@ class ProdutoEmbalagem {
       return true;
     }
     if (quantidadeArmazenada >= QuantidadeVendaUtil.escalaFracionada) {
+      if (quantidadeArmazenada >=
+              10 * QuantidadeVendaUtil.escalaFracionada &&
+          quantidadeArmazenada % QuantidadeVendaUtil.escalaFracionada == 0) {
+        return true;
+      }
       final emUnidadeVenda = QuantidadeVendaUtil.valorExibicao(
         quantidadeArmazenada,
         fracionada: true,

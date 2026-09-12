@@ -26,6 +26,12 @@ class EntregaBaixaSyncService extends ChangeNotifier {
   static final instance = EntregaBaixaSyncService._();
 
   static const _intervaloCiclo = Duration(seconds: 15);
+  static const _intervalosOffline = <Duration>[
+    Duration(seconds: 5),
+    Duration(seconds: 10),
+    Duration(seconds: 30),
+  ];
+  int _intervaloOfflineIndice = 0;
   static const _ttlSincronizada = Duration(seconds: 20);
 
   LanApiClient? _client;
@@ -83,11 +89,30 @@ class EntregaBaixaSyncService extends ChangeNotifier {
     };
     LanApiEventHub.instance.addListener(_hubListener!);
     _timer?.cancel();
-    _timer = Timer.periodic(_intervaloCiclo, (_) {
-      unawaited(processarFila());
-    });
+    _intervaloOfflineIndice = 0;
+    _agendarProximoCiclo();
     unawaited(_recarregarOutbox());
     unawaited(processarFila());
+  }
+
+  void _agendarProximoCiclo() {
+    _timer?.cancel();
+    final online = LanApiEventHub.instance.online;
+    final intervalo = online
+        ? _intervaloCiclo
+        : _intervalosOffline[
+            _intervaloOfflineIndice.clamp(0, _intervalosOffline.length - 1)];
+    if (!online &&
+        _intervaloOfflineIndice < _intervalosOffline.length - 1) {
+      _intervaloOfflineIndice++;
+    }
+    if (online) {
+      _intervaloOfflineIndice = 0;
+    }
+    _timer = Timer(intervalo, () {
+      unawaited(processarFila());
+      if (_ligado) _agendarProximoCiclo();
+    });
   }
 
   void desligar() {
