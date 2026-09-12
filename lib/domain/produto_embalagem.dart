@@ -222,6 +222,38 @@ class ProdutoEmbalagem {
     );
   }
 
+  /// Quantidade na unidade de venda para comprovantes (ex.: `8,04`), sem unidade.
+  static String formatarQuantidadeItemImpressao({
+    required Produto? produto,
+    required int quantidadeArmazenada,
+  }) {
+    final qtdEfetiva = quantidadeVendaEfetivaItem(
+      produto: produto,
+      quantidadeArmazenada: quantidadeArmazenada,
+    );
+    if (produto != null) {
+      return formatarQuantidadeUnidadeVenda(produto, qtdEfetiva);
+    }
+    return QuantidadeVendaUtil.formatarExibicao(
+      qtdEfetiva,
+      fracionada: qtdEfetiva != qtdEfetiva.roundToDouble(),
+    );
+  }
+
+  /// Quantidade com unidade de venda (ex.: `8,04 M2`) para orcamento/PDF.
+  static String formatarQuantidadeItemImpressaoComUnidade({
+    required Produto? produto,
+    required int quantidadeArmazenada,
+  }) {
+    final qTxt = formatarQuantidadeItemImpressao(
+      produto: produto,
+      quantidadeArmazenada: quantidadeArmazenada,
+    );
+    if (produto == null) return qTxt;
+    final u = normalizarUnidade(produto.unidade);
+    return u.isEmpty ? qTxt : '$qTxt $u';
+  }
+
   /// Mesma regra de escala usada ao gravar [ItemVenda.quantidade] no PDV.
   static bool leituraUsaEscalaFracionada(
     Produto produto,

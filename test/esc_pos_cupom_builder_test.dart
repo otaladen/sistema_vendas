@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/app_config_repository.dart';
+import 'package:sistema_vendas/domain/quantidade_venda_util.dart';
 import 'package:sistema_vendas/model/item_venda.dart';
 import 'package:sistema_vendas/model/produto.dart';
 import 'package:sistema_vendas/model/venda.dart';
@@ -40,6 +41,47 @@ String _ascii(List<int> bytes) =>
     String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
 
 void main() {
+  test('cupom ESC/POS imprime quantidade fracionada sem truncar', () {
+    final produto = Produto(
+      id: 2,
+      codigoInterno: 'PISO',
+      nome: 'Piso ceramico',
+      unidade: 'M2',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 45,
+      preco1: 45,
+      permiteQuantidadeFracionada: false,
+    );
+    final armazenado =
+        QuantidadeVendaUtil.paraArmazenamento(8.04, fracionada: true);
+    final item = ItemVenda(
+      nomeProduto: 'Piso ceramico',
+      quantidade: armazenado,
+      precoUnitario: 45,
+      precoCustoUnitario: 30,
+    )..produto.target = produto;
+    final venda = Venda(
+      numeroOrcamento: 1,
+      total: 361.8,
+      formaPagamento: 'dinheiro',
+    );
+    final ascii = _ascii(
+      EscPosCupomBuilder.montar(
+        CupomBalcaoDados(
+          venda: venda,
+          config: const EmpresaConfig(nomeLoja: 'Loja'),
+          itens: [item],
+          totalRecebido: 361.8,
+        ),
+        largura: EscPosLarguraBobina.mm80,
+        abrirGaveta: false,
+      ),
+    );
+    expect(ascii, contains('8,04 M2'));
+    expect(ascii, isNot(contains('8 M2 x')));
+  });
+
   test('cupom dinheiro ESC/POS usa layout DANFE com chave e QR', () {
     final venda = Venda(
       id: 1,

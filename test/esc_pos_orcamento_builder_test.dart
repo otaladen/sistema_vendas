@@ -1,13 +1,57 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/app_config_repository.dart';
+import 'package:sistema_vendas/domain/quantidade_venda_util.dart';
 import 'package:sistema_vendas/model/cliente.dart';
 import 'package:sistema_vendas/model/item_venda.dart';
 import 'package:sistema_vendas/model/produto.dart';
 import 'package:sistema_vendas/model/venda.dart';
+import 'package:sistema_vendas/services/orcamento_pdf_service.dart';
 import 'package:sistema_vendas/services/esc_pos_commands.dart';
 import 'package:sistema_vendas/services/esc_pos_orcamento_builder.dart';
 
 void main() {
+  test('orcamento ESC/POS imprime quantidade fracionada em m2', () {
+    final produto = Produto(
+      id: 2,
+      codigoInterno: 'PISO',
+      nome: 'Piso ceramico',
+      unidade: 'M2',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 45,
+      preco1: 45,
+      permiteQuantidadeFracionada: false,
+    );
+    final armazenado =
+        QuantidadeVendaUtil.paraArmazenamento(8.04, fracionada: true);
+    final item = ItemVenda(
+      nomeProduto: 'Piso ceramico',
+      quantidade: armazenado,
+      precoUnitario: 45,
+      precoCustoUnitario: 30,
+      precoTipo: 'preco1',
+      tipoEntregaItem: 'retirada',
+    )..produto.target = produto;
+
+    expect(
+      OrcamentoPdfService.quantidadeComUnidade(item: item, produto: produto),
+      '8,04 M2',
+    );
+
+    final bytes = EscPosOrcamentoBuilder.montar(
+      OrcamentoEscPosDados(
+        venda: Venda(numeroOrcamento: 9, total: 361.8, formaPagamento: 'dinheiro'),
+        config: const EmpresaConfig(nomeLoja: 'Loja'),
+        itens: [item],
+        validadeDias: 7,
+        produtosPorItem: {0: produto},
+      ),
+    );
+    final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    expect(texto, contains('8,04 M2'));
+    expect(texto, isNot(contains('8 M2 x')));
+  });
+
   test('montar orcamento ESC/POS gera bytes com init e texto', () {
     final produto = Produto(
       id: 1,

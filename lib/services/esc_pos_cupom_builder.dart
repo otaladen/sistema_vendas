@@ -5,8 +5,8 @@ import 'package:intl/intl.dart';
 import '../data/app_config_repository.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
-import '../domain/quantidade_venda_util.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
@@ -217,11 +217,9 @@ abstract final class EscPosCupomBuilder {
       }();
       final nome = ProdutoNomeExibicao.paraImpressaoItem(item);
       final un = (item.produtoOuNull?.unidade ?? 'UN').trim().toUpperCase();
-      final fracionada =
-          item.produtoOuNull?.permiteQuantidadeFracionada ?? false;
-      final qtd = QuantidadeVendaUtil.formatarExibicao(
-        item.quantidadeVendaEfetiva,
-        fracionada: fracionada,
+      final qtd = ProdutoEmbalagem.formatarQuantidadeItemImpressao(
+        produto: item.produtoOuNull,
+        quantidadeArmazenada: item.quantidade,
       );
       final unit = _moeda.format(item.precoUnitario);
       final tot = _moeda.format(item.subtotal);

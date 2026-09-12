@@ -7,7 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
-import '../domain/quantidade_venda_util.dart';
+import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
@@ -294,11 +294,9 @@ class CupomNaoFiscalVendaPdf {
       CupomPdfLayout.chaveNfceIndicaContingencia(venda.nfceChaveAcesso);
 
   static String _quantidadeItemNfce(ItemVenda item) {
-    final fracionada =
-        item.produtoOuNull?.permiteQuantidadeFracionada ?? false;
-    return QuantidadeVendaUtil.formatarExibicao(
-      item.quantidadeVendaEfetiva,
-      fracionada: fracionada,
+    return ProdutoEmbalagem.formatarQuantidadeItemImpressao(
+      produto: item.produtoOuNull,
+      quantidadeArmazenada: item.quantidade,
     );
   }
 

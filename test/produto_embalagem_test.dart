@@ -52,6 +52,36 @@ void main() {
     );
   });
 
+  test('impressao exibe 8,04 m2 sem flag fracionada no cadastro', () {
+    final produto = Produto(
+      id: 3,
+      codigoInterno: 'PISO',
+      nome: 'Piso ceramico',
+      unidade: 'M2',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 45,
+      preco1: 45,
+      permiteQuantidadeFracionada: false,
+    );
+    final armazenado =
+        QuantidadeVendaUtil.paraArmazenamento(8.04, fracionada: true);
+    expect(
+      ProdutoEmbalagem.formatarQuantidadeItemImpressaoComUnidade(
+        produto: produto,
+        quantidadeArmazenada: armazenado,
+      ),
+      '8,04 M2',
+    );
+    expect(
+      ProdutoEmbalagem.formatarQuantidadeItemImpressao(
+        produto: produto,
+        quantidadeArmazenada: armazenado,
+      ),
+      '8,04',
+    );
+  });
+
   test('formatacao decimal mesmo sem venda fracionada no cadastro', () {
     final produto = Produto(
       id: 2,

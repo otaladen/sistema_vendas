@@ -11,7 +11,6 @@ import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
-import '../domain/quantidade_venda_util.dart';
 import '../domain/venda_relacao_safe.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
@@ -64,21 +63,9 @@ abstract final class OrcamentoPdfService {
     required ItemVenda item,
     Produto? produto,
   }) {
-    final qtdEfetiva = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
+    return ProdutoEmbalagem.formatarQuantidadeItemImpressaoComUnidade(
       produto: produto,
       quantidadeArmazenada: item.quantidade,
-    );
-    if (produto != null) {
-      final qTxt = ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(
-        produto,
-        qtdEfetiva,
-      );
-      final u = ProdutoEmbalagem.normalizarUnidade(produto.unidade);
-      return u.isEmpty ? qTxt : '$qTxt $u';
-    }
-    return QuantidadeVendaUtil.formatarExibicao(
-      qtdEfetiva,
-      fracionada: false,
     );
   }
 
