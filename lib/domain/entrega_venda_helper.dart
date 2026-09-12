@@ -555,7 +555,7 @@ class EntregaVendaHelper {
   static String mensagemBloqueioFinalizacaoCarretoCotacao(Venda venda) {
     if (statusEntregaEhCotacao(venda.statusEntrega)) {
       return 'Este orcamento foi salvo como cotacao (frete estimado sem endereco). '
-          'Abra no PDV, desmarque "So cotacao" e informe o endereco de entrega '
+          'Abra no PDV, selecione o cliente e informe o endereco de entrega '
           'antes de finalizar no caixa.';
     }
     return 'Orcamento com carreto exige endereco de entrega. '

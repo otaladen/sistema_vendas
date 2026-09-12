@@ -237,6 +237,16 @@ abstract final class EscPosOrcamentoBuilder {
       _padCols('VALOR TOTAL:', 'R\$ ${_moeda.format(total)}', cols),
     ));
     out.add(EscPosCommands.boldOff);
+    for (final l in _wrap(
+      OrcamentoCondicoesPagamento.resumoFinanceiroDaVenda(
+        venda,
+        total: total,
+        formatarMoeda: (v) => 'R\$ ${_moeda.format(v)}',
+      ),
+      cols,
+    )) {
+      out.add(EscPosCommands.line(l));
+    }
 
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.boldOn);

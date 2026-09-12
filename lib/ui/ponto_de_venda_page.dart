@@ -196,6 +196,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   static const int _validadeOrcamentoDias = 7;
   static const int _selecaoSemClienteValor = -1;
   static const int _selecaoNovoClienteValor = -2;
+  static const int _selecaoSomenteCotacaoValor = -3;
   static const double _larguraPreviewCarrinhoPdv = 280;
   static const double _breakpointPreviewCarrinhoPdv = 720;
 
@@ -343,8 +344,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Retirada futura sempre exige cliente (reserva / identificacao).
   bool get _pdvExigeClientePorRetiradaFutura => _carrinhoTemItemRetiradaFutura;
 
-  /// Carreto sempre exige cliente (endereco / entrega).
-  bool get _pdvExigeClientePorCarreto => _carrinhoTemItemCarreto;
+  /// Carreto exige cliente, exceto cotacao sem cadastro (Consumidor Final).
+  bool get _pdvExigeClientePorCarreto =>
+      _carrinhoTemItemCarreto && !_entregaSomenteCotacao;
 
   bool get _pdvExigeClientePorEntrega =>
       _pdvExigeClientePorCarreto || _pdvExigeClientePorRetiradaFutura;
@@ -380,8 +382,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   bool get _carretoExigeEnderecoCompleto =>
       _carrinhoTemItemCarreto && !_entregaSomenteCotacao;
 
+  void _ativarEntregaSomenteCotacao() {
+    _entregaSomenteCotacao = true;
+    _entregaSemDataCombinada = true;
+    _dataEntregaMarcada = null;
+    _enderecoEntregaController.clear();
+    _observacaoEntregaController.clear();
+  }
+
   void _aplicarEnderecoCarretoDoClienteSeVazio() {
-    if (!_carrinhoTemItemCarreto) return;
+    if (!_carrinhoTemItemCarreto || _entregaSomenteCotacao) return;
     if (_enderecoEntregaController.text.trim().isNotEmpty) return;
     final cliente = _clienteSelecionado();
     if (cliente == null) return;
@@ -3503,15 +3513,22 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       setState(() {
         _clienteSelecionadoId = null;
         _indiceEnderecoSelecionado = 0;
-        _atualizarEntregaCarrinhoComTipo(EntregaVendaHelper.tipoRetirada);
-        _prioridadeEntregaSelecionada = 'normal';
-        _janelaEntregaSelecionada = 'nao_definida';
-        _dataEntregaMarcada = null;
-        _entregaSemDataCombinada = false;
-        _entregaSomenteCotacao = false;
-        _valorFreteController.clear();
-        _enderecoEntregaController.clear();
-        _observacaoEntregaController.clear();
+        if (_entregaSomenteCotacao) {
+          _dataEntregaMarcada = null;
+          _entregaSemDataCombinada = true;
+          _enderecoEntregaController.clear();
+          _observacaoEntregaController.clear();
+        } else {
+          _atualizarEntregaCarrinhoComTipo(EntregaVendaHelper.tipoRetirada);
+          _prioridadeEntregaSelecionada = 'normal';
+          _janelaEntregaSelecionada = 'nao_definida';
+          _dataEntregaMarcada = null;
+          _entregaSemDataCombinada = false;
+          _entregaSomenteCotacao = false;
+          _valorFreteController.clear();
+          _enderecoEntregaController.clear();
+          _observacaoEntregaController.clear();
+        }
         _precoListaAtivo = _precoListaPadraoPdv;
         _atualizarPrecosCarrinhoPreservandoTabelas();
       });
@@ -3527,6 +3544,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (cliente == null) return;
     setState(() {
       _clienteSelecionadoId = value;
+      _entregaSomenteCotacao = false;
       if (cliente!.vendedorResponsavelId > 0) {
         _vendedorSelecionadoId = cliente.vendedorResponsavelId;
       }
@@ -3795,19 +3813,23 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
     if (!mounted) return false;
     final motivo = _motivoClienteObrigatorioPdv;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${motivo[0].toUpperCase()}${motivo.substring(1)}: '
-          'selecione ou cadastre o cliente para continuar.',
+    final podeCotacaoSemCliente =
+        _carrinhoTemItemCarreto && !_pdvExigeClientePorRetiradaFutura;
+    if (!podeCotacaoSemCliente) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${motivo[0].toUpperCase()}${motivo.substring(1)}: '
+            'selecione ou cadastre o cliente para continuar.',
+          ),
         ),
-      ),
-    );
+      );
+    }
     await _abrirSeletorClienteNoPdv(
       permitirSemCliente: false,
       motivoObrigatorio: motivo,
     );
-    return !_pdvClienteAusente;
+    return !_pdvExigeClientePorEntrega || !_pdvClienteAusente;
   }
 
   Future<void> _abrirSeletorClienteNoPdv({
@@ -3821,6 +3843,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             motivoObrigatorio.trim().isEmpty
         ? 'Cliente obrigatorio'
         : 'Cliente obrigatorio ($motivoObrigatorio)';
+    final podeCotacaoSemCliente = !permitirSemCliente &&
+        _carrinhoTemItemCarreto &&
+        !_pdvExigeClientePorRetiradaFutura;
     final resultado = await showDialog<int>(
       context: context,
       builder: (dialogContext) {
@@ -3828,6 +3853,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           limit: 60,
           somenteAtivos: true,
         );
+        var somenteCotacao = _entregaSomenteCotacao;
         return StatefulBuilder(
           builder: (context, setDialogStateInner) {
             return AlertDialog(
@@ -3841,6 +3867,25 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (podeCotacaoSemCliente) ...[
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: somenteCotacao,
+                        onChanged: (v) {
+                          setDialogStateInner(() {
+                            somenteCotacao = v;
+                          });
+                        },
+                        title: const Text(
+                          'Só cotação (sem cadastro de cliente)',
+                        ),
+                        subtitle: const Text(
+                          'Cliente apenas cotando preços. '
+                          'Endereço e dados ficam para depois.',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     TextField(
                       controller: pesquisaController,
                       autofocus: true,
@@ -3947,6 +3992,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                   onPressed: () => Navigator.pop(dialogContext),
                   child: const Text('Cancelar'),
                 ),
+                if (podeCotacaoSemCliente)
+                  FilledButton(
+                    onPressed: somenteCotacao
+                        ? () => Navigator.pop(
+                              dialogContext,
+                              _selecaoSomenteCotacaoValor,
+                            )
+                        : null,
+                    child: const Text('Avançar'),
+                  ),
               ],
             );
           },
@@ -3957,6 +4012,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     pesquisaController.dispose();
 
     if (!mounted || resultado == null) {
+      return;
+    }
+    if (resultado == _selecaoSomenteCotacaoValor) {
+      setState(_ativarEntregaSomenteCotacao);
+      _sincronizarTextoBuscaClientePdv();
+      setDialogState?.call(() {});
       return;
     }
     if (resultado == _selecaoNovoClienteValor) {
@@ -5226,7 +5287,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
     if (_carretoExigeEnderecoCompleto &&
         _enderecoEntregaController.text.trim().isEmpty) {
-      return 'Informe o endereco para carreto ou marque "So cotacao".';
+      return 'Informe o endereco para carreto.';
     }
     if (_carretoExigeEnderecoCompleto &&
         _dataEntregaMarcada == null &&
@@ -5745,65 +5806,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           ),
         ],
         if (_carrinhoTemItemCarreto) ...[
-          const SizedBox(height: 10),
-          InkWell(
-            onTap: () {
-              _atualizarCheckoutFechamento(setDialogState, () {
-                _entregaSomenteCotacao = !_entregaSomenteCotacao;
-                if (_entregaSomenteCotacao) {
-                  _entregaSemDataCombinada = true;
-                  _dataEntregaMarcada = null;
-                }
-              });
-            },
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: 28,
-                  width: 28,
-                  child: Checkbox(
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    value: _entregaSomenteCotacao,
-                    onChanged: (v) {
-                      _atualizarCheckoutFechamento(setDialogState, () {
-                        _entregaSomenteCotacao = v == true;
-                        if (_entregaSomenteCotacao) {
-                          _entregaSemDataCombinada = true;
-                          _dataEntregaMarcada = null;
-                        }
-                      });
-                    },
+          if (_entregaSomenteCotacao) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Só cotação — Consumidor Final. Informe o frete estimado; '
+              'endereço e agenda ficam para depois.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'So cotacao (sem endereco de entrega)',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      Text(
-                        'Use quando o cliente so quer precos com frete estimado. '
-                        'Endereco e agenda ficam para depois.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
             ),
-          ),
-          const SizedBox(height: 8),
+          ],
           if (!_entregaSomenteCotacao &&
               _clienteSelecionado() != null &&
               _enderecosClienteSelecionado().isNotEmpty) ...[
@@ -6667,23 +6679,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       return;
     }
     if (!await _garantirVendedorPdvObrigatorio()) return;
-    if (_pdvExigeClientePorEntrega && _pdvClienteAusente) {
-      if (!mounted) return;
-      final motivo = _motivoClienteObrigatorioPdv;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${motivo[0].toUpperCase()}${motivo.substring(1)}: '
-            'selecione ou cadastre o cliente no topo da tela.',
-          ),
-        ),
-      );
-      await _abrirSeletorClienteNoPdv(
-        permitirSemCliente: false,
-        motivoObrigatorio: motivo,
-      );
-      if (_pdvClienteAusente) return;
-    }
+    if (!await _garantirClientePdvParaEntrega()) return;
     if (_descontoPdVUltrapassaTetoSemAutorizacao()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -6706,7 +6702,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Informe o endereco para carreto ou marque "So cotacao".',
+              'Informe o endereco para carreto.',
             ),
           ),
         );
@@ -6850,15 +6846,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       final entrega = DadosEntregaOrcamento(
         tipoEntrega: _resolverTipoEntregaVendaCarrinho(),
         valorFrete: valorFrete,
-        enderecoEntrega: _enderecoEntregaController.text.trim(),
-        observacaoEntrega: _observacaoEntregaController.text.trim(),
-        prioridadeEntrega: _carrinhoTemItemCarreto
+        enderecoEntrega: _entregaSomenteCotacao
+            ? ''
+            : _enderecoEntregaController.text.trim(),
+        observacaoEntrega: _entregaSomenteCotacao
+            ? ''
+            : _observacaoEntregaController.text.trim(),
+        prioridadeEntrega:
+            _carrinhoTemItemCarreto && !_entregaSomenteCotacao
             ? _prioridadeEntregaSelecionada
             : 'normal',
-        janelaEntrega: _carrinhoTemItemCarreto
+        janelaEntrega: _carrinhoTemItemCarreto && !_entregaSomenteCotacao
             ? _janelaEntregaSelecionada
             : 'nao_definida',
-        dataEntregaMarcada: _carrinhoTemItemCarreto
+        dataEntregaMarcada:
+            _carrinhoTemItemCarreto && !_entregaSomenteCotacao
             ? _dataEntregaMarcada
             : null,
         entregaSomenteCotacao: _entregaSomenteCotacao,
@@ -6974,6 +6976,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       );
       // Libera o overlay ANTES de imprimir/PDF — senao o "Processando
       // orcamento..." volta a cobrir a tela apos fechar o dialogo de acoes.
+      if (vendaSalva != null) {
+        _sincronizarPagamentoVendaParaImpressao(vendaSalva, pagamento);
+      }
       vendaSalvaPos = vendaSalva;
       numeroOrcamentoSalvoPos = numeroOrcamentoSalvo;
       salvouOk = true;
@@ -7639,6 +7644,31 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       produtosPorItem[i] = produto;
     }
     return (itens: itensOrcamento, produtos: produtosPorItem);
+  }
+
+  void _sincronizarPagamentoVendaParaImpressao(
+    Venda venda,
+    DadosPagamentoOrcamento pagamento,
+  ) {
+    final linhas = pagamento.linhasMisto;
+    if (linhas != null && linhas.length >= 2) {
+      venda.formaPagamento = PagamentoMeio.misto;
+      venda.pagamentosJson = PagamentoOrcamentoCodec.encode(linhas);
+      var maxPar = 1;
+      for (final l in linhas) {
+        if (l.meio == PagamentoMeio.cartaoCredito && l.parcelas > maxPar) {
+          maxPar = l.parcelas;
+        }
+      }
+      venda.quantidadeParcelas = maxPar;
+      return;
+    }
+    venda.formaPagamento = pagamento.formaPagamento;
+    venda.quantidadeParcelas = pagamento.formaPagamento ==
+            PagamentoMeio.cartaoCredito
+        ? (pagamento.quantidadeParcelas < 1 ? 1 : pagamento.quantidadeParcelas)
+        : 1;
+    venda.pagamentosJson = '';
   }
 
   Future<CupomPdfGerado> _gerarOrcamentoPdfBytes(Venda venda) async {

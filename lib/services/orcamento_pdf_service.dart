@@ -8,7 +8,6 @@ import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
-import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
@@ -37,52 +36,15 @@ abstract final class OrcamentoPdfService {
   static String formatarMoeda(double v) => 'R\$ ${_moeda.format(v)}';
 
   static String rotuloFormaPagamento(String forma) {
-    switch (forma) {
-      case 'dinheiro':
-        return 'Dinheiro';
-      case 'pix':
-        return 'PIX';
-      case 'cartao_debito':
-        return 'Cartao debito';
-      case 'cartao_credito':
-        return 'Cartao credito';
-      case 'transferencia':
-        return 'Transferencia';
-      case 'fiado':
-        return 'Fiado';
-      case 'misto':
-        return 'Misto';
-      default:
-        if (forma.startsWith('cartao')) return forma;
-        return forma.isEmpty ? '-' : forma;
-    }
+    return OrcamentoCondicoesPagamento.rotuloMeio(forma);
   }
 
-  static String textoPagamento(Venda v) {
-    if (v.formaPagamento != 'misto' || v.pagamentosJson.trim().isEmpty) {
-      final base = rotuloFormaPagamento(v.formaPagamento);
-      if (v.formaPagamento == 'cartao_credito' && v.quantidadeParcelas > 1) {
-        return '$base ${v.quantidadeParcelas}x';
-      }
-      if (v.formaPagamento == 'cartao_credito') {
-        return '$base a vista';
-      }
-      if (v.formaPagamento == 'pix' || v.formaPagamento == 'dinheiro') {
-        return '$base a vista';
-      }
-      return base;
-    }
-    final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
-    return linhas
-        .map((l) {
-          final base = '${rotuloFormaPagamento(l.meio)} ${formatarMoeda(l.valor)}';
-          if (l.meio == 'cartao_credito' && l.parcelas > 0) {
-            final vp = l.valor / l.parcelas;
-            return '$base ${l.parcelas}x de ${formatarMoeda(vp)}';
-          }
-          return base;
-        })
-        .join('; ');
+  static String textoPagamento(Venda v, {double? total}) {
+    return OrcamentoCondicoesPagamento.linhasDaVenda(
+      v,
+      total: total ?? v.total,
+      formatarMoeda: formatarMoeda,
+    ).join('; ');
   }
 
   static String rotuloVendedor(Venda venda, {dynamic vendedorRepository}) {
@@ -238,7 +200,7 @@ abstract final class OrcamentoPdfService {
           (telLoja.isNotEmpty || whatsappLoja.isNotEmpty ? 1 : 0) +
           (cnpjEmpresa.trim().isNotEmpty ? 1 : 0),
       // Folga: aviso fiscal + forma de pagamento escolhida (+ rodape config).
-      linhasExtras: 6 +
+      linhasExtras: 8 +
           OrcamentoCondicoesPagamento.quantidadeLinhasLayout(
             formaPagamento: venda.formaPagamento,
             quantidadeParcelas: venda.quantidadeParcelas,
@@ -381,6 +343,17 @@ abstract final class OrcamentoPdfService {
                 rotulo: 'VALOR TOTAL:',
                 valor: formatar(total),
                 destaque: true,
+              ),
+              CupomPdfLayout.textoCorpo(
+                CupomPdfLayout.textoTermicoAscii(
+                  OrcamentoCondicoesPagamento.resumoFinanceiroDaVenda(
+                    venda,
+                    total: total,
+                    formatarMoeda: formatar,
+                  ),
+                ),
+                layout,
+                fontWeight: pw.FontWeight.bold,
               ),
               CupomPdfLayout.divisoriaSecao(layout: layout),
               CupomPdfLayout.tituloSecao(

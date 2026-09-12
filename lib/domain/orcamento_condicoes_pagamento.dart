@@ -1,13 +1,13 @@
 import '../model/venda.dart';
 import 'pagamento_orcamento.dart';
 
-/// Texto da forma de pagamento escolhida no orcamento impresso.
+/// Texto da forma/condicao de pagamento escolhida no orcamento impresso.
 ///
 /// Nao gera tabela generica de parcelas: so a condicao salva na venda.
 abstract final class OrcamentoCondicoesPagamento {
   OrcamentoCondicoesPagamento._();
 
-  static const String tituloSecao = 'FORMA DE PAGAMENTO';
+  static const String tituloSecao = 'CONDICOES DE PAGAMENTO / FORMA SUGERIDA';
 
   static bool meioAVista(String meio) {
     switch (meio) {
@@ -18,6 +18,29 @@ abstract final class OrcamentoCondicoesPagamento {
         return true;
       default:
         return false;
+    }
+  }
+
+  static String rotuloMeio(String meio) {
+    switch (meio) {
+      case PagamentoMeio.dinheiro:
+        return 'Dinheiro';
+      case PagamentoMeio.pix:
+        return 'PIX';
+      case PagamentoMeio.cartaoDebito:
+        return 'Cartao de debito';
+      case PagamentoMeio.cartaoCredito:
+        return 'Cartao de credito';
+      case PagamentoMeio.transferencia:
+        return 'Transferencia';
+      case PagamentoMeio.fiado:
+        return 'Fiado';
+      case PagamentoMeio.vale:
+        return 'Vale';
+      case PagamentoMeio.misto:
+        return 'Misto';
+      default:
+        return meio.isEmpty ? 'A vista' : meio;
     }
   }
 
@@ -47,6 +70,20 @@ abstract final class OrcamentoCondicoesPagamento {
       quantidadeParcelas: venda.quantidadeParcelas,
       pagamentosJson: venda.pagamentosJson,
     );
+  }
+
+  /// Linha curta para o resumo financeiro (PDF e ESC/POS).
+  static String resumoFinanceiroDaVenda(
+    Venda venda, {
+    required double total,
+    required String Function(double) formatarMoeda,
+  }) {
+    final detalhe = linhasDaVenda(
+      venda,
+      total: total,
+      formatarMoeda: formatarMoeda,
+    ).join(' | ');
+    return 'Pagamento: $detalhe';
   }
 
   /// Linhas da condicao escolhida (sem titulo de secao).
@@ -89,32 +126,18 @@ abstract final class OrcamentoCondicoesPagamento {
     required int parcelas,
     required String Function(double) formatarMoeda,
   }) {
-    if (meioAVista(meio)) {
-      return 'Forma de Pagamento: A vista (Dinheiro/PIX/Debito) - '
-          'Total: ${formatarMoeda(valor)}';
-    }
+    final rotulo = rotuloMeio(meio);
     if (meio == PagamentoMeio.cartaoCredito) {
       final n = parcelas < 1 ? 1 : parcelas;
-      return 'Forma de Pagamento: Cartao de credito - '
-          '${n}x de ${formatarMoeda(valor / n)}';
+      if (n > 1) {
+        return '$rotulo ${n}x de ${formatarMoeda(valor / n)}';
+      }
+      return '$rotulo a vista - Total: ${formatarMoeda(valor)}';
     }
-    return 'Forma de Pagamento: ${_rotulo(meio)} - '
-        'Total: ${formatarMoeda(valor)}';
-  }
-
-  static String _rotulo(String meio) {
-    switch (meio) {
-      case PagamentoMeio.transferencia:
-        return 'Transferencia';
-      case PagamentoMeio.fiado:
-        return 'Fiado';
-      case PagamentoMeio.vale:
-        return 'Vale';
-      case PagamentoMeio.misto:
-        return 'Misto';
-      default:
-        return meio.isEmpty ? 'A vista' : meio;
+    if (meioAVista(meio)) {
+      return '$rotulo a vista - Total: ${formatarMoeda(valor)}';
     }
+    return '$rotulo - Total: ${formatarMoeda(valor)}';
   }
 
   static double _valorSeguro(double total) {

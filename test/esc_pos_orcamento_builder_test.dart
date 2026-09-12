@@ -56,9 +56,11 @@ void main() {
     expect(texto, contains('Cimento'));
     expect(texto, contains('VALOR TOTAL'));
     expect(texto, contains('COTACAO'));
-    expect(texto, contains('FORMA DE PAGAMENTO'));
-    expect(texto, contains('A vista'));
-    expect(texto, contains('Dinheiro/PIX/Debito'));
+    expect(texto, contains('CONDICOES DE PAGAMENTO'));
+    expect(texto, contains('FORMA SUGERIDA'));
+    expect(texto, contains('Pagamento:'));
+    expect(texto, contains('Dinheiro'));
+    expect(texto, isNot(contains('Dinheiro/PIX/Debito')));
     expect(texto, isNot(contains('2x de')));
     expect(texto, isNot(contains('12x')));
     expect(texto, isNot(contains('Condicoes de parcelamento')));
@@ -174,10 +176,14 @@ void main() {
       ),
     );
     final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    expect(texto, contains('CONDICOES DE PAGAMENTO'));
+    expect(texto, contains('FORMA SUGERIDA'));
+    expect(texto, contains('Pagamento:'));
     expect(texto, contains('Cartao de credito'));
     expect(texto, contains('3x de'));
     expect(texto, isNot(contains('2x de')));
     expect(texto, isNot(contains('12x')));
     expect(texto, isNot(contains('A vista')));
+    expect(texto, isNot(contains('Dinheiro/PIX/Debito')));
   });
 }
