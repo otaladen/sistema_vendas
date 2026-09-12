@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/api/lan_api_client.dart';
+import 'package:sistema_vendas/domain/entrega_filtro_util.dart';
 import 'package:sistema_vendas/domain/filtro_listagem_entregas.dart';
 import 'package:sistema_vendas/model/motorista.dart';
 import 'package:sistema_vendas/model/venda.dart';
@@ -15,10 +16,11 @@ class _FakeVendaRepo {
     required FiltroListagemEntregas filtroLista,
     required FiltroListagemEntregas filtroContagem,
   }) {
+    final lista = EntregaFiltroUtil.aplicarEmMemoria(entregas, filtroLista);
     return ResultadoListagemEntregas(
-      entregas: entregas,
+      entregas: lista,
       atrasadas: 0,
-      pendentesHoje: entregas.length,
+      pendentesHoje: lista.where(EntregaFiltroUtil.ehAgendaHoje).length,
     );
   }
 
@@ -41,7 +43,12 @@ class _FakeVendedorRepo {
   dynamic obterPorId(int id) => null;
 }
 
-Venda _venda({required int n, String tipo = 'entrega_loja', String mot = ''}) {
+Venda _venda({
+  required int n,
+  String tipo = 'entrega_loja',
+  String mot = '',
+  String statusEntrega = 'pendente',
+}) {
   return LanApiClient.vendaCompletaDeMap({
     'id': n,
     'data': DateTime.now().toUtc().toIso8601String(),
@@ -51,8 +58,8 @@ Venda _venda({required int n, String tipo = 'entrega_loja', String mot = ''}) {
     'clienteId': 3,
     'vendedorId': 2,
     'tipoEntrega': tipo,
-    'statusEntrega': 'pendente',
-    'entregaPendente': true,
+    'statusEntrega': statusEntrega,
+    'entregaPendente': statusEntrega != 'entregue',
     'numeroOrcamento': n,
     'enderecoEntrega': 'Rua A, Centro',
     'motoristaEntrega': mot,
@@ -118,5 +125,31 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(tester.takeException(), isNull);
     expect(find.textContaining('#99'), findsWidgets);
+  });
+
+  testWidgets('EntregasPage nao lista entrega ja concluida na agenda do dia',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: EntregasPage(
+          vendaRepository: _FakeVendaRepo([
+            _venda(n: 100, mot: 'Joao'),
+            _venda(n: 212, mot: 'Joao', statusEntrega: 'entregue'),
+          ]),
+          produtoRepository: Object(),
+          motoristaRepository: _FakeMotoristaRepo(),
+          vendedorRepository: _FakeVendedorRepo(),
+          usuarioAtual: 'admin',
+          podeGerenciarStatusEntrega: true,
+          podeRegistrarPodEntrega: true,
+          podeRegistrarDevolucaoTrocaSemSenha: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('#100'), findsWidgets);
+    expect(find.textContaining('#212'), findsNothing);
   });
 }

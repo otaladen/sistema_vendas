@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/entrega_filtro_util.dart';
 import '../../model/venda.dart';
 
 /// Utilitarios compartilhados do planejamento por dia (aba Entregas).
@@ -33,9 +34,17 @@ class PlanejamentoEntregaDia {
   }
 
   /// Mapa `dd/MM/yyyy` -> quantidade; inclui [semData] quando houver.
-  static Map<String, int> resumoDeEntregas(List<Venda> entregas) {
+  /// Por padrao conta so carretos pendentes (ignora entregue/cancelada).
+  static Map<String, int> resumoDeEntregas(
+    List<Venda> entregas, {
+    bool incluirConcluidas = false,
+  }) {
     final map = <String, int>{};
     for (final venda in entregas) {
+      if (!incluirConcluidas &&
+          EntregaFiltroUtil.ehConcluidaNaAgenda(venda.statusEntrega)) {
+        continue;
+      }
       final marcada = venda.dataEntregaMarcada;
       final chave =
           marcada == null ? semData : chaveDeDateTime(marcada);

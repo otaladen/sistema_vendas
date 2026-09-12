@@ -16,6 +16,7 @@ class FiltroListagemEntregas {
     this.numeroNota = '',
     this.apenasAtrasadas = false,
     this.apenasPendentesHoje = false,
+    this.incluirEntregasConcluidas = true,
   });
 
   final String statusEntrega;
@@ -33,6 +34,10 @@ class FiltroListagemEntregas {
   final bool apenasAtrasadas;
   final bool apenasPendentesHoje;
 
+  /// Quando falso e [statusEntrega] e `todos`, oculta `entregue` / `cancelada`.
+  /// Padrao verdadeiro para listagens gerais (relatorios, hidratacao).
+  final bool incluirEntregasConcluidas;
+
   /// Copia sem recorte de resumo (para contadores da barra e mapa de dias).
   FiltroListagemEntregas paraContagemResumo() {
     return FiltroListagemEntregas(
@@ -44,6 +49,7 @@ class FiltroListagemEntregas {
       filtroMotorista: filtroMotorista,
       filtroVendedor: filtroVendedor,
       numeroNota: numeroNota,
+      incluirEntregasConcluidas: false,
     );
   }
 }

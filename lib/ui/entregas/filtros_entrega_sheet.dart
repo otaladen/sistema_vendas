@@ -13,6 +13,7 @@ int contarFiltrosEntregaAtivos({
   required String numeroNota,
   required DateTime? inicio,
   required DateTime? fim,
+  bool exibirEntregasConcluidas = false,
 }) {
   var n = 0;
   if (status != 'todos') n++;
@@ -23,6 +24,7 @@ int contarFiltrosEntregaAtivos({
   if (bairro.trim().isNotEmpty) n++;
   if (numeroNota.trim().isNotEmpty) n++;
   if (inicio != null || fim != null) n++;
+  if (exibirEntregasConcluidas) n++;
   return n;
 }
 
@@ -38,6 +40,7 @@ List<String> resumosFiltrosEntregaAtivos({
   required String bairro,
   required String numeroNota,
   required String rotuloPeriodo,
+  bool exibirEntregasConcluidas = false,
 }) {
   final chips = <String>[];
   if (status != 'todos') chips.add('Status: ${rotuloStatus(status)}');
@@ -66,6 +69,9 @@ List<String> resumosFiltrosEntregaAtivos({
   if (rotuloPeriodo != 'Periodo: todos' &&
       rotuloPeriodo != 'Marcadas para hoje') {
     chips.add(rotuloPeriodo);
+  }
+  if (exibirEntregasConcluidas) {
+    chips.add('Exibir entregas concluidas');
   }
   return chips;
 }
@@ -110,6 +116,8 @@ Future<void> showFiltrosEntregaSheet({
   required VoidCallback onPeriodoPersonalizado,
   required String rotuloPeriodo,
   required List<String> resumosAtivos,
+  bool exibirEntregasConcluidas = false,
+  ValueChanged<bool>? onExibirEntregasConcluidas,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -291,6 +299,19 @@ Future<void> showFiltrosEntregaSheet({
                       onDataMarcada(v);
                     },
                   ),
+                  if (onExibirEntregasConcluidas != null) ...[
+                    const SizedBox(height: 4),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Exibir entregas concluidas'),
+                      subtitle: const Text(
+                        'Por padrao a agenda do dia mostra so pendentes, '
+                        'agendadas ou em rota.',
+                      ),
+                      value: exibirEntregasConcluidas,
+                      onChanged: onExibirEntregasConcluidas,
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   TextField(
                     controller: numeroNotaController,

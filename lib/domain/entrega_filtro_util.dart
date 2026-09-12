@@ -9,6 +9,39 @@ abstract final class EntregaFiltroUtil {
   /// [roteirizada] e status interno — na tela entra no mesmo balde que pendente.
   static const statusesNoPatio = {'pendente', 'roteirizada'};
 
+  /// Status que nao ocupam mais a agenda do dia (carreto ja realizado ou cancelado).
+  static const statusesConcluidosAgenda = {'entregue', 'cancelada'};
+
+  static bool ehConcluidaNaAgenda(String statusEntrega) {
+    return statusesConcluidosAgenda.contains(statusEntrega.trim().toLowerCase());
+  }
+
+  /// Pendente, agendada, em rota ou complemento pendente.
+  static bool ehAtivaNaAgenda(Venda venda) =>
+      !ehConcluidaNaAgenda(venda.statusEntrega);
+
+  static DateTime soDia(DateTime d) {
+    final l = d.toLocal();
+    return DateTime(l.year, l.month, l.day);
+  }
+
+  /// Consulta de agenda do dia: por padrao so carretos pendentes de realizacao.
+  static List<Venda> agendaDoDia(
+    Iterable<Venda> candidatas,
+    DateTime dia, {
+    bool incluirConcluidas = false,
+  }) {
+    final base = soDia(dia);
+    return candidatas.where((venda) {
+      if (!incluirConcluidas && ehConcluidaNaAgenda(venda.statusEntrega)) {
+        return false;
+      }
+      final marcada = venda.dataEntregaMarcada?.toLocal();
+      if (marcada == null) return false;
+      return soDia(marcada) == base;
+    }).toList();
+  }
+
   /// Status gravados que o chip/filtro da tela deve incluir. Null = todos.
   static Set<String>? statusesDoFiltro(String statusEntrega) {
     final s = statusEntrega.trim();
@@ -98,6 +131,11 @@ abstract final class EntregaFiltroUtil {
 
     var out = candidatas.where((venda) {
       if (!atendeStatusFiltro(venda.statusEntrega, filtro.statusEntrega)) {
+        return false;
+      }
+      if (!filtro.incluirEntregasConcluidas &&
+          statusesDoFiltro(filtro.statusEntrega) == null &&
+          ehConcluidaNaAgenda(venda.statusEntrega)) {
         return false;
       }
       final iniMarcada = filtro.dataMarcadaInicio;

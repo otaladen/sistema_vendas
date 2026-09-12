@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/item_venda.dart';
 import '../../model/venda.dart';
+import '../entrega_filtro_util.dart';
 import '../entrega_venda_helper.dart';
 import '../venda_documento_rotulo_helper.dart';
 import '../venda_relacao_safe.dart';
@@ -349,7 +350,7 @@ abstract final class AgendaCarretoOcupacaoHelper {
     if (venda.dataEntregaMarcada == null) return false;
     final st = venda.status.trim().toLowerCase();
     if (st != 'finalizada' && st != 'orcamento') return false;
-    if (venda.statusEntrega.trim().toLowerCase() == 'cancelada') return false;
+    if (EntregaFiltroUtil.ehConcluidaNaAgenda(venda.statusEntrega)) return false;
     return EntregaVendaHelper.vendaTemItensCarreto(venda) ||
         venda.tipoEntrega == EntregaVendaHelper.tipoEntregaLoja ||
         venda.tipoEntrega == EntregaVendaHelper.tipoMisto;

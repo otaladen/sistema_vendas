@@ -20,6 +20,7 @@ import '../data/sync/entrega_local_refresh_hub.dart';
 import '../data/sync/entregas_foco_hub.dart';
 import '../data/lote_produto_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/entrega_filtro_util.dart';
 import '../services/lote_fefo_service.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/complemento_entrega_codec.dart';
@@ -215,6 +216,7 @@ class _EntregasPageState extends State<EntregasPage>
   int _filtrosDropdownNonce = 0;
   _FiltroResumoEntregas _filtroResumoLista = _FiltroResumoEntregas.nenhum;
   bool _filtroApenasSemMotorista = false;
+  bool _exibirEntregasConcluidas = false;
   _ModoVisualizacaoDia _modoVisualizacaoDia = _ModoVisualizacaoDia.lista;
   late DateTime _inicioSemanaExibida;
 
@@ -284,6 +286,19 @@ class _EntregasPageState extends State<EntregasPage>
     }
   }
 
+  bool get _incluirConcluidasNaConsulta {
+    if (_exibirEntregasConcluidas) return true;
+    if (_statusSelecionado == 'entregue' || _statusSelecionado == 'cancelada') {
+      return true;
+    }
+    return _numeroNotaController.text.trim().isNotEmpty;
+  }
+
+  void _definirExibirEntregasConcluidas(bool ligar) {
+    setState(() => _exibirEntregasConcluidas = ligar);
+    _carregarEntregas();
+  }
+
   int _contagemFiltrosAtivos() {
     return contarFiltrosEntregaAtivos(
       status: _statusSelecionado,
@@ -295,6 +310,7 @@ class _EntregasPageState extends State<EntregasPage>
       numeroNota: _numeroNotaController.text,
       inicio: _inicio,
       fim: _fim,
+      exibirEntregasConcluidas: _exibirEntregasConcluidas,
     );
   }
 
@@ -330,6 +346,7 @@ class _EntregasPageState extends State<EntregasPage>
       bairro: _bairroController.text,
       numeroNota: _numeroNotaController.text,
       rotuloPeriodo: _rotuloPeriodoSelecionado(),
+      exibirEntregasConcluidas: _exibirEntregasConcluidas,
     );
     if (!mounted) return;
     await showFiltrosEntregaSheet(
@@ -375,6 +392,8 @@ class _EntregasPageState extends State<EntregasPage>
       onPeriodoPersonalizado: _selecionarPeriodoPersonalizado,
       rotuloPeriodo: _rotuloPeriodoSelecionado(),
       resumosAtivos: resumos,
+      exibirEntregasConcluidas: _exibirEntregasConcluidas,
+      onExibirEntregasConcluidas: _definirExibirEntregasConcluidas,
     );
   }
 
@@ -1097,6 +1116,8 @@ class _EntregasPageState extends State<EntregasPage>
       apenasPendentesHoje:
           !paraContagemResumo &&
           _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
+      incluirEntregasConcluidas:
+          paraContagemResumo ? false : _incluirConcluidasNaConsulta,
     );
   }
 
@@ -1480,11 +1501,11 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   List<Venda> _entregasDoDia(DateTime base) {
-    return _entregas.where((v) {
-      final d = v.dataEntregaMarcada?.toLocal();
-      if (d == null) return false;
-      return DateTime(d.year, d.month, d.day) == base;
-    }).toList()..sort((a, b) {
+    return EntregaFiltroUtil.agendaDoDia(
+      _entregas,
+      base,
+      incluirConcluidas: _incluirConcluidasNaConsulta,
+    )..sort((a, b) {
       final pa = _pesoPrioridade(a.prioridadeEntrega);
       final pb = _pesoPrioridade(b.prioridadeEntrega);
       final byP = pb.compareTo(pa);
@@ -2530,6 +2551,7 @@ class _EntregasPageState extends State<EntregasPage>
       _agrupamento = 'motorista';
       _filtroDataMarcada = 'hoje';
       _filtroApenasSemMotorista = false;
+      _exibirEntregasConcluidas = false;
       _bairroController.clear();
       _numeroNotaController.clear();
       _modoAgruparMesmoCarro = false;
@@ -4196,6 +4218,9 @@ class _EntregasPageState extends State<EntregasPage>
 
   List<Venda> _listaEntregasExibicaoFinal() {
     var lista = _listaEntregasPlanejadasExibicao();
+    if (!_incluirConcluidasNaConsulta) {
+      lista = lista.where(EntregaFiltroUtil.ehAtivaNaAgenda).toList();
+    }
     if (_filtroApenasSemMotorista) {
       lista = lista
           .where((v) => !motoristaLogisticaDefinido(nomeMotoristaEntrega(v)))
@@ -5017,6 +5042,8 @@ class _EntregasPageState extends State<EntregasPage>
             onAbrirDetalhes: _abrirDetalhesItensVenda,
             onVisaoAvancada: () => unawaited(_definirVisaoSimples(false)),
             podeGerenciar: widget.podeGerenciarStatusEntrega,
+            exibirEntregasConcluidas: _exibirEntregasConcluidas,
+            onExibirEntregasConcluidas: _definirExibirEntregasConcluidas,
           ),
         ),
       );
@@ -5107,6 +5134,8 @@ class _EntregasPageState extends State<EntregasPage>
                   onFiltroSemMotorista: (ligar) {
                     setState(() => _filtroApenasSemMotorista = ligar);
                   },
+                  exibirEntregasConcluidas: _exibirEntregasConcluidas,
+                  onExibirEntregasConcluidas: _definirExibirEntregasConcluidas,
                   inicioSemanaExibida: _inicioSemanaExibida,
                   onSemanaAnterior: () => _deslocarSemanaExibida(-1),
                   onSemanaProxima: () => _deslocarSemanaExibida(1),

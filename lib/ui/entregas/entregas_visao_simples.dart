@@ -29,6 +29,8 @@ class EntregasVisaoSimples extends StatelessWidget {
     required this.onAbrirDetalhes,
     required this.onVisaoAvancada,
     this.podeGerenciar = true,
+    this.exibirEntregasConcluidas = false,
+    this.onExibirEntregasConcluidas,
   });
 
   final List<Venda> entregas;
@@ -48,6 +50,8 @@ class EntregasVisaoSimples extends StatelessWidget {
   final ValueChanged<Venda> onAbrirDetalhes;
   final VoidCallback onVisaoAvancada;
   final bool podeGerenciar;
+  final bool exibirEntregasConcluidas;
+  final ValueChanged<bool>? onExibirEntregasConcluidas;
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +92,8 @@ class EntregasVisaoSimples extends StatelessWidget {
           onAmanha: onAmanha,
           onEscolherDia: onEscolherDia,
           onVisaoAvancada: onVisaoAvancada,
+          exibirEntregasConcluidas: exibirEntregasConcluidas,
+          onExibirEntregasConcluidas: onExibirEntregasConcluidas,
         ),
         const SizedBox(height: 10),
         if (semMotorista.isNotEmpty) ...[
@@ -212,6 +218,8 @@ class _CabecalhoSimples extends StatelessWidget {
     required this.onAmanha,
     required this.onEscolherDia,
     required this.onVisaoAvancada,
+    this.exibirEntregasConcluidas = false,
+    this.onExibirEntregasConcluidas,
   });
 
   final int atrasadas;
@@ -223,6 +231,8 @@ class _CabecalhoSimples extends StatelessWidget {
   final VoidCallback onAmanha;
   final VoidCallback onEscolherDia;
   final VoidCallback onVisaoAvancada;
+  final bool exibirEntregasConcluidas;
+  final ValueChanged<bool>? onExibirEntregasConcluidas;
 
   @override
   Widget build(BuildContext context) {
@@ -274,6 +284,12 @@ class _CabecalhoSimples extends StatelessWidget {
                   label: Text(rotuloDiaSelecionado),
                   onPressed: onEscolherDia,
                 ),
+                if (onExibirEntregasConcluidas != null)
+                  FilterChip(
+                    label: const Text('Exibir concluidas'),
+                    selected: exibirEntregasConcluidas,
+                    onSelected: onExibirEntregasConcluidas,
+                  ),
                 if (atrasadas > 0)
                   Chip(
                     avatar: Icon(

@@ -29,6 +29,8 @@ class EntregasBarraCompacta extends StatelessWidget {
     required this.onStatusRapido,
     required this.filtroSemMotoristaAtivo,
     required this.onFiltroSemMotorista,
+    this.exibirEntregasConcluidas = false,
+    this.onExibirEntregasConcluidas,
     required this.inicioSemanaExibida,
     required this.onSemanaAnterior,
     required this.onSemanaProxima,
@@ -66,6 +68,8 @@ class EntregasBarraCompacta extends StatelessWidget {
   final ValueChanged<String> onStatusRapido;
   final bool filtroSemMotoristaAtivo;
   final ValueChanged<bool> onFiltroSemMotorista;
+  final bool exibirEntregasConcluidas;
+  final ValueChanged<bool>? onExibirEntregasConcluidas;
   final DateTime inicioSemanaExibida;
   final VoidCallback onSemanaAnterior;
   final VoidCallback onSemanaProxima;
@@ -132,6 +136,25 @@ class EntregasBarraCompacta extends StatelessWidget {
                         selected: filtroPendentesHojeAtivo,
                         onSelected: onFiltroPendentesHoje,
                       ),
+                      if (onExibirEntregasConcluidas != null)
+                        FilterChip(
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          avatar: Icon(
+                            Icons.check_circle_outline,
+                            size: 16,
+                            color: exibirEntregasConcluidas
+                                ? theme.colorScheme.primary
+                                : Colors.grey,
+                          ),
+                          label: Text(
+                            estreita ? 'Concl.' : 'Concluidas',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          selected: exibirEntregasConcluidas,
+                          onSelected: onExibirEntregasConcluidas,
+                        ),
                     ],
                   ),
                 ),
