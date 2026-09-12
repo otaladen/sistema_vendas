@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/troca_com_nota_pdv_intent.dart';
 import '../model/usuario_sistema.dart';
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/cliente_repository.dart';
 import '../data/produto_repository.dart';
 import '../data/venda_repository.dart';
@@ -18,7 +18,7 @@ Future<void> abrirPdvTrocaComNota(
   required ClienteRepository clienteRepository,
   required VendaRepository vendaRepository,
   required VendedorRepository vendedorRepository,
-  required AppConfigRepository appConfigRepository,
+  required ConfiguracoesService configuracoesService,
   required PrintService printService,
   required UsuarioSistema usuarioLogado,
 }) {
@@ -30,7 +30,7 @@ Future<void> abrirPdvTrocaComNota(
         clienteRepository: clienteRepository,
         vendaRepository: vendaRepository,
         vendedorRepository: vendedorRepository,
-        appConfigRepository: appConfigRepository,
+        configuracoesService: configuracoesService,
         printService: printService,
         usuarioLogado: usuarioLogado,
         intentTrocaComNota: intent,

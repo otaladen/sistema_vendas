@@ -33,6 +33,7 @@ import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_unidade_exibicao.dart';
 import '../domain/sessao_operacional_guard.dart';
 import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/api/cliente_api_repository.dart';
 import '../data/api/lan_api_client.dart';
 import '../data/api/lan_api_event_hub.dart';
@@ -149,7 +150,7 @@ class PontoDeVendaPage extends StatefulWidget {
     required this.clienteRepository,
     required this.vendaRepository,
     required this.vendedorRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     required this.usuarioLogado,
     this.intentTrocaComNota,
@@ -160,7 +161,7 @@ class PontoDeVendaPage extends StatefulWidget {
   final dynamic clienteRepository;
   final dynamic vendaRepository;
   final dynamic vendedorRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;
 
@@ -970,7 +971,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   Future<void> _carregarConfiguracaoVendaSemEstoque() async {
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) {
       return;
     }
@@ -1650,7 +1651,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (!mounted) return;
     if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
     final texto = _pesquisaController.text;
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
 
     final result = await Navigator.of(context, rootNavigator: true)
@@ -7642,7 +7643,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   Future<CupomPdfGerado> _gerarOrcamentoPdfBytes(Venda venda) async {
     final carregado = await _carregarItensOrcamentoParaImpressao(venda);
-    final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
+    final empresa = await widget.configuracoesService.carregarEfetiva();
     return OrcamentoPdfService.gerar(
       venda: venda,
       itens: carregado.itens,
@@ -7730,7 +7731,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (_pdvPularDialogOrcamentoSalvo) {
       return;
     }
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     final modoEscPos = config.modoImpressaoBalcao == 'escpos';
     _dialogoOrcamentoSalvoAberto = true;

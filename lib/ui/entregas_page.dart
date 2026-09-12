@@ -47,7 +47,7 @@ import 'entregas/conferencia_carga_consolidada_lista.dart';
 import 'entregas/romaneio_carga_consolidada.dart';
 import 'entregas/romaneio_pdf.dart';
 import 'entregas/romaneio_relatorios.dart';
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../domain/entregas/carreto_saida_produto_orfao.dart';
 import '../domain/entregas/loja_origem_mercadoria.dart';
 import '../domain/entregas/buscar_na_loja.dart';
@@ -131,7 +131,7 @@ class EntregasPage extends StatefulWidget {
     required this.podeGerenciarStatusEntrega,
     required this.podeRegistrarPodEntrega,
     required this.podeRegistrarDevolucaoTrocaSemSenha,
-    this.appConfigRepository,
+    this.configuracoesService,
     this.ocultarValoresMonetarios = false,
   });
 
@@ -139,7 +139,7 @@ class EntregasPage extends StatefulWidget {
   final dynamic produtoRepository;
   final dynamic motoristaRepository;
   final dynamic vendedorRepository;
-  final AppConfigRepository? appConfigRepository;
+  final ConfiguracoesService? configuracoesService;
   final String usuarioAtual;
   final bool podeGerenciarStatusEntrega;
   final bool podeRegistrarPodEntrega;
@@ -652,10 +652,10 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   Future<void> _prefetchPodFotos() async {
-    final repo = widget.appConfigRepository;
-    if (repo == null || _entregas.isEmpty) return;
+    final svc = widget.configuracoesService;
+    if (svc == null || _entregas.isEmpty) return;
     await EntregaPodPrefetchService(
-      configRepository: repo,
+      configRepository: svc.repository,
     ).prefetchLista(_entregas);
   }
 
@@ -680,7 +680,7 @@ class _EntregasPageState extends State<EntregasPage>
     if (pod == null) return false;
     try {
       final podFinal = EntregaPodFinalizacao(
-        configRepository: widget.appConfigRepository,
+        configRepository: widget.configuracoesService?.repository,
       );
       final motivo = anterior.isEmpty
           ? 'POD registrado — recebido por: ${pod.recebidoPor}'
@@ -2805,7 +2805,7 @@ class _EntregasPageState extends State<EntregasPage>
         );
         if (pod == null) return false;
         final podFinal = EntregaPodFinalizacao(
-          configRepository: widget.appConfigRepository,
+          configRepository: widget.configuracoesService?.repository,
         );
         await podFinal.registrarPod(
           vendaRepository: widget.vendaRepository,
@@ -3230,10 +3230,10 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   Future<bool> _permitirVendaSemEstoqueAtual() async {
-    final repo = widget.appConfigRepository;
-    if (repo == null) return true;
+    final svc = widget.configuracoesService;
+    if (svc == null) return true;
     try {
-      final cfg = await repo.carregarEmpresaConfig();
+      final cfg = await svc.carregarEfetiva();
       return cfg.permitirVendaSemEstoque;
     } catch (_) {
       return true;
@@ -3588,7 +3588,7 @@ class _EntregasPageState extends State<EntregasPage>
                           '${exibir.podFotoPathServidor}',
                         ),
                         venda: exibir,
-                        configRepository: widget.appConfigRepository,
+                        configuracoesService: widget.configuracoesService,
                         podeEditar: widget.podeRegistrarPodEntrega,
                         onEditar: () async {
                           final ok = await _editarPodEntrega(exibir);

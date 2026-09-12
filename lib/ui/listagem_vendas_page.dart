@@ -9,7 +9,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/api/lan_api_client.dart';
 import '../data/api/venda_api_repository.dart';
 import '../data/sync/lan_sync_scheduler.dart';
@@ -60,7 +60,7 @@ class ListagemVendasPage extends StatefulWidget {
     required this.clienteRepository,
     required this.vendedorRepository,
     required this.produtoRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     required this.usuarioAtual,
     required this.podeCancelarVendas,
@@ -72,7 +72,7 @@ class ListagemVendasPage extends StatefulWidget {
   final dynamic clienteRepository;
   final dynamic vendedorRepository;
   final dynamic produtoRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final String usuarioAtual;
   final bool podeCancelarVendas;
@@ -240,7 +240,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     clienteRepository: widget.clienteRepository,
     vendedorRepository: widget.vendedorRepository,
     produtoRepository: widget.produtoRepository,
-    appConfigRepository: widget.appConfigRepository,
+    configuracoesService: widget.configuracoesService,
     printService: widget.printService,
     focusNfeService: _focusNfeService,
   );
@@ -396,7 +396,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           podeRegistrarSemSenha: widget.podeCancelarVendas,
           usuarioLogado: widget.usuarioLogado,
           vendedorRepository: widget.vendedorRepository,
-          appConfigRepository: widget.appConfigRepository,
+          configuracoesService: widget.configuracoesService,
           printService: widget.printService,
         ),
       ),
@@ -965,7 +965,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       );
       return;
     }
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     final autorizado = await autorizarSegundaViaCupomSeConfigurado(
       context: context,

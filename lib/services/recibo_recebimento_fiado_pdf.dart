@@ -11,6 +11,7 @@ import '../model/recebimento_fiado.dart';
 import '../model/titulo_receber.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
 import 'cupom_pdf_layout.dart';
+import 'impressoes_service.dart';
 
 /// Recibo não fiscal de pagamento de fiado (quitação no caixa).
 class ReciboRecebimentoFiadoPdf {
@@ -83,7 +84,7 @@ class ReciboRecebimentoFiadoPdf {
     final doc = pw.Document();
     final modelo = empresaModeloPdfDeString(config.modeloPdf);
     final comLogo = logoBytes.isNotEmpty;
-    final layout = config.layoutImpressao.cupom;
+    final layout = ImpressoesService.layoutCupomEfetivo(config);
     final dataLocal = recebimento.data.toLocal();
 
     final pageFormat = CupomPdfLayout.formatoPagina(

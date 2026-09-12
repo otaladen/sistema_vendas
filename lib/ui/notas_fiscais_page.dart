@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/api/lan_api_client.dart';
 import '../domain/main_menu_sub_destino.dart';
 import '../model/usuario_sistema.dart';
@@ -16,7 +16,7 @@ class NotasFiscaisPage extends StatelessWidget {
     required this.produtoRepository,
     required this.vendaRepository,
     required this.clienteRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.usuarioLogado,
     this.terminalLeve = false,
     this.lanApiClient,
@@ -25,7 +25,7 @@ class NotasFiscaisPage extends StatelessWidget {
   final dynamic produtoRepository;
   final dynamic vendaRepository;
   final dynamic clienteRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final UsuarioSistema usuarioLogado;
   final bool terminalLeve;
   final LanApiClient? lanApiClient;
@@ -44,7 +44,7 @@ class NotasFiscaisPage extends StatelessWidget {
     await NfeImportacaoXmlFlow.executar(
       context,
       produtoRepository: produtoRepository,
-      appConfigRepository: appConfigRepository,
+      configuracoesService: configuracoesService,
       lanApiClient: lanApiClient,
     );
   }

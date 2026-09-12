@@ -99,6 +99,9 @@ class EmpresaConfig {
     /// Porta serial (ex.: COM3).
     this.escPosPortaCom = '',
 
+    /// PDV: imprime cupom ao finalizar venda sem dialogo (somente neste terminal).
+    this.pdvAutoImpressaoAoFinalizarVenda = false,
+
     /// Regime Focus: 1 = Simples Nacional, 3 = Regime Normal (sincroniza na LAN).
     this.regimeTributarioEmitente = FiscalConfig.regimeTributarioEmitente,
 
@@ -247,6 +250,8 @@ class EmpresaConfig {
   final int escPosPortaTcp;
   final String escPosPortaCom;
 
+  final bool pdvAutoImpressaoAoFinalizarVenda;
+
   final int regimeTributarioEmitente;
 
   final bool pdvBalcaoRapido;
@@ -332,6 +337,7 @@ class EmpresaConfig {
     String? escPosHost,
     int? escPosPortaTcp,
     String? escPosPortaCom,
+    bool? pdvAutoImpressaoAoFinalizarVenda,
     int? regimeTributarioEmitente,
     bool? pdvBalcaoRapido,
     bool? pdvCheckoutDireto,
@@ -444,6 +450,8 @@ class EmpresaConfig {
       escPosHost: escPosHost ?? this.escPosHost,
       escPosPortaTcp: escPosPortaTcp ?? this.escPosPortaTcp,
       escPosPortaCom: escPosPortaCom ?? this.escPosPortaCom,
+      pdvAutoImpressaoAoFinalizarVenda: pdvAutoImpressaoAoFinalizarVenda ??
+          this.pdvAutoImpressaoAoFinalizarVenda,
       regimeTributarioEmitente: regimeTributarioEmitente != null
           ? regimeTributarioEmitente.clamp(1, 3)
           : this.regimeTributarioEmitente,

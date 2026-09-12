@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
-import '../../../data/app_config_repository.dart';
+import '../../configuracoes_service.dart';
 import '../../../data/caixa_auditoria_repository.dart';
 import '../../../data/caixa_sessao_repository.dart';
 import '../../../data/sync/caixa_local_refresh_hub.dart';
@@ -61,7 +61,7 @@ CaixaSessao _fecharSessao(CaixaSessao alvo) {
 /// Sessoes de caixa compartilhadas entre PC servidor e terminais leves.
 void registerCaixaRoutes(Router router, LanApiDeps d) {
   final repo = CaixaSessaoRepository();
-  final configRepo = AppConfigRepository();
+  final configRepo = ConfiguracoesService.repositoryFallback();
 
   router.get('/api/caixa/sessoes', (_) async {
     final mapa = await repo.listarTodasSessoes();

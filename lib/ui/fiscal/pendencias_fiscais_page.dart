@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 import '../../config/focus_nfe_runtime.dart';
 import '../../data/api/lan_api_event_hub.dart';
 import '../../data/api/venda_api_repository.dart';
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/sync/sync_refresh_hub.dart';
 import '../../data/venda_repository.dart';
@@ -33,13 +33,13 @@ class PendenciasFiscaisPage extends StatefulWidget {
     super.key,
     required this.vendaRepository,
     required this.clienteRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.usuarioLogado,
   });
 
   final dynamic vendaRepository;
   final dynamic clienteRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final UsuarioSistema usuarioLogado;
 
   @override
@@ -118,7 +118,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
   }
 
   Future<void> _carregarConfig() async {
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     setState(() => _permitirVendaSemEstoque = config.permitirVendaSemEstoque);
   }
@@ -297,7 +297,6 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
         venda: venda,
         vendaRepository: widget.vendaRepository as VendaRepository,
         clienteRepository: widget.clienteRepository as ClienteRepository,
-        appConfigRepository: widget.appConfigRepository,
         permitirVendaSemEstoque: _permitirVendaSemEstoque,
         produtoRepository: produtoRepo,
       );
@@ -408,7 +407,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
         builder: (_) => NfeGerenciamentoPage(
           vendaRepository: widget.vendaRepository,
           clienteRepository: widget.clienteRepository,
-          appConfigRepository: widget.appConfigRepository,
+          configuracoesService: widget.configuracoesService,
           usuarioLogado: widget.usuarioLogado,
           abaInicial: 1,
         ),

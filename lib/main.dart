@@ -21,7 +21,6 @@ import 'data/api/produto_api_repository.dart';
 import 'data/api/recado_loja_api_repository.dart';
 import 'data/api/usuario_api_repository.dart';
 import 'data/api/venda_api_repository.dart';
-import 'data/sync/sync_entity_codec_extras.dart';
 import 'data/api/vendedor_api_repository.dart';
 import 'services/entrega_baixa_sync_service.dart';
 import 'services/entrega_pod_lan_service.dart';
@@ -51,9 +50,10 @@ import 'services/auditoria_retencao_service.dart';
 import 'services/entrega_pod_retencao_service.dart';
 import 'services/lan_servidor_bootstrap.dart';
 import 'services/lan_servidor_headless_service.dart';
+import 'services/configuracoes_service.dart';
 import 'services/print_service.dart';
+import 'ui/configuracoes/configuracoes_scope.dart';
 import 'services/estoque_diagnostico_startup.dart';
-import 'services/fiscal_config_store.dart';
 import 'services/fiscal_reconciliacao_startup.dart';
 import 'services/trusted_http_client.dart';
 import 'services/windows_app_startup_helper.dart';
@@ -103,25 +103,31 @@ Future<void> main(List<String> args) async {
       }
 
       final appConfigRepository = AppConfigRepository();
-      await FiscalConfigStore.carregar();
+      final configuracoesService =
+          ConfiguracoesService.registrar(appConfigRepository);
       await LoteValidadeConfigStore.carregar();
-      final empresaCfg = await appConfigRepository.carregarEmpresaConfig();
-      await FiscalConfigStore.aplicarRegimeEmpresa(
-        empresaCfg.regimeTributarioEmitente,
+      var empresaCfg = await configuracoesService.inicializarNaAbertura(
+        terminalLeve: false,
       );
+      final ehTerminalLeve = modoTerminalLeveAtivo(empresaCfg);
 
       // Terminal leve (Windows cliente): abre sem ObjectBox / sem bootstrap.
-      if (modoTerminalLeveAtivo(empresaCfg)) {
+      if (ehTerminalLeve) {
         unawaited(
-          EntregaPodRetencaoService.aplicarSeConfigurado(appConfigRepository),
+          EntregaPodRetencaoService.aplicarSeConfigurado(
+            configuracoesService.repository,
+          ),
         );
         runApp(
-          MyApp(
-            objectBox: null,
-            syncService: null,
-            lanSyncScheduler: null,
-            appConfigRepository: appConfigRepository,
-            terminalLeve: true,
+          ConfiguracoesScope(
+            service: configuracoesService,
+            child: MyApp(
+              objectBox: null,
+              syncService: null,
+              lanSyncScheduler: null,
+              configuracoesService: configuracoesService,
+              terminalLeve: true,
+            ),
           ),
         );
         return;
@@ -153,23 +159,25 @@ Future<void> main(List<String> args) async {
         objectBox: objectBox,
       );
       await AuditoriaRetencaoService.aplicarSeConfigurado(
-        configRepository: appConfigRepository,
+        configRepository: configuracoesService.repository,
         auditoriaRepository: auditoriaRepository,
       );
       unawaited(
-        EntregaPodRetencaoService.aplicarSeConfigurado(appConfigRepository),
+        EntregaPodRetencaoService.aplicarSeConfigurado(
+          configuracoesService.repository,
+        ),
       );
       await _executarMigracaoMotoristaEntrega(
         objectBox: objectBox,
-        configRepository: appConfigRepository,
+        configRepository: configuracoesService.repository,
       );
       await _executarMigracaoSkuZerosEsquerda(
         objectBox: objectBox,
-        configRepository: appConfigRepository,
+        configRepository: configuracoesService.repository,
       );
       await _executarMigracaoCadastroDuplicados(
         objectBox: objectBox,
-        configRepository: appConfigRepository,
+        configRepository: configuracoesService.repository,
       );
 
       // Windows/Android/iOS servidor: ObjectBox + LanApi.
@@ -181,18 +189,21 @@ Future<void> main(List<String> args) async {
           (Platform.isAndroid || Platform.isIOS)) {
         syncService = SyncService(
           objectBox: objectBox,
-          configRepository: appConfigRepository,
+          configRepository: configuracoesService.repository,
         );
         lanSyncScheduler = LanSyncScheduler(syncService: syncService);
       }
 
       runApp(
-        MyApp(
-          objectBox: objectBox,
-          syncService: syncService,
-          lanSyncScheduler: lanSyncScheduler,
-          appConfigRepository: appConfigRepository,
-          terminalLeve: false,
+        ConfiguracoesScope(
+          service: configuracoesService,
+          child: MyApp(
+            objectBox: objectBox,
+            syncService: syncService,
+            lanSyncScheduler: lanSyncScheduler,
+            configuracoesService: configuracoesService,
+            terminalLeve: false,
+          ),
         ),
       );
     },
@@ -260,14 +271,14 @@ class MyApp extends StatefulWidget {
     required this.objectBox,
     required this.syncService,
     required this.lanSyncScheduler,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     this.terminalLeve = false,
   });
 
   final ObjectBox? objectBox;
   final SyncService? syncService;
   final LanSyncScheduler? lanSyncScheduler;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final bool terminalLeve;
 
   @override
@@ -315,7 +326,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_carregarPersonalizacaoInicial());
-    _printService = PrintService(widget.appConfigRepository);
+    _printService = PrintService(widget.configuracoesService);
     if (widget.terminalLeve) {
       // Conecta na API antes do login (usuarios so existem no PC servidor).
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -325,14 +336,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       _timerBackupAutomatico = Timer.periodic(
         const Duration(minutes: 5),
         (_) => AutoBackupService.tentarExecutarSeDevido(
-          widget.appConfigRepository,
+          widget.configuracoesService.repository,
           objectBox: widget.objectBox!,
           lanSyncScheduler: widget.lanSyncScheduler,
         ),
       );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         AutoBackupService.tentarExecutarSeDevido(
-          widget.appConfigRepository,
+          widget.configuracoesService.repository,
           objectBox: widget.objectBox!,
           lanSyncScheduler: widget.lanSyncScheduler,
         );
@@ -340,14 +351,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         unawaited(
           LanServidorBootstrap.garantirAtivo(
             objectBox: widget.objectBox!,
-            configRepository: widget.appConfigRepository,
+            configRepository: widget.configuracoesService.repository,
           ),
         );
       });
       if (Platform.isWindows) {
         unawaited(
           WindowsBackupAoFecharWindowService.instalar(
-            appConfigRepository: widget.appConfigRepository,
+            configuracoesService: widget.configuracoesService,
             executarBackupAoFechar: _executarBackupAoFechar,
             servidorComObjectBox: () => widget.objectBox != null,
           ),
@@ -356,7 +367,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     } else if (Platform.isWindows && widget.terminalLeve) {
       unawaited(
         WindowsBackupAoFecharWindowService.instalar(
-          appConfigRepository: widget.appConfigRepository,
+          configuracoesService: widget.configuracoesService,
           executarBackupAoFechar: _executarBackupAoFechar,
           servidorComObjectBox: () => false,
         ),
@@ -401,7 +412,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (widget.objectBox != null) {
       final nomeLoja = await _nomeLojaAtual();
       await BackupAoFecharService.tentarSeAtivo(
-        repository: widget.appConfigRepository,
+        repository: widget.configuracoesService.repository,
         objectBox: widget.objectBox!,
         lanSyncScheduler: widget.lanSyncScheduler,
         nomeLoja: nomeLoja,
@@ -410,7 +421,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   Future<String> _nomeLojaAtual() async {
-    final c = await widget.appConfigRepository.carregarEmpresaConfig();
+    final c = await widget.configuracoesService.carregarEfetiva();
     return c.nomeLoja;
   }
 
@@ -484,7 +495,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _prepararTerminalLeve() async {
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     final url = config.redeServidorUrl.trim();
     if (url.isEmpty) {
       if (!mounted) return;
@@ -523,6 +534,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           'URL tipica: http://192.168.1.69:${LanApiUrl.portaPadrao}',
         );
       }
+      widget.configuracoesService.vincularLanApiClient(client);
       final repos = _criarReposTerminal(client);
       if (!mounted) return;
       setState(() {
@@ -851,19 +863,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _hidratarEmpresaConfigTerminal(LanApiClient? client) async {
-    if (client == null || !client.configurado) return;
-    final m = await client.obterEmpresaConfig();
-    final raw = m['config'];
-    if (raw is! Map) return;
-    final atual = await widget.appConfigRepository.carregarEmpresaConfig();
-    final mesclado = SyncEntityCodecExtras.empresaConfigDeMap(
-      atual,
-      Map<String, dynamic>.from(raw),
-    );
-    await widget.appConfigRepository.salvarEmpresaConfig(
-      mesclado,
-      propagarRede: false,
-    );
+    widget.configuracoesService.vincularLanApiClient(client);
+    await widget.configuracoesService.carregarGlobalDoServidor();
   }
 
   Future<void> _sair() async {
@@ -958,7 +959,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         _usuarioApi == null ||
         _apiClient == null) {
       return TerminalConfigPage(
-        appConfigRepository: widget.appConfigRepository,
+        configuracoesService: widget.configuracoesService,
         onLogout: () => unawaited(_sair()),
         onSalvo: _prepararTerminalLeve,
         erroConexao: _terminalErro,
@@ -983,7 +984,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       usuarioLogado: _usuarioLogado!,
       onLogout: () => unawaited(_sair()),
       lanSyncScheduler: null,
-      appConfigRepository: widget.appConfigRepository,
+      configuracoesService: widget.configuracoesService,
       printService: _printService,
       vendaApiRepository: _vendaApi,
       lanApiClient: _apiClient,
@@ -1016,7 +1017,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       usuarioLogado: _usuarioLogado!,
       onLogout: () => unawaited(_sair()),
       lanSyncScheduler: widget.lanSyncScheduler,
-      appConfigRepository: widget.appConfigRepository,
+      configuracoesService: widget.configuracoesService,
       printService: _printService,
       usuarioRepository: _usuarioRepository,
       fornecedorRepository: FornecedorRepository(widget.objectBox!),

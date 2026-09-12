@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../config/focus_nfe_runtime.dart';
-import '../../data/app_config_repository.dart';
 import '../../data/cliente_repository.dart';
 import '../../data/sync/sync_cursor_storage.dart';
 import '../../data/venda_repository.dart';
@@ -23,7 +22,6 @@ abstract final class NfceEmissaoPendenteFlow {
     required Venda venda,
     required VendaRepository vendaRepository,
     required ClienteRepository clienteRepository,
-    required AppConfigRepository appConfigRepository,
     required bool permitirVendaSemEstoque,
     dynamic produtoRepository,
   }) async {

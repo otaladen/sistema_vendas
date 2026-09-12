@@ -14,6 +14,7 @@ import '../domain/pagamento_orcamento.dart';
 import '../domain/plano_fiado.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
+import 'impressoes_service.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
@@ -663,7 +664,7 @@ class CupomNaoFiscalVendaPdf {
         : null;
     final modelo = empresaModeloPdfDeString(config.modeloPdf);
     final comLogo = logoBytes.isNotEmpty;
-    final layout = config.layoutImpressao.cupom;
+    final layout = ImpressoesService.layoutCupomEfetivo(config);
     final doc = CupomPdfLayout.criarDocumento(layout);
 
     late final int linhasTexto;

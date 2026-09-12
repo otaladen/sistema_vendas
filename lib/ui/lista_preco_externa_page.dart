@@ -10,7 +10,7 @@ import 'package:path/path.dart' as p;
 import '../data/api/lan_api_client.dart';
 import '../data/api/lan_api_event_hub.dart';
 import '../data/api/lista_preco_externa_api_repository.dart';
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/lista_preco_externa_repository.dart';
 import '../data/sync/sync_refresh_hub.dart';
 import '../domain/lista_preco_externa.dart';
@@ -96,7 +96,7 @@ class _ListaPrecoExternaPageState extends State<ListaPrecoExternaPage> {
   }
 
   Future<ListaPrecoExternaStore> _criarRepositorio() async {
-    final config = await AppConfigRepository().carregarEmpresaConfig();
+    final config = await ConfiguracoesService.global.carregarEfetiva();
     if (!modoTerminalLeveAtivo(config)) {
       _viaApi = false;
       return ListaPrecoExternaRepository();

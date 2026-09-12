@@ -11,14 +11,17 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/api/lan_api_client.dart';
 import '../data/sync/sync_entity_codec_extras.dart';
 import 'configuracoes/obra_calculadora_config_section.dart';
 import 'configuracoes/backup_configuracao_section.dart';
 import 'configuracoes/backup_terminal_leve_section.dart';
+import 'configuracoes/config_escopo_banner.dart';
 import 'configuracoes/config_page_shell.dart';
 import 'configuracoes/config_secao.dart';
 import 'configuracoes/config_section_card.dart';
+import '../services/impressoes_service.dart';
 import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../config/fiscal_config.dart';
@@ -38,7 +41,7 @@ class ConfiguracoesPage extends StatefulWidget {
   const ConfiguracoesPage({
     super.key,
     required this.vendaRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     required this.produtoRepository,
     this.objectBox,
@@ -50,7 +53,7 @@ class ConfiguracoesPage extends StatefulWidget {
 
   final dynamic vendaRepository;
   final ObjectBox? objectBox;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final dynamic produtoRepository;
   final LanSyncScheduler? lanSyncScheduler;
@@ -92,6 +95,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   int _fiscalRegime = FiscalRegimePadrao.regimeNormal;
   String _modeloPdf = 'cupom';
   String _impressoraPadrao = '';
+  bool _pdvAutoImpressaoAoFinalizarVenda = false;
   String _logoPath = '';
   bool _salvando = false;
   bool _prefsEmpresaAplicadas = false;
@@ -263,8 +267,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       smtpFromEmail: _smtpFromController.text,
       smtpSsl: _smtpSsl,
     );
-    final empresa = await widget.appConfigRepository.carregarEmpresaConfig();
-    await widget.appConfigRepository.salvarEmpresaConfig(
+    final empresa = await widget.configuracoesService.carregarEfetiva();
+    await widget.configuracoesService.salvarEfetiva(
       empresa.copyWith(regimeTributarioEmitente: _fiscalRegime),
     );
     if (!mounted) return;
@@ -341,27 +345,17 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   }
 
   Future<EmpresaConfig> _carregarConfigDoDiscoOuServidor() async {
-    final local = await widget.appConfigRepository.carregarEmpresaConfig();
-    if (!widget.terminalLeve) return local;
+    if (!widget.terminalLeve) {
+      return widget.configuracoesService.carregarEfetiva();
+    }
     final client = widget.lanApiClient;
-    if (client is! LanApiClient || !client.configurado) {
-      return local;
+    if (client is LanApiClient && client.configurado) {
+      widget.configuracoesService.vincularLanApiClient(client);
     }
     try {
-      final m = await client.obterEmpresaConfig();
-      final raw = m['config'];
-      if (raw is! Map) return local;
-      final mesclado = SyncEntityCodecExtras.empresaConfigDeMap(
-        local,
-        Map<String, dynamic>.from(raw),
-      );
-      // Cache local para PDV/caixa; nao propaga de volta ao servidor.
-      await widget.appConfigRepository.salvarEmpresaConfig(
-        mesclado,
-        propagarRede: false,
-      );
-      return mesclado;
+      return await widget.configuracoesService.carregarGlobalDoServidor();
     } catch (e) {
+      final local = await widget.configuracoesService.carregarEfetiva();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -391,6 +385,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           .replaceAll('.', ',');
       _modeloPdf = config.modeloPdf;
       _impressoraPadrao = config.impressoraPadrao;
+      _pdvAutoImpressaoAoFinalizarVenda =
+          config.pdvAutoImpressaoAoFinalizarVenda;
       _logoPath = config.logoPath;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _podFotoRetencaoDias =
@@ -600,13 +596,14 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     if (!mounted) return;
     setState(() => _salvando = true);
     try {
-      final disco = await widget.appConfigRepository.carregarEmpresaConfig();
+      final disco = await widget.configuracoesService.carregarEfetiva();
       final atualizado = disco.copyWith(
         nomeLoja: _nomeLojaController.text,
         telefone: _telefoneController.text,
         endereco: _enderecoController.text,
         pastaPadraoPdf: _pastaPadraoPdfController.text,
         impressoraPadrao: _impressoraPadrao,
+        pdvAutoImpressaoAoFinalizarVenda: _pdvAutoImpressaoAoFinalizarVenda,
         modeloPdf: _modeloPdf,
         rodapeNota: _rodapeNotaController.text,
         rodapeOrcamento: _rodapeOrcamentoController.text,
@@ -686,12 +683,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 Map<String, dynamic>.from(raw),
               )
             : atualizado;
-        await widget.appConfigRepository.salvarEmpresaConfig(
+        await widget.configuracoesService.salvarEfetiva(
           paraCache,
           propagarRede: false,
         );
       } else {
-        await widget.appConfigRepository.salvarEmpresaConfig(atualizado);
+        await widget.configuracoesService.salvarEfetiva(atualizado);
         if (client is LanApiClient && client.configurado) {
           try {
             await client.salvarEmpresaConfigRemoto(
@@ -825,7 +822,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         );
         return;
       }
-      final salva = await widget.appConfigRepository.carregarEmpresaConfig();
+      final salva = await widget.configuracoesService.carregarEfetiva();
       final empresa = salva.copyWith(
         nomeLoja: _nomeLojaController.text.trim(),
         telefone: _telefoneController.text.trim(),
@@ -840,7 +837,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       if (_modeloPdf == 'cupom') {
         final pdf = await CupomLayoutPreviewPdf.gerar(
           empresa: empresa,
-          layout: empresa.layoutImpressao.orcamento,
+          layout: ImpressoesService.layoutOrcamentoEfetivo(empresa),
           orcamento: true,
         );
         await Printing.directPrintPdf(
@@ -916,6 +913,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   Widget _painelEmpresa() {
     return _configTab(
       [
+        ConfigEscopoBanner(
+          tipo: ConfigEscopoTipo.lojaServidor,
+          terminalLeve: widget.terminalLeve,
+        ),
         ConfigSectionCard(
           icon: Icons.storefront_outlined,
           title: 'Dados da empresa',
@@ -1624,43 +1625,39 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   Widget _painelImpressao() {
     return _configTab(
       [
+        const ConfigEscopoBanner(
+          tipo: ConfigEscopoTipo.lojaServidor,
+        ),
         ConfigSectionCard(
-          icon: Icons.print_outlined,
-          title: 'Impressao e PDF',
-          subtitle: 'Modelo de documento, rodapes, impressora e teste de impressao.',
+          icon: Icons.receipt_long_outlined,
+          title: 'Documentos da loja',
+          subtitle:
+              'Modelo, textos de rodape e estilo do cupom (sincronizados na rede).',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
-                controller: _pastaPadraoPdfController,
-                decoration: InputDecoration(
-                  labelText: 'Pasta padrao de PDF (opcional)',
-                  suffixIcon: IconButton(
-                    tooltip: 'Escolher pasta',
-                    onPressed: _escolherPastaPadraoPdf,
-                    icon: const Icon(Icons.folder_open_outlined),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 initialValue: _modeloPdf,
                 decoration: const InputDecoration(labelText: 'Modelo de PDF'),
                 items: const [
-                  DropdownMenuItem(value: 'cupom', child: Text('Cupom (80mm)')),
+                  DropdownMenuItem(value: 'cupom', child: Text('Cupom termico')),
                   DropdownMenuItem(value: 'a4', child: Text('A4')),
                 ],
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() => _modeloPdf = value);
-                },
+                onChanged: widget.terminalLeve
+                    ? null
+                    : (value) {
+                        if (value == null) return;
+                        setState(() => _modeloPdf = value);
+                      },
               ),
               const SizedBox(height: 8),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Layout do cupom e orcamento'),
-                subtitle: const Text(
-                  'Divisorias, colunas, fontes e campos — com pre-visualizacao',
+                subtitle: Text(
+                  widget.terminalLeve
+                      ? 'Visualize o padrao da loja; edicao no PC servidor.'
+                      : 'Divisorias, colunas, fontes e campos — com pre-visualizacao',
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () async {
@@ -1668,7 +1665,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => LayoutImpressaoPage(
-                        appConfigRepository: widget.appConfigRepository,
+                        configuracoesService: widget.configuracoesService,
                         printService: widget.printService,
                         terminalLeve: widget.terminalLeve,
                         lanApiClient: widget.lanApiClient,
@@ -1678,31 +1675,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 },
               ),
               const SizedBox(height: 8),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Impressora padrao'),
-                subtitle: Text(
-                  _impressoraPadrao.trim().isEmpty
-                      ? 'Nao configurada — toque para abrir a tela dedicada'
-                      : _impressoraPadrao,
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () async {
-                  await Navigator.push<void>(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => ConfigImpressoraPage(
-                        printService: widget.printService,
-                        appConfigRepository: widget.appConfigRepository,
-                      ),
-                    ),
-                  );
-                  if (context.mounted) await _carregarConfig();
-                },
-              ),
-              const SizedBox(height: 8),
               TextField(
                 controller: _rodapeNotaController,
+                readOnly: widget.terminalLeve,
                 keyboardType: TextInputType.multiline,
                 textInputAction: TextInputAction.newline,
                 minLines: 3,
@@ -1716,6 +1691,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               const SizedBox(height: 8),
               TextField(
                 controller: _rodapeOrcamentoController,
+                readOnly: widget.terminalLeve,
                 keyboardType: TextInputType.multiline,
                 textInputAction: TextInputAction.newline,
                 minLines: 3,
@@ -1726,6 +1702,73 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   hintText: 'Use Enter para nova linha',
                 ),
               ),
+              if (!widget.terminalLeve) ...[
+                const SizedBox(height: 12),
+                ConfigSaveButton(
+                  salvando: _salvando,
+                  onPressed: _salvarConfig,
+                  label: 'Salvar documentos da loja',
+                ),
+              ],
+            ],
+          ),
+        ),
+        ConfigEscopoBanner(
+          tipo: ConfigEscopoTipo.terminalLocal,
+          terminalLeve: widget.terminalLeve,
+        ),
+        ConfigSectionCard(
+          icon: Icons.print_outlined,
+          title: 'Impressora deste terminal',
+          subtitle:
+              'Hardware local: fila Windows, bobina 58/80 mm, margens e auto-impressao no PDV.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _pastaPadraoPdfController,
+                decoration: InputDecoration(
+                  labelText: 'Pasta padrao de PDF neste PC (opcional)',
+                  suffixIcon: IconButton(
+                    tooltip: 'Escolher pasta',
+                    onPressed: _escolherPastaPadraoPdf,
+                    icon: const Icon(Icons.folder_open_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Impressora, bobina e ESC/POS'),
+                subtitle: Text(
+                  _impressoraPadrao.trim().isEmpty
+                      ? 'Nao configurada — abra a tela dedicada'
+                      : _impressoraPadrao,
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  await Navigator.push<void>(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => ConfigImpressoraPage(
+                        printService: widget.printService,
+                        configuracoesService: widget.configuracoesService,
+                      ),
+                    ),
+                  );
+                  if (context.mounted) await _carregarConfig();
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Auto-impressao ao finalizar venda (PDV)'),
+                subtitle: const Text(
+                  'Imprime o cupom automaticamente neste terminal, sem dialogo.',
+                ),
+                value: _pdvAutoImpressaoAoFinalizarVenda,
+                onChanged: (v) =>
+                    setState(() => _pdvAutoImpressaoAoFinalizarVenda = v),
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -1733,7 +1776,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     child: OutlinedButton.icon(
                       onPressed: _escolherLogo,
                       icon: const Icon(Icons.image_outlined),
-                      label: Text(_logoPath.isEmpty ? 'Selecionar logo' : 'Trocar logo'),
+                      label: Text(
+                        _logoPath.isEmpty ? 'Logo neste PC' : 'Trocar logo local',
+                      ),
                     ),
                   ),
                   if (_logoPath.isNotEmpty) ...[
@@ -1749,7 +1794,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               if (_logoPath.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
-                  'Logo selecionada: ${p.basename(_logoPath)}',
+                  'Logo neste terminal: ${p.basename(_logoPath)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -1757,7 +1802,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               ConfigSaveButton(
                 salvando: _salvando,
                 onPressed: _salvarConfig,
-                label: 'Salvar configuracoes de impressao/PDF',
+                label: 'Salvar configuracoes deste terminal',
               ),
               const SizedBox(height: 8),
               SizedBox(
@@ -1765,7 +1810,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 child: OutlinedButton.icon(
                   onPressed: _imprimirTeste,
                   icon: const Icon(Icons.print_outlined),
-                  label: const Text('Teste de impressao'),
+                  label: const Text('Teste de impressao (bobina local)'),
                 ),
               ),
             ],
@@ -1802,7 +1847,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           ),
         if (widget.terminalLeve) const SizedBox(height: 12),
         RedeSincronizacaoCard(
-          configRepository: widget.appConfigRepository,
+          configuracoesService: widget.configuracoesService,
           lanSyncScheduler: widget.lanSyncScheduler,
           forcarModoCliente: widget.terminalLeve,
         ),
@@ -1823,7 +1868,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     return _configTab(
       [
         BackupConfiguracaoSection(
-          appConfigRepository: widget.appConfigRepository,
+          configuracoesService: widget.configuracoesService,
           objectBox: widget.objectBox!,
           produtoRepository: widget.produtoRepository,
           lanSyncScheduler: widget.lanSyncScheduler,

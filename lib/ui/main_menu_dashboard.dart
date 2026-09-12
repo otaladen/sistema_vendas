@@ -418,7 +418,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     try {
       final deps = MainMenuDeps.of(context);
       if (deps.terminalLeve) {
-        final config = await deps.appConfigRepository.carregarEmpresaConfig();
+        final config = await deps.configuracoesService.carregarEfetiva();
         // Mantem ultimo KPI bom se a API falhar (evita zerar a tela).
         var resumo = _resumo ??
             const _MainMenuResumo(
@@ -544,7 +544,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         });
         return;
       }
-      final config = await deps.appConfigRepository.carregarEmpresaConfig();
+      final config = await deps.configuracoesService.carregarEfetiva();
       await Future<void>.delayed(Duration.zero);
       if (!mounted) return;
 
@@ -703,7 +703,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
               .fold<double>(0, (s, l) => s + l.titulo.saldo);
         }
 
-        final backupManual = await deps.appConfigRepository
+        final backupManual = await deps.configuracoesService.repository
             .carregarRegistroBackupManual();
         final backupStatus = BackupStatusHelper.avaliar(
           config: config,

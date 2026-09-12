@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import '../data/app_config_repository.dart';
+import 'configuracoes_service.dart';
 import 'esc_pos_commands.dart';
 import 'esc_pos_cupom_builder.dart';
 import 'esc_pos_orcamento_builder.dart';
@@ -19,9 +20,9 @@ class EscPosImpressaoResultado {
 
 /// Impressao termica direta ESC/POS (balcão / NFC-e).
 class EscPosPrinterService {
-  EscPosPrinterService(this._configRepository);
+  EscPosPrinterService(this._configuracoes);
 
-  final AppConfigRepository _configRepository;
+  final ConfiguracoesService _configuracoes;
 
   EscPosDestino _destinoDe(EmpresaConfig c) => EscPosDestino.fromConfig(
         tipo: c.escPosDestino,
@@ -115,7 +116,7 @@ class EscPosPrinterService {
   }
 
   Future<EscPosImpressaoResultado> imprimirTeste() async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await _configuracoes.carregarEfetiva();
     final cols =
         EscPosLarguraBobina.fromConfig(config.escPosLargura).colunas;
     final out = BytesBuilder(copy: false);
@@ -157,7 +158,7 @@ class EscPosPrinterService {
 
   /// So pulso de gaveta (reutiliza transporte configurado).
   Future<GavetaAbrirResultado> abrirGaveta({bool forcar = false}) async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await _configuracoes.carregarEfetiva();
     if (!forcar && !config.abrirGavetaAutomatica) {
       return const GavetaAbrirResultado(
         sucesso: false,

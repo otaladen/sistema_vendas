@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
-import '../../../data/app_config_repository.dart';
+import '../../configuracoes_service.dart';
 import '../../../data/sync/sync_entity_codec_extras.dart';
 import '../../../model/usuario_sistema.dart';
 import '../../../services/fiscal_config_store.dart';
@@ -154,7 +154,7 @@ void registerAuthRoutes(Router router, LanApiDeps d) {
 
   router.get('/api/empresa/config', (_) async {
     try {
-      final repo = AppConfigRepository();
+      final repo = ConfiguracoesService.repositoryFallback();
       final cfg = await repo.carregarEmpresaConfig();
       return lanApiJson({
         'ok': true,
@@ -175,7 +175,7 @@ void registerAuthRoutes(Router router, LanApiDeps d) {
       if (raw is! Map) {
         return lanApiJson({'error': 'config obrigatorio'}, status: 400);
       }
-      final repo = AppConfigRepository();
+      final repo = ConfiguracoesService.repositoryFallback();
       final atual = await repo.carregarEmpresaConfig();
       final mesclado = SyncEntityCodecExtras.empresaConfigDeMap(
         atual,

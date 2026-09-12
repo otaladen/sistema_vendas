@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/backup_agendado_headless_service.dart';
 import '../../data/auto_backup_service.dart';
 import '../../data/backup_historico_service.dart';
@@ -33,14 +34,14 @@ import '../produtos/zerar_cadastro_produtos_flow.dart';
 class BackupConfiguracaoSection extends StatefulWidget {
   const BackupConfiguracaoSection({
     super.key,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.objectBox,
     required this.produtoRepository,
     this.lanSyncScheduler,
     required this.nomeLoja,
   });
 
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final ObjectBox objectBox;
   final ProdutoRepository produtoRepository;
   final LanSyncScheduler? lanSyncScheduler;
@@ -111,17 +112,17 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   Future<void> _recarregar() async {
     setState(() => _carregando = true);
     try {
-      final config = await widget.appConfigRepository.carregarEmpresaConfig();
+      final config = await widget.configuracoesService.carregarEfetiva();
       final manual =
-          await widget.appConfigRepository.carregarRegistroBackupManual();
+          await widget.configuracoesService.repository.carregarRegistroBackupManual();
       var falha =
-          await widget.appConfigRepository.carregarFalhaBackupAutomatico();
+          await widget.configuracoesService.repository.carregarFalhaBackupAutomatico();
       final aoFechar =
-          await widget.appConfigRepository.carregarBackupAoFecharAtivo();
+          await widget.configuracoesService.repository.carregarBackupAoFecharAtivo();
       final escopoAuto =
-          await widget.appConfigRepository.carregarBackupAutomaticoEscopo();
+          await widget.configuracoesService.repository.carregarBackupAutomaticoEscopo();
       final horarioTarefa =
-          await widget.appConfigRepository.carregarHorarioTarefaBackupWindows();
+          await widget.configuracoesService.repository.carregarHorarioTarefaBackupWindows();
       var tarefaInstalada = false;
       if (Platform.isWindows) {
         tarefaInstalada = await BackupTarefaWindowsService.tarefaInstalada();
@@ -136,12 +137,12 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       final pastaAuto = config.backupAutomaticoPasta.trim();
       if (config.backupAutomaticoAtivo && pastaAuto.isEmpty) {
         configEfetiva = config.copyWith(backupAutomaticoAtivo: false);
-        await widget.appConfigRepository.salvarEmpresaConfig(configEfetiva);
-        await widget.appConfigRepository.registrarFalhaBackupAutomatico(
+        await widget.configuracoesService.salvarEfetiva(configEfetiva);
+        await widget.configuracoesService.repository.registrarFalhaBackupAutomatico(
           'Backup automatico desativado: pasta de destino nao configurada.',
         );
         falha =
-            await widget.appConfigRepository.carregarFalhaBackupAutomatico();
+            await widget.configuracoesService.repository.carregarFalhaBackupAutomatico();
       }
 
       if (!mounted) return;
@@ -181,8 +182,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   }
 
   Future<void> _persistirPreferenciasBackupAutomatico() async {
-    final atual = await widget.appConfigRepository.carregarEmpresaConfig();
-    await widget.appConfigRepository.salvarEmpresaConfig(
+    final atual = await widget.configuracoesService.carregarEfetiva();
+    await widget.configuracoesService.salvarEfetiva(
       atual.copyWith(
         backupAutomaticoAtivo: _backupAutomaticoAtivo,
         backupAutomaticoPasta: _backupAutomaticoPasta,
@@ -243,9 +244,9 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     final ms = melhorAuto.criadoEm.millisecondsSinceEpoch;
     if (ms <= _ultimoBackupAutomaticoMs) return;
 
-    await widget.appConfigRepository.atualizarUltimoBackupAutomaticoMs(ms);
+    await widget.configuracoesService.repository.atualizarUltimoBackupAutomaticoMs(ms);
     if (!mounted) return;
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     setState(() {
       _ultimoBackupAutomaticoMs = config.ultimoBackupAutomaticoMs;
@@ -261,7 +262,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     required Directory pastaBackup,
   }) async {
     await BackupPosExecucaoService.aposBackupSucesso(
-      repository: widget.appConfigRepository,
+      repository: widget.configuracoesService.repository,
       pastaRaizPrimaria: pastaRaiz,
       pastaBackup: pastaBackup,
     );
@@ -554,7 +555,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         horarioHhMm: _tarefaWindowsHorario,
         argumentosExe: BackupAgendadoHeadlessService.argBackupAgendado,
       );
-      await widget.appConfigRepository.salvarHorarioTarefaBackupWindows(
+      await widget.configuracoesService.repository.salvarHorarioTarefaBackupWindows(
         _tarefaWindowsHorario,
       );
       AuditoriaRegistrar.registrar(
@@ -605,7 +606,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       () => _tarefaWindowsHorario =
           BackupTarefaWindowsService.normalizarHorario(horario),
     );
-    await widget.appConfigRepository.salvarHorarioTarefaBackupWindows(
+    await widget.configuracoesService.repository.salvarHorarioTarefaBackupWindows(
       _tarefaWindowsHorario,
     );
   }
@@ -619,7 +620,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
 
   Future<void> _alternarBackupAoFechar(bool value) async {
     setState(() => _backupAoFecharAtivo = value);
-    await widget.appConfigRepository.salvarBackupAoFecharAtivo(value);
+    await widget.configuracoesService.repository.salvarBackupAoFecharAtivo(value);
     await WindowsBackupAoFecharWindowService.atualizarPreventClose();
   }
 
@@ -781,7 +782,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   Future<void> _definirEscopoBackupAutomatico(LocalBackupEscopo? escopo) async {
     if (escopo == null) return;
     setState(() => _backupAutomaticoEscopo = escopo);
-    await widget.appConfigRepository.salvarBackupAutomaticoEscopo(escopo);
+    await widget.configuracoesService.repository.salvarBackupAutomaticoEscopo(escopo);
   }
 
   Future<bool> _criarBackupDados({
@@ -829,7 +830,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       // (retencao, historico) nao deve deixar a tela presa em 100%.
       _fecharDialogoProgresso();
 
-      await widget.appConfigRepository.salvarRegistroBackupManual(
+      await widget.configuracoesService.repository.salvarRegistroBackupManual(
         ultimoMs: resultado.criadoEm.millisecondsSinceEpoch,
         ultimoPath: resultado.pastaBackup.path,
         ultimoTamanhoKb: resultado.tamanhoBancoKb,
@@ -840,7 +841,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         pastaRaiz: Directory(destinoRaiz),
         pastaBackup: resultado.pastaBackup,
       );
-      await widget.appConfigRepository.limparFalhaBackupAutomatico();
+      await widget.configuracoesService.repository.limparFalhaBackupAutomatico();
 
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.backup,
@@ -966,14 +967,14 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         onProgress: _atualizarProgresso,
       );
       _fecharDialogoProgresso();
-      await widget.appConfigRepository.atualizarUltimoBackupAutomaticoMs(
+      await widget.configuracoesService.repository.atualizarUltimoBackupAutomaticoMs(
         resultado.criadoEm.millisecondsSinceEpoch,
       );
       await _posProcessarBackup(
         pastaRaiz: Directory(_backupAutomaticoPasta.trim()),
         pastaBackup: resultado.pastaBackup,
       );
-      await widget.appConfigRepository.limparFalhaBackupAutomatico();
+      await widget.configuracoesService.repository.limparFalhaBackupAutomatico();
       AuditoriaRegistrar.registrar(
         modulo: AuditoriaModulo.backup,
         acao: AuditoriaAcao.backupAutomatico,
@@ -1026,7 +1027,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       });
       await _persistirPreferenciasBackupAutomatico();
       await AutoBackupService.tentarExecutarSeDevido(
-        widget.appConfigRepository,
+        widget.configuracoesService.repository,
         objectBox: widget.objectBox,
         lanSyncScheduler: widget.lanSyncScheduler,
       );
@@ -1317,7 +1318,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
             _atualizarProgresso(v * 0.4, etapa);
           },
         );
-        await widget.appConfigRepository.salvarRegistroBackupManual(
+        await widget.configuracoesService.repository.salvarRegistroBackupManual(
           ultimoMs: seguranca.criadoEm.millisecondsSinceEpoch,
           ultimoPath: seguranca.pastaBackup.path,
           ultimoTamanhoKb: seguranca.tamanhoBancoKb,

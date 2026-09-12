@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/cliente_api_repository.dart';
 import '../../data/api/lan_api_client.dart';
 import '../../data/api/lan_api_event_hub.dart';
@@ -41,13 +41,13 @@ class MotoristaEntregasPage extends StatefulWidget {
     required this.vendaRepository,
     required this.motoristaRepository,
     required this.usuarioLogado,
-    this.appConfigRepository,
+    this.configuracoesService,
   });
 
   final dynamic vendaRepository;
   final dynamic motoristaRepository;
   final UsuarioSistema usuarioLogado;
-  final AppConfigRepository? appConfigRepository;
+  final ConfiguracoesService? configuracoesService;
 
   @override
   State<MotoristaEntregasPage> createState() => _MotoristaEntregasPageState();
@@ -336,7 +336,7 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
 
     try {
       final podFinal = EntregaPodFinalizacao(
-        configRepository: widget.appConfigRepository,
+        configRepository: widget.configuracoesService?.repository,
       );
       final motivoPod =
           'Recebido por: ${pod.recebidoPor}${pod.fotoPathLocal != null ? ' (com foto no servidor)' : ''}';

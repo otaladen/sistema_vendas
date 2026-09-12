@@ -57,7 +57,7 @@ class MainMenuSubRouter {
           clienteRepository: deps.clienteRepository,
           produtoRepository: deps.produtoRepository,
           vendedorRepository: deps.vendedorRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           printService: deps.printService,
           usuarioLogado: u,
         );
@@ -67,7 +67,7 @@ class MainMenuSubRouter {
           clienteRepository: deps.clienteRepository,
           vendedorRepository: deps.vendedorRepository,
           produtoRepository: deps.produtoRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           printService: deps.printService,
           usuarioAtual: u.login,
           podeCancelarVendas: UsuarioPermissaoHelper.podeCancelarVendas(u),
@@ -181,7 +181,7 @@ class MainMenuSubRouter {
         }
         return FiscalImportarNfePage(
           produtoRepository: deps.produtoRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           lanApiClient: deps.lanApiClient,
         );
       case MainMenuSubDestino.fiscalNotasImportadas:
@@ -192,7 +192,7 @@ class MainMenuSubRouter {
       case MainMenuSubDestino.fiscalNotasRecebidas:
         return NotasRecebidasPage(
           produtoRepository: deps.produtoRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           lanApiClient: deps.lanApiClient,
         );
       case MainMenuSubDestino.fiscalDevolucaoFornecedor:
@@ -214,14 +214,14 @@ class MainMenuSubRouter {
         return PendenciasFiscaisPage(
           vendaRepository: deps.vendaRepository,
           clienteRepository: deps.clienteRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           usuarioLogado: u,
         );
       case MainMenuSubDestino.fiscalNfeSaida:
         return NfeGerenciamentoPage(
           vendaRepository: deps.vendaRepository,
           clienteRepository: deps.clienteRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           usuarioLogado: u,
         );
       case MainMenuSubDestino.fiscalRelatorioMensal:
@@ -295,7 +295,7 @@ class MainMenuSubRouter {
       clienteRepository: deps.clienteRepository,
       vendedorRepository: deps.vendedorRepository,
       produtoRepository: deps.produtoRepository,
-      appConfigRepository: deps.appConfigRepository,
+      configuracoesService: deps.configuracoesService,
       usuarioLogado: u,
       usuarioAdmin: u.admin,
       usuarioLogin: u.login,
@@ -309,7 +309,7 @@ class MainMenuSubRouter {
                     produtoRepository: deps.produtoRepository,
                     motoristaRepository: deps.motoristaRepository,
                     vendedorRepository: deps.vendedorRepository,
-                    appConfigRepository: deps.appConfigRepository,
+                    configuracoesService: deps.configuracoesService,
                     usuarioAtual: u.login,
                     podeGerenciarStatusEntrega: podeGerenciarEntregas,
                     podeRegistrarPodEntrega:
@@ -330,7 +330,7 @@ class MainMenuSubRouter {
               produtoRepository: deps.produtoRepository,
               vendaRepository: deps.vendaRepository,
               vendedorRepository: deps.vendedorRepository,
-              appConfigRepository: deps.appConfigRepository,
+              configuracoesService: deps.configuracoesService,
               printService: deps.printService,
               usuarioLogado: u,
               usuarioAtual: u.login,

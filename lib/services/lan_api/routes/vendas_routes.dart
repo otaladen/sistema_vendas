@@ -6,7 +6,7 @@ import 'package:shelf_router/shelf_router.dart';
 import '../../../data/sync/entrega_local_refresh_hub.dart';
 import '../../../data/sync/sync_entity_codec.dart';
 import '../../../data/sync/sync_entity_codec_extras.dart';
-import '../../../data/app_config_repository.dart';
+import '../../configuracoes_service.dart';
 import '../../../data/loja_origem_rede_store.dart';
 import '../../../data/venda_repository.dart';
 import '../../../domain/entregas/loja_origem_mercadoria.dart';
@@ -726,7 +726,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
 
   router.get('/api/entregas/lojas-origem', (_) async {
     try {
-      final cfg = await AppConfigRepository().carregarEmpresaConfig();
+      final cfg = await ConfiguracoesService.repositoryFallback().carregarEmpresaConfig();
       final extras = await LojaOrigemRedeStore().listar();
       final lojaAtual = cfg.nomeLoja.trim();
       return lanApiJson({
@@ -1077,7 +1077,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
       final vendaId = int.parse(id);
       var permitir = body['permitirVendaSemEstoque'] != false;
       try {
-        final cfg = await AppConfigRepository().carregarEmpresaConfig();
+        final cfg = await ConfiguracoesService.repositoryFallback().carregarEmpresaConfig();
         permitir = cfg.permitirVendaSemEstoque;
       } catch (_) {}
       d.vendaRepository.liberarSaidaCarreto(
@@ -1126,7 +1126,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
       final vendaId = int.parse(id);
       var permitir = body['permitirVendaSemEstoque'] != false;
       try {
-        final cfg = await AppConfigRepository().carregarEmpresaConfig();
+        final cfg = await ConfiguracoesService.repositoryFallback().carregarEmpresaConfig();
         permitir = cfg.permitirVendaSemEstoque;
       } catch (_) {}
       d.vendaRepository.atualizarBuscarNaLoja(

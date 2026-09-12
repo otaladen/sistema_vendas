@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/lan_api_client.dart';
 import 'nfe_importacao_xml_flow.dart';
 import '../widgets/hub_nav_button.dart';
@@ -11,19 +11,19 @@ class FiscalImportarNfePage extends StatelessWidget {
   const FiscalImportarNfePage({
     super.key,
     required this.produtoRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     this.lanApiClient,
   });
 
   final dynamic produtoRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final LanApiClient? lanApiClient;
 
   void _importar(BuildContext context) {
     NfeImportacaoXmlFlow.executar(
       context,
       produtoRepository: produtoRepository,
-      appConfigRepository: appConfigRepository,
+      configuracoesService: configuracoesService,
       lanApiClient: lanApiClient,
     );
   }

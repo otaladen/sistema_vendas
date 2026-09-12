@@ -76,6 +76,45 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
   if (!context.mounted) return;
   final modoEscPos =
       config.modoImpressaoBalcao == 'escpos' && dadosEscPos != null;
+
+  if (config.pdvAutoImpressaoAoFinalizarVenda) {
+    try {
+      if (modoEscPos) {
+        final r = await EscPosPrinterService.imprimirCupomDireto(dadosEscPos!);
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(r.mensagem)),
+        );
+        return;
+      }
+      final pdf = await gerarPdf();
+      if (!context.mounted) return;
+      final printer =
+          await printService.resolverImpressoraPorNome(config.impressoraPadrao);
+      if (printer != null) {
+        await Printing.directPrintPdf(
+          printer: printer,
+          onLayout: (_) async => pdf.bytes,
+          name: suggestedFileName.replaceAll('.pdf', ''),
+          format: config.modeloPdf == 'a4'
+              ? PdfPageFormat.a4
+              : CupomPdfLayout.formatoImpressaoDireta(
+                  layout: pdf.layout,
+                  formatoPdf: pdf.pageFormat,
+                ),
+        );
+      } else {
+        await Printing.layoutPdf(onLayout: (_) async => pdf.bytes);
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Auto-impressao falhou: $e')),
+      );
+    }
+    return;
+  }
+
   final acao = await showDialog<String>(
     context: context,
     barrierDismissible: false,

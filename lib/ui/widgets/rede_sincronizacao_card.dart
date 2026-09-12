@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/sync/sync_api_client.dart';
 import '../../data/sync/sync_conflict_log.dart';
@@ -26,12 +26,12 @@ import '../../ui/shell/main_menu_deps.dart';
 class RedeSincronizacaoCard extends StatefulWidget {
   const RedeSincronizacaoCard({
     super.key,
-    required this.configRepository,
+    required this.configuracoesService,
     this.lanSyncScheduler,
     this.forcarModoCliente = false,
   });
 
-  final AppConfigRepository configRepository;
+  final ConfiguracoesService configuracoesService;
   final LanSyncScheduler? lanSyncScheduler;
 
   /// Terminal leve: trava papel cliente (sem banco local neste PC).
@@ -88,9 +88,9 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
 
   Future<void> _carregar() async {
     setState(() => _carregando = true);
-    final config = await widget.configRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     final modoImplantacao =
-        await widget.configRepository.carregarModoImplantacaoLocal();
+        await widget.configuracoesService.repository.carregarModoImplantacaoLocal();
     final ip = await LanRedeHelper.obterIpv4Local();
     var url = config.redeServidorUrl.trim();
     if (config.redeModoServidor && ip != null && url.isEmpty) {
@@ -249,7 +249,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
 
   Future<void> _alternarModoImplantacao(bool ativo) async {
     setState(() => _modoImplantacao = ativo);
-    await widget.configRepository.salvarModoImplantacaoLocal(ativo);
+    await widget.configuracoesService.repository.salvarModoImplantacaoLocal(ativo);
     await widget.lanSyncScheduler?.iniciar();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -271,7 +271,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       if (modoServidor) {
         _preencherUrlServidorLocal();
       }
-      final atual = await widget.configRepository.carregarEmpresaConfig();
+      final atual = await widget.configuracoesService.carregarEfetiva();
       var token = _tokenAtual;
       var tokenGeradoAgora = false;
       if (_syncAtiva && token.isEmpty) {
@@ -286,7 +286,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         redeServidorUrl: _urlController.text.trim(),
         redeSyncToken: token,
       );
-      await widget.configRepository.salvarEmpresaConfig(config);
+      await widget.configuracoesService.salvarEfetiva(config);
 
       if (modoServidor && Platform.isWindows) {
         // Terminais devem funcionar so de ligar este PC (sem abrir a UI).
@@ -309,7 +309,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         if (ob != null) {
           await LanServidorBootstrap.garantirAtivo(
             objectBox: ob,
-            configRepository: widget.configRepository,
+            configRepository: widget.configuracoesService.repository,
           );
         }
         await widget.lanSyncScheduler?.iniciar();

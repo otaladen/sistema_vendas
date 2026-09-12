@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/lan_api_client.dart';
 import '../../data/api/lan_api_event_hub.dart';
 import '../../data/api/nfe_entrada_api_repository.dart';
@@ -23,7 +23,7 @@ abstract final class NfeImportacaoXmlFlow {
     BuildContext context, {
     required String xml,
     required dynamic produtoRepository,
-    required AppConfigRepository appConfigRepository,
+    required ConfiguracoesService configuracoesService,
     LanApiClient? lanApiClient,
   }) async {
     if (xml.trim().isEmpty) return;
@@ -31,7 +31,7 @@ abstract final class NfeImportacaoXmlFlow {
       context,
       xml: xml,
       produtoRepository: produtoRepository,
-      appConfigRepository: appConfigRepository,
+      configuracoesService: configuracoesService,
       lanApiClient: lanApiClient,
     );
   }
@@ -39,7 +39,7 @@ abstract final class NfeImportacaoXmlFlow {
   static Future<void> executar(
     BuildContext context, {
     required dynamic produtoRepository,
-    required AppConfigRepository appConfigRepository,
+    required ConfiguracoesService configuracoesService,
     LanApiClient? lanApiClient,
   }) async {
     final client =
@@ -64,7 +64,7 @@ abstract final class NfeImportacaoXmlFlow {
         context,
         xml: xml,
         produtoRepository: produtoRepository,
-        appConfigRepository: appConfigRepository,
+        configuracoesService: configuracoesService,
         lanApiClient: lanApiClient,
       );
     } on LanApiException catch (e) {
@@ -89,7 +89,7 @@ abstract final class NfeImportacaoXmlFlow {
     BuildContext context, {
     required String xml,
     required dynamic produtoRepository,
-    required AppConfigRepository appConfigRepository,
+    required ConfiguracoesService configuracoesService,
     LanApiClient? lanApiClient,
   }) async {
     final client =
@@ -144,7 +144,7 @@ abstract final class NfeImportacaoXmlFlow {
           nfe: nfe,
           nfeRepository: repo,
           produtoRepository: produtoRepository,
-          appConfigRepository: appConfigRepository,
+          configuracoesService: configuracoesService,
           xmlOriginal: xml,
           sugestoesIniciais: sugestoes,
         ),

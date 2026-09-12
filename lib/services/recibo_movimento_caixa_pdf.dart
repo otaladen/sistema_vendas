@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../data/app_config_repository.dart';
 import 'cupom_pdf_layout.dart';
+import 'impressoes_service.dart';
 
 /// Comprovante nao fiscal de suprimento ou sangria no caixa.
 class ReciboMovimentoCaixaPdf {
@@ -47,7 +48,7 @@ class ReciboMovimentoCaixaPdf {
     final doc = pw.Document();
     final modelo = empresaModeloPdfDeString(config.modeloPdf);
     final comLogo = logoBytes.isNotEmpty;
-    final layout = config.layoutImpressao.cupom;
+    final layout = ImpressoesService.layoutCupomEfetivo(config);
     final dataLocal = dataHora.toLocal();
     final obs = observacao.trim();
 

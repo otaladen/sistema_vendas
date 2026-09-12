@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../data/app_config_repository.dart';
+import 'configuracoes_service.dart';
 import '../ui/app_global_error_handler.dart';
 
 /// Intercepta o fechamento da janela no Windows enquanto o backup ao sair roda.
@@ -20,7 +20,7 @@ abstract final class WindowsBackupAoFecharWindowService {
   }
 
   static Future<void> instalar({
-    required AppConfigRepository appConfigRepository,
+    required ConfiguracoesService configuracoesService,
     required Future<void> Function({bool agendarHeadless}) executarBackupAoFechar,
     required bool Function() servidorComObjectBox,
   }) async {
@@ -28,7 +28,7 @@ abstract final class WindowsBackupAoFecharWindowService {
     await ensureInitialized();
     _listener?.dispose();
     _listener = _WindowsBackupCloseListener(
-      appConfigRepository: appConfigRepository,
+      configuracoesService: configuracoesService,
       executarBackupAoFechar: executarBackupAoFechar,
       servidorComObjectBox: servidorComObjectBox,
     );
@@ -48,12 +48,12 @@ abstract final class WindowsBackupAoFecharWindowService {
 
 class _WindowsBackupCloseListener with WindowListener {
   _WindowsBackupCloseListener({
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.executarBackupAoFechar,
     required this.servidorComObjectBox,
   });
 
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final Future<void> Function({bool agendarHeadless}) executarBackupAoFechar;
   final bool Function() servidorComObjectBox;
 
@@ -84,7 +84,7 @@ class _WindowsBackupCloseListener with WindowListener {
       }
 
       final backupAoFechar =
-          await appConfigRepository.carregarBackupAoFecharAtivo();
+          await configuracoesService.repository.carregarBackupAoFecharAtivo();
       if (!backupAoFechar) {
         await executarBackupAoFechar(agendarHeadless: true);
         await windowManager.destroy();

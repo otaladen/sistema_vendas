@@ -17,7 +17,8 @@ import '../../data/api/lan_api_client.dart';
 import '../../data/api/lan_api_event_hub.dart';
 import '../../data/api/produto_api_repository.dart';
 import '../../data/api/venda_api_repository.dart';
-import '../../data/app_config_repository.dart';
+import '../../data/app_config_repository.dart' show EmpresaConfig;
+import '../../services/configuracoes_service.dart';
 import '../../data/nfe_inutilizacao_store.dart';
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../data/sync/sync_refresh_hub.dart';
@@ -78,7 +79,7 @@ class NfeGerenciamentoPage extends StatefulWidget {
     super.key,
     required this.vendaRepository,
     required this.clienteRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.usuarioLogado,
     this.vendaIdInicial,
     this.abaInicial = 0,
@@ -86,7 +87,7 @@ class NfeGerenciamentoPage extends StatefulWidget {
 
   final dynamic vendaRepository;
   final dynamic clienteRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final UsuarioSistema usuarioLogado;
   final int? vendaIdInicial;
   final int abaInicial;
@@ -258,7 +259,7 @@ class _NfeGerenciamentoPageState extends State<NfeGerenciamentoPage>
   }
 
   Future<void> _carregarEmpresa() async {
-    final cfg = await widget.appConfigRepository.carregarEmpresaConfig();
+    final cfg = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     setState(() => _empresa = cfg);
   }

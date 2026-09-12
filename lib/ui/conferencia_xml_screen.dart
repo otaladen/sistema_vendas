@@ -6,7 +6,7 @@ import '../data/api/lan_api_client.dart';
 import '../data/api/lan_api_event_hub.dart';
 import '../data/api/nfe_entrada_api_repository.dart';
 import '../data/api/produto_api_repository.dart';
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/nfe_entrada_repository.dart';
 import '../domain/conferencia_nfe_opcoes.dart';
 import '../domain/nfe_entrada_conversao_util.dart';
@@ -35,7 +35,7 @@ class ConferenciaXmlScreen extends StatefulWidget {
     required this.nfe,
     required this.nfeRepository,
     required this.produtoRepository,
-    this.appConfigRepository,
+    this.configuracoesService,
     this.xmlOriginal = '',
     this.sugestoesIniciais,
   });
@@ -43,7 +43,7 @@ class ConferenciaXmlScreen extends StatefulWidget {
   final NfeXmlParseResult nfe;
   final dynamic nfeRepository;
   final dynamic produtoRepository;
-  final AppConfigRepository? appConfigRepository;
+  final ConfiguracoesService? configuracoesService;
   final String xmlOriginal;
 
   /// Quando ja veio do `POST /api/nfe/ler-xml` (evita segundo parse no terminal).
@@ -222,9 +222,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   }
 
   Future<void> _carregarMargemMinima() async {
-    final repo = widget.appConfigRepository;
-    if (repo == null) return;
-    final config = await repo.carregarEmpresaConfig();
+    final svc = widget.configuracoesService;
+    if (svc == null) return;
+    final config = await svc.carregarEfetiva();
     if (!mounted) return;
     setState(() {
       _margemMinimaPadrao = config.margemMinimaPercentualPadrao.clamp(0, 99);

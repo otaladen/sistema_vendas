@@ -16,6 +16,7 @@ import '../domain/quantidade_venda_util.dart';
 import '../domain/venda_relacao_safe.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
+import 'impressoes_service.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
@@ -183,7 +184,7 @@ abstract final class OrcamentoPdfService {
     final comLogo = logoBytes.isNotEmpty;
 
     // LGPD: forca ocultar documento do cliente no papel de cotacao.
-    final layout = empresa.layoutImpressao.orcamento.copyWith(
+    final layout = ImpressoesService.layoutOrcamentoEfetivo(empresa).copyWith(
       familiaFonte: LayoutFamiliaFonte.courier,
       linhaQuantidadePreco: true,
       exibirDocumentoCliente: false,

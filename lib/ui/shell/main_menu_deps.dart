@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/lan_api_client.dart';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/objectbox.dart';
@@ -24,7 +24,7 @@ class MainMenuDeps extends InheritedWidget {
     required this.usuarioLogado,
     required this.onLogout,
     required this.lanSyncScheduler,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     this.usuarioRepository,
     this.vendaApiRepository,
@@ -50,7 +50,7 @@ class MainMenuDeps extends InheritedWidget {
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;
   final LanSyncScheduler? lanSyncScheduler;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   /// [UsuarioRepository] (PC1) ou [UsuarioApiRepository] (terminal).
   final dynamic usuarioRepository;
@@ -116,7 +116,7 @@ class MainMenuDeps extends InheritedWidget {
     usuarioLogado: usuarioLogado,
     onLogout: onLogout,
     lanSyncScheduler: lanSyncScheduler,
-    appConfigRepository: appConfigRepository,
+    configuracoesService: configuracoesService,
     printService: printService,
     usuarioRepository: usuarioRepository,
     vendaApiRepository: vendaApiRepository,

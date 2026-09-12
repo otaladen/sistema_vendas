@@ -617,6 +617,13 @@ class SyncEntityCodecExtras {
     'backupSegundoDestinoPasta',
     'abrirGavetaAutomatica',
     'gavetaPino',
+    'modoImpressaoBalcao',
+    'escPosLargura',
+    'escPosDestino',
+    'escPosHost',
+    'escPosPortaTcp',
+    'escPosPortaCom',
+    'pdvAutoImpressaoAoFinalizarVenda',
   };
 
   static Map<String, dynamic> empresaConfigParaMap(EmpresaConfig c) => {

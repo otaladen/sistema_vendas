@@ -114,7 +114,7 @@ class MainMenuRouter {
           clienteRepository: deps.clienteRepository,
           vendaRepository: deps.vendaRepository,
           vendedorRepository: deps.vendedorRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           printService: deps.printService,
           usuarioLogado: u,
           onLogout: deps.onLogout,
@@ -126,7 +126,7 @@ class MainMenuRouter {
           clienteRepository: deps.clienteRepository,
           vendaRepository: deps.vendaRepository,
           vendedorRepository: deps.vendedorRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           printService: deps.printService,
           usuarioLogado: u,
         );
@@ -136,7 +136,7 @@ class MainMenuRouter {
           produtoRepository: deps.produtoRepository,
           vendaRepository: deps.vendaRepository,
           vendedorRepository: deps.vendedorRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           printService: deps.printService,
           usuarioLogado: u,
           usuarioAtual: u.login,
@@ -167,7 +167,7 @@ class MainMenuRouter {
           produtoRepository: deps.produtoRepository,
           vendaRepository: deps.vendaRepository,
           clienteRepository: deps.clienteRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           usuarioLogado: u,
           terminalLeve: deps.terminalLeve,
           lanApiClient: deps.lanApiClient,
@@ -178,7 +178,7 @@ class MainMenuRouter {
           produtoRepository: deps.produtoRepository,
           motoristaRepository: deps.motoristaRepository,
           vendedorRepository: deps.vendedorRepository,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           usuarioAtual: u.login,
           podeGerenciarStatusEntrega:
               UsuarioPermissaoHelper.podeGerenciarEntregas(u),
@@ -217,7 +217,7 @@ class MainMenuRouter {
           vendaRepository: deps.vendaRepository,
           objectBox: deps.objectBox,
           lanSyncScheduler: deps.lanSyncScheduler,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
           printService: deps.printService,
           produtoRepository: deps.produtoRepository,
           secaoInicialId: configSecaoInicialId,
@@ -229,7 +229,7 @@ class MainMenuRouter {
           vendaRepository: deps.vendaRepository,
           motoristaRepository: deps.motoristaRepository,
           usuarioLogado: u,
-          appConfigRepository: deps.appConfigRepository,
+          configuracoesService: deps.configuracoesService,
         );
     }
   }

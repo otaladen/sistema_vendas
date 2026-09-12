@@ -27,6 +27,8 @@ class SyncLocalConfig {
   static const _kEscPosHost = 'sync_local_escpos_host';
   static const _kEscPosPortaTcp = 'sync_local_escpos_porta_tcp';
   static const _kEscPosPortaCom = 'sync_local_escpos_porta_com';
+  static const _kPdvAutoImpressaoFinalizar =
+      'sync_local_pdv_auto_impressao_finalizar_v1';
 
   static Future<void> migrarLegadoSeNecessario(EmpresaConfig legado) async {
     final prefs = await SharedPreferences.getInstance();
@@ -124,6 +126,9 @@ class SyncLocalConfig {
         return p;
       }(),
       escPosPortaCom: prefs.getString(_kEscPosPortaCom) ?? base.escPosPortaCom,
+      pdvAutoImpressaoAoFinalizarVenda:
+          prefs.getBool(_kPdvAutoImpressaoFinalizar) ??
+              base.pdvAutoImpressaoAoFinalizarVenda,
     );
   }
 
@@ -176,6 +181,10 @@ class SyncLocalConfig {
       config.escPosPortaTcp.clamp(1, 65535),
     );
     await prefs.setString(_kEscPosPortaCom, config.escPosPortaCom.trim());
+    await prefs.setBool(
+      _kPdvAutoImpressaoFinalizar,
+      config.pdvAutoImpressaoAoFinalizarVenda,
+    );
     await prefs.setBool(_kMigrado, true);
   }
 }

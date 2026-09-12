@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../data/api/lan_api_event_hub.dart';
 import '../data/app_config_repository.dart';
+import 'configuracoes_service.dart';
 import '../data/sync/sync_api_client.dart';
 import '../domain/produto_imagem_nome_arquivo.dart';
 
@@ -13,7 +14,8 @@ class ProdutoImagemLanService {
     required this.imagesDirectoryPath,
     AppConfigRepository? configRepository,
     SyncApiClient? apiClient,
-  })  : _configRepository = configRepository ?? AppConfigRepository(),
+  })  : _configRepository =
+            configRepository ?? ConfiguracoesService.repositoryFallback(),
         _apiClientOverride = apiClient;
 
   final String imagesDirectoryPath;

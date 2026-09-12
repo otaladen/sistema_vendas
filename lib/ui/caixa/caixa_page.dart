@@ -17,6 +17,7 @@ import '../../data/api/caixa_sessao_api.dart';
 import '../../data/api/cliente_api_repository.dart';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/objectbox.dart';
 import '../../data/caixa_auditoria_repository.dart';
 import '../../data/caixa_sessao_repository.dart';
@@ -76,6 +77,7 @@ import '../../services/print_service.dart';
 import '../clientes_page.dart';
 import '../cupom_venda_impressao_helper.dart';
 import '../../services/esc_pos_cupom_builder.dart';
+import '../../services/impressoes_service.dart';
 import '../segunda_via_cupom_autorizacao.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
 import '../widgets/lan_api_feedback.dart';
@@ -113,7 +115,7 @@ class CaixaPage extends StatefulWidget {
     required this.produtoRepository,
     required this.vendaRepository,
     required this.vendedorRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     required this.usuarioLogado,
     required this.usuarioAtual,
@@ -128,7 +130,7 @@ class CaixaPage extends StatefulWidget {
   final dynamic produtoRepository;
   final dynamic vendaRepository;
   final dynamic vendedorRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;
   final String usuarioAtual;
@@ -547,7 +549,7 @@ class _CaixaPageState extends State<CaixaPage> {
         builder: (_) => PendenciasFiscaisPage(
           vendaRepository: widget.vendaRepository,
           clienteRepository: widget.clienteRepository,
-          appConfigRepository: widget.appConfigRepository,
+          configuracoesService: widget.configuracoesService,
           usuarioLogado: usuario,
         ),
       ),
@@ -804,7 +806,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _carregarLimiteDivergenciaCaixa() async {
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     setState(() {
       _limiteDivergenciaSemSupervisor = config.limiteDivergenciaCaixa;
@@ -1084,7 +1086,7 @@ class _CaixaPageState extends State<CaixaPage> {
         clienteRepository: widget.clienteRepository,
         vendaRepository: widget.vendaRepository,
         vendedorRepository: widget.vendedorRepository,
-        appConfigRepository: widget.appConfigRepository,
+        configuracoesService: widget.configuracoesService,
         printService: widget.printService,
         usuarioLogado: widget.usuarioLogado,
       );
@@ -1567,7 +1569,7 @@ class _CaixaPageState extends State<CaixaPage> {
     if (!mounted) return;
     // PC1 com um-caixa: se outro terminal abriu via API, SharedPreferences
     // local ja foi atualizado — aderir a qualquer sessao aberta na loja.
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     final todas = await _sessaoRepo.listarTodasSessoes();
     CaixaSessao? abertaLoja;
     for (final x in todas.values) {
@@ -2444,7 +2446,7 @@ class _CaixaPageState extends State<CaixaPage> {
         }
       } catch (_) {}
     } else {
-      final config = await widget.appConfigRepository.carregarEmpresaConfig();
+      final config = await widget.configuracoesService.carregarEfetiva();
       if (config.umCaixaAbertoPorLoja) {
         final outra =
             await CaixaSessaoRepository().obterSessaoAbertaEmOutroTerminal();
@@ -2672,7 +2674,7 @@ class _CaixaPageState extends State<CaixaPage> {
     if (_terminalId.isEmpty) {
       _terminalId = await _sessaoRepo.obterTerminalId();
     }
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     return _sessaoRepo.registrarMovimentacao(
       terminalId: _terminalId,
       deltaSuprimento: suprimento ? valor : 0,
@@ -2740,7 +2742,7 @@ class _CaixaPageState extends State<CaixaPage> {
     if (!mounted) return;
     final tipo = suprimento ? 'Suprimento' : 'Sangria';
     final tipoArquivo = suprimento ? 'suprimento' : 'sangria';
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     CaixaFeedback.sucesso(context, '$tipo de ${_formatarMoeda(valor)} registrado.');
     await mostrarFluxoImpressaoCupomVenda(
@@ -2752,7 +2754,7 @@ class _CaixaPageState extends State<CaixaPage> {
       suggestedFileName:
           '${tipoArquivo}_caixa_${DateFormat('yyyyMMdd_HHmmss').format(dataHora)}.pdf',
       gerarPdf: () async {
-        final layout = config.layoutImpressao.cupom;
+        final layout = ImpressoesService.layoutCupomEfetivo(config);
         final bytes = await ReciboMovimentoCaixaPdf.gerarBytes(
           suprimento: suprimento,
           valor: valor,
@@ -2997,7 +2999,7 @@ class _CaixaPageState extends State<CaixaPage> {
     }
     final recebimento = rec;
 
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
 
     final saldoOverride = repo is VendaApiRepository
@@ -3013,7 +3015,7 @@ class _CaixaPageState extends State<CaixaPage> {
       suggestedFileName:
           'recibo_fiado_${resultado.cliente.id}_${recebimento.id}.pdf',
       gerarPdf: () async {
-        final layout = config.layoutImpressao.cupom;
+        final layout = ImpressoesService.layoutCupomEfetivo(config);
         final bytes = await ReciboRecebimentoFiadoPdf.gerarBytes(
           recebimento: recebimento,
           cliente: resultado.cliente,
@@ -3557,7 +3559,7 @@ class _CaixaPageState extends State<CaixaPage> {
     required double declaradoCredito,
     required String observacao,
   }) async {
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     final logoBytes = config.logoPath.trim().isNotEmpty
         ? await File(
             config.logoPath,
@@ -3682,7 +3684,7 @@ class _CaixaPageState extends State<CaixaPage> {
     required String observacao,
   }) async {
     if (!mounted) return;
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     final acao = await showDialog<String>(
       context: context,
@@ -4199,7 +4201,7 @@ class _CaixaPageState extends State<CaixaPage> {
     final precoLista = _precoListaPadraoConferencia(venda);
     final clienteId = venda.cliente.targetId;
     final cid = clienteId > 0 ? clienteId : null;
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
 
     final result = await Navigator.of(context, rootNavigator: true)
@@ -5625,7 +5627,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   GavetaEscPosService get _gaveta =>
-      _gavetaService ??= GavetaEscPosService(widget.appConfigRepository);
+      _gavetaService ??= GavetaEscPosService(widget.configuracoesService);
 
   Future<void> _tentarAbrirGavetaPosPagamento() async {
     final r = await _gaveta.abrirAposPagamento();
@@ -5782,7 +5784,7 @@ class _CaixaPageState extends State<CaixaPage> {
             builder: (_) => NfeGerenciamentoPage(
               vendaRepository: widget.vendaRepository,
               clienteRepository: widget.clienteRepository,
-              appConfigRepository: widget.appConfigRepository,
+              configuracoesService: widget.configuracoesService,
               usuarioLogado: usuarioNfe,
               vendaIdInicial: vendaId,
             ),
@@ -5972,7 +5974,7 @@ class _CaixaPageState extends State<CaixaPage> {
         builder: (_) => NfeGerenciamentoPage(
           vendaRepository: widget.vendaRepository,
           clienteRepository: widget.clienteRepository,
-          appConfigRepository: widget.appConfigRepository,
+          configuracoesService: widget.configuracoesService,
           usuarioLogado: usuarioNfe,
           vendaIdInicial: venda.id,
         ),
@@ -6007,7 +6009,7 @@ class _CaixaPageState extends State<CaixaPage> {
         : totalRecebido;
     final trocoImp =
         cupomValores.troco > 0.009 ? cupomValores.troco : troco;
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     List<ItemVenda> itensCupom = const [];
     final repo = widget.vendaRepository;
@@ -6064,7 +6066,7 @@ class _CaixaPageState extends State<CaixaPage> {
         clienteRepository: widget.clienteRepository,
         vendedorRepository: widget.vendedorRepository,
         produtoRepository: widget.produtoRepository,
-        appConfigRepository: widget.appConfigRepository,
+        configuracoesService: widget.configuracoesService,
         printService: widget.printService,
         focusNfeService: _focusNfeService,
       );
@@ -6099,7 +6101,7 @@ class _CaixaPageState extends State<CaixaPage> {
           if (r['autorizada'] == true) {
             if (posVendaAutomatico && mounted) {
               final config =
-                  await widget.appConfigRepository.carregarEmpresaConfig();
+                  await widget.configuracoesService.carregarEfetiva();
               if (mounted) {
                 await EmitirNfceVendaFlow.imprimirCupomNfcePosVenda(
                   context,
@@ -6528,7 +6530,7 @@ class _CaixaPageState extends State<CaixaPage> {
 
   Future<void> _emitirSegundaViaCupomParaVenda(Venda v) async {
     final vendaAtualizada = widget.vendaRepository.obterPorId(v.id) ?? v;
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     List<ItemVenda> itensCupom = const [];
     final repo = widget.vendaRepository;

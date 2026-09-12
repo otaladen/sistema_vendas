@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../domain/main_menu_sub_destino.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
@@ -20,7 +20,7 @@ class VendasPage extends StatelessWidget {
     required this.vendaRepository,
     required this.vendedorRepository,
     required this.motoristaRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     required this.usuarioLogado,
     required this.onLogout,
@@ -31,7 +31,7 @@ class VendasPage extends StatelessWidget {
   final dynamic vendaRepository;
   final dynamic vendedorRepository;
   final dynamic motoristaRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;

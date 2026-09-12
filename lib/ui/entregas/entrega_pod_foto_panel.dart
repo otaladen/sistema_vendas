@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/app_config_repository.dart';
 import '../../model/venda.dart';
+import '../../services/configuracoes_service.dart';
 import '../../services/entrega_pod_lan_service.dart';
 
 /// Exibe dados do POD e foto (local, cache ou download LAN).
@@ -12,13 +12,13 @@ class EntregaPodFotoPanel extends StatefulWidget {
   const EntregaPodFotoPanel({
     super.key,
     required this.venda,
-    this.configRepository,
+    this.configuracoesService,
     this.podeEditar = false,
     this.onEditar,
   });
 
   final Venda venda;
-  final AppConfigRepository? configRepository;
+  final ConfiguracoesService? configuracoesService;
   final bool podeEditar;
   final VoidCallback? onEditar;
 

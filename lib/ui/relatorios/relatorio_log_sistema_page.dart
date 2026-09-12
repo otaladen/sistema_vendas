@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/auditoria_repository.dart';
 import '../../data/api/auditoria_api_repository.dart';
 import '../../data/api/venda_api_repository.dart';
@@ -18,14 +18,14 @@ class RelatorioLogSistemaPage extends StatefulWidget {
   const RelatorioLogSistemaPage({
     super.key,
     required this.auditoriaRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.usuarioAdmin,
     this.usuarioLogin = '',
     this.vendaRepository,
   });
 
   final dynamic auditoriaRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final dynamic vendaRepository;
   final bool usuarioAdmin;
   final String usuarioLogin;
@@ -82,7 +82,7 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
   Future<void> _carregar({bool incluirConfig = false}) async {
     setState(() => _carregando = true);
     if (incluirConfig && widget.usuarioAdmin) {
-      final config = await widget.appConfigRepository.carregarEmpresaConfig();
+      final config = await widget.configuracoesService.carregarEfetiva();
       _retencaoDias =
           AuditoriaRetencaoOpcoes.normalizar(config.auditoriaRetencaoDias);
     }
@@ -138,9 +138,9 @@ class _RelatorioLogSistemaPageState extends State<RelatorioLogSistemaPage>
     if (_salvandoRetencao) return;
     setState(() => _salvandoRetencao = true);
     try {
-      final atual = await widget.appConfigRepository.carregarEmpresaConfig();
+      final atual = await widget.configuracoesService.carregarEfetiva();
       final normalizado = AuditoriaRetencaoOpcoes.normalizar(dias);
-      await widget.appConfigRepository.salvarEmpresaConfig(
+      await widget.configuracoesService.salvarEfetiva(
         atual.copyWith(auditoriaRetencaoDias: normalizado),
       );
       if (!mounted) return;

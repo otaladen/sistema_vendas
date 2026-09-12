@@ -2,23 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/api/lan_api_client.dart';
 import '../data/sync/sync_entity_codec_extras.dart';
 import '../model/config_layout_impressao.dart';
 import '../services/cupom_layout_preview_pdf.dart';
 import '../services/cupom_pdf_layout.dart';
+import '../services/impressoes_service.dart';
 import '../services/print_service.dart';
 
 class LayoutImpressaoPage extends StatefulWidget {
   const LayoutImpressaoPage({
     super.key,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     this.printService,
     this.terminalLeve = false,
     this.lanApiClient,
   });
 
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService? printService;
   final bool terminalLeve;
   final dynamic lanApiClient;
@@ -49,7 +51,7 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
   }
 
   Future<EmpresaConfig> _carregarEmpresa() async {
-    final local = await widget.appConfigRepository.carregarEmpresaConfig();
+    final local = await widget.configuracoesService.carregarEfetiva();
     if (!widget.terminalLeve) return local;
     final client = widget.lanApiClient;
     if (client is! LanApiClient || !client.configurado) return local;
@@ -61,7 +63,7 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
         local,
         Map<String, dynamic>.from(raw),
       );
-      await widget.appConfigRepository.salvarEmpresaConfig(
+      await widget.configuracoesService.salvarEfetiva(
         mesclado,
         propagarRede: false,
       );
@@ -121,13 +123,13 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
                 Map<String, dynamic>.from(raw),
               )
             : atualizado;
-        await widget.appConfigRepository.salvarEmpresaConfig(
+        await widget.configuracoesService.salvarEfetiva(
           paraCache,
           propagarRede: false,
         );
         _empresa = paraCache;
       } else {
-        await widget.appConfigRepository.salvarEmpresaConfig(atualizado);
+        await widget.configuracoesService.salvarEfetiva(atualizado);
         _empresa = atualizado;
         if (client is LanApiClient && client.configurado) {
           try {
@@ -194,9 +196,13 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
       return;
     }
     try {
+      final layoutBobina = ImpressoesService.layoutParaBobinaLocal(
+        layoutGlobal: _layoutAtual,
+        escPosLargura: empresa.escPosLargura,
+      );
       final pdf = await CupomLayoutPreviewPdf.gerar(
         empresa: empresa,
-        layout: _layoutAtual,
+        layout: layoutBobina,
         orcamento: _orcamento,
       );
       await Printing.directPrintPdf(
@@ -229,9 +235,13 @@ class _LayoutImpressaoPageState extends State<LayoutImpressaoPage>
   Future<void> _abrirPreview() async {
     final empresa = _empresa;
     if (empresa == null) return;
+    final layoutBobina = ImpressoesService.layoutParaBobinaLocal(
+      layoutGlobal: _layoutAtual,
+      escPosLargura: empresa.escPosLargura,
+    );
     final bytes = await CupomLayoutPreviewPdf.gerarBytes(
       empresa: empresa,
-      layout: _layoutAtual,
+      layout: layoutBobina,
       orcamento: _orcamento,
     );
     if (!mounted) return;

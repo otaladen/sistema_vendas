@@ -4,7 +4,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-import '../data/app_config_repository.dart';
+import 'configuracoes_service.dart';
 
 /// Resultado de [imprimirTeste].
 enum PrintTestOutcome {
@@ -24,9 +24,9 @@ enum PrintTestOutcome {
 /// Configuracoes > Impressora). Este servico permanece para orcamentos A4,
 /// etiquetas e dialogo do Windows Print Manager.
 class PrintService {
-  PrintService(this._configRepository);
+  PrintService(this._configuracoes);
 
-  final AppConfigRepository _configRepository;
+  final ConfiguracoesService _configuracoes;
 
   /// Impressoras instaladas no sistema (tipicamente **desktop**).
   /// Em Web/mobile pode retornar lista vazia.
@@ -42,14 +42,14 @@ class PrintService {
 
   /// Nome salvo em [EmpresaConfig.impressoraPadrao] (SharedPreferences).
   Future<String> obterNomeImpressoraSalva() async {
-    final c = await _configRepository.carregarEmpresaConfig();
+    final c = await _configuracoes.carregarEfetiva();
     return c.impressoraPadrao.trim();
   }
 
   /// Persiste apenas o nome da impressora (merge com demais dados da empresa).
   Future<void> salvarImpressoraSelecionada(String nomeImpressora) async {
-    final c = await _configRepository.carregarEmpresaConfig();
-    await _configRepository.salvarEmpresaConfig(
+    final c = await _configuracoes.carregarEfetiva();
+    await _configuracoes.salvarEfetiva(
       c.copyWith(impressoraPadrao: nomeImpressora.trim()),
     );
   }

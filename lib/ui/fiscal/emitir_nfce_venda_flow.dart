@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../config/fiscal_config.dart';
 import '../../data/api/venda_api_repository.dart';
-import '../../data/app_config_repository.dart';
+import '../../data/app_config_repository.dart' show EmpresaConfig;
+import '../../services/configuracoes_service.dart';
 import '../../data/sync/sync_cursor_storage.dart';
 import '../../domain/fiscal/abrir_danfe_focus.dart';
 import '../../domain/fiscal/caixa_fiscal_acao_helper.dart';
@@ -27,7 +28,7 @@ class EmitirNfceVendaDeps {
     required this.vendaRepository,
     required this.clienteRepository,
     required this.vendedorRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     required this.focusNfeService,
     this.produtoRepository,
@@ -38,7 +39,7 @@ class EmitirNfceVendaDeps {
   final dynamic clienteRepository;
   final dynamic vendedorRepository;
   final dynamic produtoRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final FocusNfeService focusNfeService;
 }
@@ -421,7 +422,7 @@ abstract final class EmitirNfceVendaFlow {
           final r = dialogResult.resultado!;
           final vSalvar = dialogResult.vendaAtual ?? vendaAtual;
           final config =
-              await deps.appConfigRepository.carregarEmpresaConfig();
+              await deps.configuracoesService.carregarEfetiva();
           if (!context.mounted) return dialogResult;
 
           try {

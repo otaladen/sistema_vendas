@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../services/print_service.dart';
 import '../model/usuario_sistema.dart';
 import 'ponto_de_venda_page.dart';
@@ -15,7 +15,7 @@ Future<void> abrirPdvComOrcamento(
   required dynamic clienteRepository,
   required dynamic vendaRepository,
   required dynamic vendedorRepository,
-  required AppConfigRepository appConfigRepository,
+  required ConfiguracoesService configuracoesService,
   required PrintService printService,
   required UsuarioSistema usuarioLogado,
 }) {
@@ -27,7 +27,7 @@ Future<void> abrirPdvComOrcamento(
         clienteRepository: clienteRepository,
         vendaRepository: vendaRepository,
         vendedorRepository: vendedorRepository,
-        appConfigRepository: appConfigRepository,
+        configuracoesService: configuracoesService,
         printService: printService,
         usuarioLogado: usuarioLogado,
         orcamentoIdInicial: orcamentoId,

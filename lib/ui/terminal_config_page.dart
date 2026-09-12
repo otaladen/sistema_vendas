@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/lan_api_url.dart';
 import '../../data/api/lan_conexao_perfis.dart';
 
@@ -13,13 +13,13 @@ import '../../data/api/lan_conexao_perfis.dart';
 class TerminalConfigPage extends StatefulWidget {
   const TerminalConfigPage({
     super.key,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.onSalvo,
     required this.onLogout,
     this.erroConexao,
   });
 
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final Future<void> Function() onSalvo;
   final VoidCallback onLogout;
 
@@ -55,7 +55,7 @@ class _TerminalConfigPageState extends State<TerminalConfigPage> {
   }
 
   Future<void> _carregar() async {
-    final c = await widget.appConfigRepository.carregarEmpresaConfig();
+    final c = await widget.configuracoesService.carregarEfetiva();
     final raw = c.redeServidorUrl.trim();
     await LanConexaoPerfisStore.migrarSeVazio(raw);
     final perfil = await LanConexaoPerfisStore.perfilAtivo();
@@ -105,8 +105,8 @@ class _TerminalConfigPageState extends State<TerminalConfigPage> {
       }
       await LanConexaoPerfisStore.salvarUrlPerfil(_perfil, apiUrl);
       await LanConexaoPerfisStore.setPerfilAtivo(_perfil);
-      final c = await widget.appConfigRepository.carregarEmpresaConfig();
-      await widget.appConfigRepository.salvarEmpresaConfig(
+      final c = await widget.configuracoesService.carregarEfetiva();
+      await widget.configuracoesService.salvarEfetiva(
         c.copyWith(
           redeSincronizacaoAtiva: true,
           redeModoServidor: false,
@@ -163,8 +163,8 @@ class _TerminalConfigPageState extends State<TerminalConfigPage> {
       _erro = null;
     });
     try {
-      final c = await widget.appConfigRepository.carregarEmpresaConfig();
-      await widget.appConfigRepository.salvarEmpresaConfig(
+      final c = await widget.configuracoesService.carregarEfetiva();
+      await widget.configuracoesService.salvarEfetiva(
         c.copyWith(
           // Celular: desliga rede → proximo boot abre ObjectBox local.
           // Windows: marca servidor para sair do Terminal Leve.

@@ -1,6 +1,6 @@
 import 'package:shelf/shelf.dart';
 
-import '../../data/app_config_repository.dart';
+import '../configuracoes_service.dart';
 import '../../data/caixa_sessao_repository.dart';
 import '../../domain/autorizacao_pdv_chat.dart';
 import 'lan_api_deps.dart';
@@ -26,7 +26,8 @@ Future<Response?> lanApiExigirCaixaAberto(
 }) async {
   final terminalId = lanApiTerminalIdDaRequisicao(r, body: body);
   final repo = CaixaSessaoRepository();
-  final config = await AppConfigRepository().carregarEmpresaConfig();
+  final config = await ConfiguracoesService.repositoryFallback()
+      .carregarEmpresaConfig();
   final mapa = await repo.listarTodasSessoes();
   final sessao = CaixaSessaoRepository.sessaoAbertaPara(
     mapa,

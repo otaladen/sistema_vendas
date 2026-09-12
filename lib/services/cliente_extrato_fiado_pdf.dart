@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../data/app_config_repository.dart';
+import 'configuracoes_service.dart';
 import '../domain/recebimento_fiado_codec.dart';
 import '../model/cliente.dart';
 import '../model/recebimento_fiado.dart';
@@ -48,7 +49,8 @@ Future<ExtratoFiadoClienteDados> montarExtratoFiadoClienteDados({
   required double saldoEmAberto,
   double limiteCredito = 0,
 }) async {
-  final config = await AppConfigRepository().carregarEmpresaConfig();
+  final config =
+      await ConfiguracoesService.repositoryFallback().carregarEmpresaConfig();
   return ExtratoFiadoClienteDados(
     cliente: cliente,
     titulosAbertos: titulosAbertos,

@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/lan_api_event_hub.dart';
 import '../../data/sync/sync_api_client.dart';
 import '../../data/sync/sync_presence_hub.dart';
@@ -33,7 +33,6 @@ class AppRodapeStatusBar extends StatefulWidget {
 
 class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
   static final _dataHora = DateFormat('dd/MM/yyyy · HH:mm', 'pt_BR');
-  final AppConfigRepository _configRepo = AppConfigRepository();
 
   String _agora = '';
   Timer? _relogioTimer;
@@ -129,7 +128,7 @@ class _AppRodapeStatusBarState extends State<AppRodapeStatusBar> {
   }
 
   Future<void> _iniciarMonitorSync() async {
-    final config = await _configRepo.carregarEmpresaConfig();
+    final config = await ConfiguracoesService.global.carregarEfetiva();
     if (!mounted) return;
     final terminalLeve = modoTerminalLeveAtivo(config);
     final modoServidor = config.redeSincronizacaoAtiva && config.redeModoServidor;

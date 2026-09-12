@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/lan_api_client.dart';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/menu_favoritos_repository.dart';
@@ -58,7 +58,7 @@ class MainAppShellPage extends StatefulWidget {
     required this.usuarioLogado,
     required this.onLogout,
     required this.lanSyncScheduler,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     this.vendaApiRepository,
     this.lanApiClient,
@@ -83,7 +83,7 @@ class MainAppShellPage extends StatefulWidget {
   final UsuarioSistema usuarioLogado;
   final VoidCallback onLogout;
   final LanSyncScheduler? lanSyncScheduler;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final dynamic vendaApiRepository;
   final LanApiClient? lanApiClient;
@@ -213,9 +213,9 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       widget.usuarioLogado,
       PermissaoUsuario.configuracoes,
     )) {
-      final config = await widget.appConfigRepository.carregarEmpresaConfig();
+      final config = await widget.configuracoesService.carregarEfetiva();
       final manual =
-          await widget.appConfigRepository.carregarRegistroBackupManual();
+          await widget.configuracoesService.repository.carregarRegistroBackupManual();
       backupAlerta = BackupStatusHelper.avaliar(
         config: config,
         manual: manual,
@@ -234,7 +234,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
     _syncIniciado = true;
     if (widget.terminalLeve) return;
 
-    final config = await widget.appConfigRepository.carregarEmpresaConfig();
+    final config = await widget.configuracoesService.carregarEfetiva();
     if (Platform.isWindows &&
         config.redeModoServidor &&
         config.redeSincronizacaoAtiva &&
@@ -242,7 +242,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       // PC1: LanApi :8788. Sem scheduler P2P.
       await LanServidorBootstrap.garantirAtivo(
         objectBox: widget.objectBox!,
-        configRepository: widget.appConfigRepository,
+        configRepository: widget.configuracoesService.repository,
       );
       return;
     }
@@ -609,7 +609,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       usuarioLogado: widget.usuarioLogado,
       onLogout: widget.onLogout,
       lanSyncScheduler: widget.lanSyncScheduler,
-      appConfigRepository: widget.appConfigRepository,
+      configuracoesService: widget.configuracoesService,
       printService: widget.printService,
       vendaApiRepository: widget.vendaApiRepository is VendaApiRepository
           ? widget.vendaApiRepository as VendaApiRepository

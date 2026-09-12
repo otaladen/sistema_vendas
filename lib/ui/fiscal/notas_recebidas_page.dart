@@ -7,7 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 
 import '../../config/focus_nfe_runtime.dart';
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/api/lan_api_client.dart';
 import '../../data/nfe_recebidas_cache_store.dart';
 import '../../domain/fiscal/nfe_recebida.dart';
@@ -22,12 +22,12 @@ class NotasRecebidasPage extends StatefulWidget {
   const NotasRecebidasPage({
     super.key,
     required this.produtoRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     this.lanApiClient,
   });
 
   final dynamic produtoRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final LanApiClient? lanApiClient;
 
   @override
@@ -308,7 +308,7 @@ class _NotasRecebidasPageState extends State<NotasRecebidasPage> {
         context,
         xml: xml,
         produtoRepository: widget.produtoRepository,
-        appConfigRepository: widget.appConfigRepository,
+        configuracoesService: widget.configuracoesService,
         lanApiClient: widget.lanApiClient,
       );
     } finally {

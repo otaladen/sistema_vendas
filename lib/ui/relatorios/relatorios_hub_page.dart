@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../data/api/auditoria_api_repository.dart';
 import '../../data/api/sugestao_venda_metrica_api_repository.dart';
 import '../../data/api/venda_api_repository.dart';
-import '../../data/app_config_repository.dart';
+import '../../services/configuracoes_service.dart';
 import '../../data/conta_pagar_repository.dart';
 import '../../data/objectbox.dart';
 import '../../data/auditoria_repository.dart';
@@ -79,7 +79,7 @@ class RelatoriosPage extends StatefulWidget {
     required this.clienteRepository,
     required this.vendedorRepository,
     required this.produtoRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.usuarioLogado,
     required this.usuarioAdmin,
     this.usuarioLogin = '',
@@ -91,7 +91,7 @@ class RelatoriosPage extends StatefulWidget {
   final dynamic clienteRepository;
   final dynamic vendedorRepository;
   final dynamic produtoRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final UsuarioSistema usuarioLogado;
   final bool usuarioAdmin;
   final String usuarioLogin;
@@ -796,7 +796,7 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
             MaterialPageRoute<void>(
               builder: (_) => RelatorioLogSistemaPage(
                 auditoriaRepository: auditRepo,
-                appConfigRepository: widget.appConfigRepository,
+                configuracoesService: widget.configuracoesService,
                 vendaRepository: widget.vendaRepository,
                 usuarioAdmin: widget.usuarioAdmin,
                 usuarioLogin: widget.usuarioLogin,

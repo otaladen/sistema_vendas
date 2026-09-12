@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../data/api/venda_api_repository.dart';
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/devolucao_fiscal_store.dart';
 import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
@@ -38,7 +38,7 @@ class RegistrarDevolucaoTrocaPage extends StatefulWidget {
     required this.podeRegistrarSemSenha,
     this.usuarioLogado,
     this.vendedorRepository,
-    this.appConfigRepository,
+    this.configuracoesService,
     this.printService,
   });
 
@@ -50,7 +50,7 @@ class RegistrarDevolucaoTrocaPage extends StatefulWidget {
   final bool podeRegistrarSemSenha;
   final UsuarioSistema? usuarioLogado;
   final dynamic vendedorRepository;
-  final AppConfigRepository? appConfigRepository;
+  final ConfiguracoesService? configuracoesService;
   final PrintService? printService;
 
   @override
@@ -100,7 +100,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   }
 
   Future<void> _carregarTudo() async {
-    final config = await AppConfigRepository().carregarEmpresaConfig();
+    final config = await ConfiguracoesService.global.carregarEfetiva();
     if (!mounted) return;
     setState(() {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
@@ -214,7 +214,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     final u = widget.usuarioLogado;
     return u != null &&
         widget.vendedorRepository != null &&
-        widget.appConfigRepository != null &&
+        widget.configuracoesService != null &&
         widget.printService != null &&
         UsuarioPermissaoHelper.tem(u, PermissaoUsuario.acessarPdv);
   }
@@ -842,7 +842,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       clienteRepository: widget.clienteRepository,
       vendaRepository: widget.vendaRepository,
       vendedorRepository: widget.vendedorRepository!,
-      appConfigRepository: widget.appConfigRepository!,
+      configuracoesService: widget.configuracoesService!,
       printService: widget.printService!,
       usuarioLogado: widget.usuarioLogado!,
     );

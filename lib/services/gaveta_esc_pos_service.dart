@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import '../data/app_config_repository.dart';
+import '../data/app_config_repository.dart' show EmpresaConfig;
+import 'configuracoes_service.dart';
 import 'esc_pos_commands.dart';
 import 'esc_pos_transport.dart';
 
@@ -27,9 +28,9 @@ class GavetaAbrirResultado {
 
 /// Pulso ESC/POS na gaveta via destino configurado (Windows RAW / TCP / COM).
 class GavetaEscPosService {
-  GavetaEscPosService(this._configRepository);
+  GavetaEscPosService(this._configuracoes);
 
-  final AppConfigRepository _configRepository;
+  final ConfiguracoesService _configuracoes;
 
   /// Comando `ESC p m t1 t2` (padrao Epson; compativel com Bematech/Elgin).
   static Uint8List comandoPulseGaveta({
@@ -45,7 +46,7 @@ class GavetaEscPosService {
 
   /// Abre apos pagamento no caixa ([forcar] ignora o interruptor automatico).
   Future<GavetaAbrirResultado> abrirAposPagamento({bool forcar = false}) async {
-    final config = await _configRepository.carregarEmpresaConfig();
+    final config = await _configuracoes.carregarEfetiva();
     if (!forcar && !config.abrirGavetaAutomatica) {
       return const GavetaAbrirResultado(
         sucesso: false,

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../data/app_config_repository.dart';
+import 'configuracoes_service.dart';
 import '../domain/auditoria_catalogo.dart';
 import '../domain/pod_foto_retencao.dart';
 import 'auditoria_registrar.dart';
@@ -10,11 +11,13 @@ import 'entrega_pod_paths.dart';
 class EntregaPodRetencaoService {
   EntregaPodRetencaoService._();
 
-  static Future<int> aplicarSeConfigurado(
-    AppConfigRepository configRepository,
-  ) async {
+  static Future<int> aplicarSeConfigurado([
+    AppConfigRepository? configRepository,
+  ]) async {
     try {
-      final config = await configRepository.carregarEmpresaConfig();
+      final repo =
+          configRepository ?? ConfiguracoesService.repositoryFallback();
+      final config = await repo.carregarEmpresaConfig();
       return aplicar(dias: config.podFotoRetencaoDias);
     } catch (_) {
       return 0;

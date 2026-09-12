@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../data/reajuste_preco_repository.dart';
 import '../data/sync/estoque_local_refresh_hub.dart';
 import '../data/venda_repository.dart';
@@ -95,7 +95,6 @@ class EstoquePage extends StatefulWidget {
 class _EstoquePageState extends State<EstoquePage>
     with SingleTickerProviderStateMixin {
   late dynamic _usuarioRepository;
-  final _appConfigRepository = AppConfigRepository();
   late final TabController _abasController;
   int _lotesCriticosOuVencidos = 0;
   bool get _temObjectBox => widget.produtoRepository is! ProdutoApiRepository;
@@ -270,7 +269,7 @@ class _EstoquePageState extends State<EstoquePage>
   }
 
   Future<void> _carregarConfigEstoque() async {
-    final config = await _appConfigRepository.carregarEmpresaConfig();
+    final config = await ConfiguracoesService.global.carregarEfetiva();
     if (!mounted) return;
     _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
   }

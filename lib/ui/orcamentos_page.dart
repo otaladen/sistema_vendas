@@ -6,7 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../data/api/venda_api_repository.dart';
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../domain/venda_relacao_safe.dart';
@@ -29,7 +29,7 @@ class OrcamentosPage extends StatelessWidget {
     required this.clienteRepository,
     required this.produtoRepository,
     required this.vendedorRepository,
-    required this.appConfigRepository,
+    required this.configuracoesService,
     required this.printService,
     required this.usuarioLogado,
   });
@@ -38,7 +38,7 @@ class OrcamentosPage extends StatelessWidget {
   final dynamic clienteRepository;
   final dynamic produtoRepository;
   final dynamic vendedorRepository;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
   final PrintService printService;
   final UsuarioSistema usuarioLogado;
 
@@ -59,7 +59,7 @@ class OrcamentosPage extends StatelessWidget {
       clienteRepository: clienteRepository,
       vendaRepository: vendaRepository,
       vendedorRepository: vendedorRepository,
-      appConfigRepository: appConfigRepository,
+      configuracoesService: configuracoesService,
       printService: printService,
       usuarioLogado: usuarioLogado,
     );
@@ -135,7 +135,7 @@ class OrcamentosPage extends StatelessWidget {
   Future<void> _imprimirTermica(BuildContext context, Venda venda) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final config = await appConfigRepository.carregarEmpresaConfig();
+      final config = await configuracoesService.carregarEfetiva();
       final carregado = await _carregarItensParaImpressao(venda);
       if (carregado.itens.isEmpty) {
         messenger.showSnackBar(
@@ -255,7 +255,7 @@ class OrcamentosPage extends StatelessWidget {
   Future<void> _gerarPdf(BuildContext context, Venda venda) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final config = await appConfigRepository.carregarEmpresaConfig();
+      final config = await configuracoesService.carregarEfetiva();
       final carregado = await _carregarItensParaImpressao(venda);
       if (carregado.itens.isEmpty) {
         messenger.showSnackBar(

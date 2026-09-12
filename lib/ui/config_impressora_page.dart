@@ -3,21 +3,22 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../data/app_config_repository.dart';
+import '../services/configuracoes_service.dart';
 import '../services/esc_pos_printer_service.dart';
 import '../services/gaveta_esc_pos_service.dart';
 import '../services/print_service.dart';
+import 'configuracoes/config_escopo_banner.dart';
 
 /// Tela: modo PDF (A4/orçamentos) vs ESC/POS termico + gaveta.
 class ConfigImpressoraPage extends StatefulWidget {
   const ConfigImpressoraPage({
     super.key,
     required this.printService,
-    required this.appConfigRepository,
+    required this.configuracoesService,
   });
 
   final PrintService printService;
-  final AppConfigRepository appConfigRepository;
+  final ConfiguracoesService configuracoesService;
 
   @override
   State<ConfigImpressoraPage> createState() => _ConfigImpressoraPageState();
@@ -40,9 +41,9 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
   final _escPosPortaComCtrl = TextEditingController();
 
   late final GavetaEscPosService _gavetaService =
-      GavetaEscPosService(widget.appConfigRepository);
+      GavetaEscPosService(widget.configuracoesService);
   late final EscPosPrinterService _escPosService =
-      EscPosPrinterService(widget.appConfigRepository);
+      EscPosPrinterService(widget.configuracoesService);
 
   static const _erpGap16 = 16.0;
   static const _erpGap24 = 24.0;
@@ -69,7 +70,7 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
     try {
       final impressoras =
           await widget.printService.listarImpressorasDisponiveis();
-      final config = await widget.appConfigRepository.carregarEmpresaConfig();
+      final config = await widget.configuracoesService.carregarEfetiva();
       final salva = config.impressoraPadrao.trim();
       final nomes = impressoras.map((p) => p.name).toList();
       if (!mounted) return;
@@ -106,9 +107,9 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
     setState(() => _salvando = true);
     try {
       final nome = (_selecionada ?? '').trim();
-      final c = await widget.appConfigRepository.carregarEmpresaConfig();
+      final c = await widget.configuracoesService.carregarEfetiva();
       final portaTcp = int.tryParse(_escPosPortaTcpCtrl.text.trim()) ?? 9100;
-      await widget.appConfigRepository.salvarEmpresaConfig(
+      await widget.configuracoesService.salvarEfetiva(
         c.copyWith(
           impressoraPadrao: nome,
           abrirGavetaAutomatica: _abrirGavetaAutomatica,
@@ -120,6 +121,7 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
           escPosPortaTcp: portaTcp.clamp(1, 65535),
           escPosPortaCom: _escPosPortaComCtrl.text.trim(),
         ),
+        propagarRede: false,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -587,6 +589,9 @@ class _ConfigImpressoraPageState extends State<ConfigImpressoraPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const ConfigEscopoBanner(
+                        tipo: ConfigEscopoTipo.terminalLocal,
+                      ),
                       _cardModo(theme, cs),
                       const SizedBox(height: _erpGap24),
                       _cardPdf(theme, cs),
