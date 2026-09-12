@@ -2,8 +2,8 @@ import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
 
-import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
+import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/plano_fiado.dart';
@@ -16,6 +16,7 @@ import '../model/venda.dart';
 import '../model/vendedor.dart';
 import 'esc_pos_commands.dart';
 import 'fiscal_config_store.dart';
+import 'impressoes_service.dart';
 import 'orcamento_pdf_service.dart';
 
 /// Dados tipados para montar o orcamento termico ESC/POS.
@@ -28,6 +29,7 @@ class OrcamentoEscPosDados {
     this.cliente,
     this.vendedor,
     this.produtosPorItem = const {},
+    this.fiscalEmitente,
   });
 
   final Venda venda;
@@ -37,6 +39,19 @@ class OrcamentoEscPosDados {
   final Cliente? cliente;
   final Vendedor? vendedor;
   final Map<int, Produto?> produtosPorItem;
+  final FiscalConfigDados? fiscalEmitente;
+
+  OrcamentoEscPosDados comFiscal(FiscalConfigDados fiscal) =>
+      OrcamentoEscPosDados(
+        venda: venda,
+        config: config,
+        itens: itens,
+        validadeDias: validadeDias,
+        cliente: cliente,
+        vendedor: vendedor,
+        produtosPorItem: produtosPorItem,
+        fiscalEmitente: fiscal,
+      );
 }
 
 /// Monta bytes ESC/POS do orcamento (fonte nativa da Epson TM-T20 etc.).
@@ -59,6 +74,8 @@ abstract final class EscPosOrcamentoBuilder {
     final venda = dados.venda;
     final config = dados.config;
     final itens = dados.itens;
+    final fiscal = ImpressoesService.fiscalDeCache(explicit: dados.fiscalEmitente);
+    final homolog = fiscal.homologacao;
 
     out.add(EscPosCommands.init);
     out.add(EscPosCommands.codePage850);
@@ -76,17 +93,32 @@ abstract final class EscPosOrcamentoBuilder {
     if (tel.isNotEmpty) {
       out.add(EscPosCommands.line('Tel/WhatsApp: $tel'));
     }
-    final cnpj = FiscalConfigStore.efetivo.cnpjEmitente.trim().isNotEmpty
-        ? FiscalConfigStore.efetivo.cnpjEmitente
-        : FiscalConfig.cnpjEmitente;
-    if (cnpj.trim().isNotEmpty) {
-      out.add(EscPosCommands.line('CNPJ ${_formatCnpj(cnpj)}'));
+    if (fiscal.cnpjEmitente.trim().isNotEmpty) {
+      out.add(EscPosCommands.line(
+        'CNPJ ${_formatCnpj(fiscal.cnpjEmitente)}',
+      ));
     }
+    if (fiscal.inscricaoEstadualEmitente.trim().isNotEmpty) {
+      out.add(EscPosCommands.line(
+        'IE ${fiscal.inscricaoEstadualEmitente.trim()}',
+      ));
+    }
+    out.add(EscPosCommands.line(
+      FiscalRegimePadrao.rotuloRegime(FiscalRegimePadrao.regimeEfetivo(fiscal)),
+    ));
     for (final l in _wrap(config.endereco.trim(), cols)) {
       out.add(EscPosCommands.line(l));
     }
 
     out.add(EscPosCommands.separator(cols));
+    if (homolog) {
+      out.add(EscPosCommands.boldOn);
+      for (final l in _wrap('EMISSAO EM AMBIENTE DE HOMOLOGACAO', cols)) {
+        out.add(EscPosCommands.line(l));
+      }
+      out.add(EscPosCommands.boldOff);
+      out.add(EscPosCommands.separator(cols));
+    }
     out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line('ORCAMENTO'));
     out.add(EscPosCommands.boldOff);

@@ -2,6 +2,7 @@ import '../data/app_config_repository.dart';
 import 'configuracoes_service.dart';
 import '../model/config_layout_impressao.dart';
 import 'esc_pos_commands.dart';
+import 'fiscal_config_store.dart';
 
 /// Regras unificadas de bobina termica (servidor e terminais).
 class BobinaTermicaSpec {
@@ -87,5 +88,16 @@ class ImpressoesService {
   Future<ConfigLayoutImpressao> carregarLayoutOrcamentoEfetivo() async {
     final c = await _configuracoes.carregarEfetiva();
     return layoutOrcamentoEfetivo(c);
+  }
+
+  /// Focus/emitente global (API no terminal leve ou prefs no servidor).
+  Future<FiscalConfigDados> carregarFiscalParaImpressao() =>
+      _configuracoes.carregarFiscalGlobal();
+
+  /// Cache apos [carregarFiscalParaImpressao] / [ConfiguracoesService.carregarFiscalGlobal].
+  static FiscalConfigDados fiscalDeCache({FiscalConfigDados? explicit}) {
+    if (explicit != null) return explicit;
+    return ConfiguracoesService.tryGlobal?.fiscalEmCache ??
+        FiscalConfigDados.fromConstantes();
   }
 }

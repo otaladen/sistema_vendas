@@ -41,8 +41,12 @@ class EscPosPrinterService {
     final config = dados.config;
     final gaveta = abrirGaveta ?? config.abrirGavetaAutomatica;
     try {
+      final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
+      final dadosFiscal = dados.fiscalEmitente != null
+          ? dados
+          : dados.comFiscal(fiscal);
       final bytes = EscPosCupomBuilder.montar(
-        dados,
+        dadosFiscal,
         largura: EscPosLarguraBobina.fromConfig(config.escPosLargura),
         cortar: cortar,
         abrirGaveta: gaveta,
@@ -74,12 +78,15 @@ class EscPosPrinterService {
     CupomBalcaoDados dados, {
     bool cortar = true,
     bool? abrirGaveta,
-  }) =>
-      imprimirCupomDireto(
-        dados,
-        cortar: cortar,
-        abrirGaveta: abrirGaveta,
-      );
+  }) async {
+    await _configuracoes.carregarFiscalGlobal();
+    final fiscal = _configuracoes.fiscalEmCache;
+    return imprimirCupomDireto(
+      dados.fiscalEmitente != null ? dados : dados.comFiscal(fiscal),
+      cortar: cortar,
+      abrirGaveta: abrirGaveta,
+    );
+  }
 
   /// Orcamento em fonte nativa ESC/POS (Epson TM-T20 e similares).
   static Future<EscPosImpressaoResultado> imprimirOrcamentoDireto(
@@ -88,8 +95,12 @@ class EscPosPrinterService {
   }) async {
     final config = dados.config;
     try {
+      final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
+      final dadosFiscal = dados.fiscalEmitente != null
+          ? dados
+          : dados.comFiscal(fiscal);
       final bytes = EscPosOrcamentoBuilder.montar(
-        dados,
+        dadosFiscal,
         largura: EscPosLarguraBobina.fromConfig(config.escPosLargura),
         cortar: cortar,
       );

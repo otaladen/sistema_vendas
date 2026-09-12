@@ -21,9 +21,9 @@ import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import 'configuracoes_service.dart';
 import 'cupom_pdf_gerado.dart';
 import 'cupom_pdf_layout.dart';
-import 'fiscal_config_store.dart';
 
 /// Gera PDF profissional de orcamento (materiais de construcao / ERP).
 ///
@@ -131,6 +131,7 @@ abstract final class OrcamentoPdfService {
     Uint8List? logoBytesOverride,
     String Function(double)? formatarMoedaFn,
   }) async {
+    final fiscal = await ConfiguracoesService.resolverFiscalGlobal();
     final formatar = formatarMoedaFn ?? formatarMoeda;
     final itensOrcamento = List<ItemVenda>.from(itens);
     final produtos = <int, Produto?>{};
@@ -194,8 +195,8 @@ abstract final class OrcamentoPdfService {
       exibirTelefone: true,
     );
 
-    final cnpjEmpresa = FiscalConfigStore.efetivo.cnpjEmitente.trim().isNotEmpty
-        ? FiscalConfigStore.efetivo.cnpjEmitente
+    final cnpjEmpresa = fiscal.cnpjEmitente.trim().isNotEmpty
+        ? fiscal.cnpjEmitente
         : FiscalConfig.cnpjEmitente;
     final telLoja = empresa.telefone.trim();
     const whatsappLoja = '';

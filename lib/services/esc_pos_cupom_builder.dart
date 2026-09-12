@@ -2,8 +2,8 @@ import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
 
-import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
+import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/quantidade_venda_util.dart';
@@ -16,6 +16,7 @@ import 'cupom_nao_fiscal_venda_pdf.dart';
 import 'cupom_pdf_layout.dart';
 import 'esc_pos_commands.dart';
 import 'fiscal_config_store.dart';
+import 'impressoes_service.dart';
 
 /// Dados tipados para montar o cupom termico.
 class CupomBalcaoDados {
@@ -28,6 +29,7 @@ class CupomBalcaoDados {
     this.totalRecebido = 0,
     this.troco = 0,
     this.segundaVia = false,
+    this.fiscalEmitente,
   });
 
   final Venda venda;
@@ -38,6 +40,19 @@ class CupomBalcaoDados {
   final double totalRecebido;
   final double troco;
   final bool segundaVia;
+  final FiscalConfigDados? fiscalEmitente;
+
+  CupomBalcaoDados comFiscal(FiscalConfigDados fiscal) => CupomBalcaoDados(
+        venda: venda,
+        config: config,
+        itens: itens,
+        cliente: cliente,
+        vendedor: vendedor,
+        totalRecebido: totalRecebido,
+        troco: troco,
+        segundaVia: segundaVia,
+        fiscalEmitente: fiscal,
+      );
 }
 
 /// Monta bytes ESC/POS do cupom de venda / NFC-e.
@@ -61,6 +76,7 @@ abstract final class EscPosCupomBuilder {
     final out = BytesBuilder(copy: false);
     final venda = dados.venda;
     final config = dados.config;
+    final fiscal = ImpressoesService.fiscalDeCache(explicit: dados.fiscalEmitente);
 
     out.add(EscPosCommands.init);
     out.add(EscPosCommands.codePage850);
@@ -70,7 +86,7 @@ abstract final class EscPosCupomBuilder {
     final chaveValida = chaveReal.length == 44;
     final temNfceReal =
         chaveValida || venda.nfceNumero.trim().isNotEmpty;
-    final homolog = FiscalConfigStore.efetivo.homologacao;
+    final homolog = fiscal.homologacao;
     final emissao = (venda.nfceEmitidaEm ?? venda.data).toLocal();
 
     // Cupom dinheiro/fiado: numera como NFC-e auxiliar (controle interno).
@@ -87,8 +103,8 @@ abstract final class EscPosCupomBuilder {
         ? chaveReal
         : CupomPdfLayout.chaveAcessoSomenteDigitos(
             CupomPdfLayout.gerarChaveAcessoDecorativaNfce(
-              cnpj: FiscalConfig.cnpjEmitente,
-              uf: FiscalConfig.ufEmitente,
+              cnpj: fiscal.cnpjEmitente,
+              uf: fiscal.ufEmitente,
               numeroNota: numeroDoc,
               serie: serieDoc,
               emissao: emissao,
@@ -102,7 +118,7 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.boldOff);
-    final razao = FiscalConfig.razaoSocialEmitente.trim();
+    final razao = fiscal.razaoSocialEmitente.trim();
     if (razao.isNotEmpty &&
         razao.toLowerCase() != config.nomeLoja.trim().toLowerCase()) {
       for (final l in _wrap(razao, cols)) {
@@ -110,13 +126,17 @@ abstract final class EscPosCupomBuilder {
       }
     }
     out.add(EscPosCommands.line(
-      'CNPJ ${_formatCnpj(FiscalConfig.cnpjEmitente)}',
+      'CNPJ ${_formatCnpj(fiscal.cnpjEmitente)}',
     ));
-    if (FiscalConfig.inscricaoEstadualEmitente.trim().isNotEmpty) {
+    if (fiscal.inscricaoEstadualEmitente.trim().isNotEmpty) {
       out.add(EscPosCommands.line(
-        'IE ${FiscalConfig.inscricaoEstadualEmitente.trim()}',
+        'IE ${fiscal.inscricaoEstadualEmitente.trim()}',
       ));
     }
+    final regime = FiscalRegimePadrao.regimeEfetivo(fiscal);
+    out.add(EscPosCommands.line(
+      FiscalRegimePadrao.rotuloRegime(regime),
+    ));
     for (final l in _wrap(config.endereco.trim(), cols)) {
       out.add(EscPosCommands.line(l));
     }
@@ -124,6 +144,7 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.line('Tel: ${config.telefone.trim()}'));
     }
     out.add(EscPosCommands.separator(cols));
+    _adicionarFaixaHomologacao(out, cols, homolog);
 
     // Titulo estilo DANFE (cupom dinheiro e NFC-e real).
     out.add(EscPosCommands.boldOn);
@@ -133,12 +154,6 @@ abstract final class EscPosCupomBuilder {
     out.add(EscPosCommands.boldOff);
     if (dados.segundaVia) {
       out.add(EscPosCommands.line('*** SEGUNDA VIA ***'));
-    }
-    if (temNfceReal && homolog) {
-      out.add(EscPosCommands.boldOn);
-      out.add(EscPosCommands.line('AMBIENTE DE HOMOLOGACAO'));
-      out.add(EscPosCommands.line('SEM VALOR FISCAL'));
-      out.add(EscPosCommands.boldOff);
     }
     out.add(EscPosCommands.alignLeft);
 
@@ -304,11 +319,15 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.boldOff);
     }
 
-    // Rodape fiscal: so em NFC-e real de homologacao.
-    if (temNfceReal && homolog) {
+    if (homolog) {
+      out.add(EscPosCommands.separator(cols));
+      out.add(EscPosCommands.alignCenter);
       out.add(EscPosCommands.boldOn);
-      out.add(EscPosCommands.line('SEM VALOR FISCAL'));
+      for (final l in _wrap('SEM VALOR FISCAL', cols)) {
+        out.add(EscPosCommands.line(l));
+      }
       out.add(EscPosCommands.boldOff);
+      out.add(EscPosCommands.alignLeft);
     } else if (temNfceReal) {
       final rodape = config.rodapeNota.trim();
       if (rodape.isNotEmpty && !_pareceRodapeNaoFiscal(rodape)) {
@@ -382,6 +401,24 @@ abstract final class EscPosCupomBuilder {
       linhas.add(grupos.sublist(i, end).join(' '));
     }
     return linhas;
+  }
+
+  static void _adicionarFaixaHomologacao(
+    BytesBuilder out,
+    int cols,
+    bool homolog,
+  ) {
+    if (!homolog) return;
+    out.add(EscPosCommands.alignCenter);
+    out.add(EscPosCommands.boldOn);
+    for (final l in _wrap('EMISSAO EM AMBIENTE DE HOMOLOGACAO', cols)) {
+      out.add(EscPosCommands.line(l));
+    }
+    for (final l in _wrap('SEM VALOR FISCAL', cols)) {
+      out.add(EscPosCommands.line(l));
+    }
+    out.add(EscPosCommands.boldOff);
+    out.add(EscPosCommands.separator(cols));
   }
 
   static String _payloadQr(Venda venda, String chaveDigitos) {
