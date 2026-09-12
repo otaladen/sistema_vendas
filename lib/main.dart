@@ -57,6 +57,7 @@ import 'services/fiscal_config_store.dart';
 import 'services/fiscal_reconciliacao_startup.dart';
 import 'services/trusted_http_client.dart';
 import 'services/windows_app_startup_helper.dart';
+import 'services/windows_backup_ao_fechar_window_service.dart';
 import 'ui/app_startup_error_page.dart';
 import 'ui/app_global_error_handler.dart';
 import 'ui/layout/app_layout.dart';
@@ -97,6 +98,9 @@ Future<void> main(List<String> args) async {
       configurarHttpOverridesPlataforma();
       await initializeDateFormatting('pt_BR');
       await _tentarSincronizarHorarioSistemaNoInicio();
+      if (Platform.isWindows) {
+        await WindowsBackupAoFecharWindowService.ensureInitialized();
+      }
 
       final appConfigRepository = AppConfigRepository();
       await FiscalConfigStore.carregar();
@@ -340,6 +344,23 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           ),
         );
       });
+      if (Platform.isWindows) {
+        unawaited(
+          WindowsBackupAoFecharWindowService.instalar(
+            appConfigRepository: widget.appConfigRepository,
+            executarBackupAoFechar: _executarBackupAoFechar,
+            servidorComObjectBox: () => widget.objectBox != null,
+          ),
+        );
+      }
+    } else if (Platform.isWindows && widget.terminalLeve) {
+      unawaited(
+        WindowsBackupAoFecharWindowService.instalar(
+          appConfigRepository: widget.appConfigRepository,
+          executarBackupAoFechar: _executarBackupAoFechar,
+          servidorComObjectBox: () => false,
+        ),
+      );
     }
   }
 
@@ -351,6 +372,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     _debounceProdutoApi?.cancel();
     LanApiEventHub.instance.desconectar();
     EntregaBaixaSyncService.instance.desligar();
+    WindowsBackupAoFecharWindowService.remover();
     super.dispose();
   }
 
@@ -364,7 +386,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && widget.terminalLeve) {
       unawaited(EntregaBaixaSyncService.instance.aoRetomarApp());
     }
-    if (state == AppLifecycleState.detached && !widget.terminalLeve) {
+    if (state == AppLifecycleState.detached &&
+        !widget.terminalLeve &&
+        !Platform.isWindows) {
       unawaited(_executarBackupAoFechar());
     }
   }

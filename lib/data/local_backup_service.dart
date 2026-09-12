@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../domain/local_backup_escopo.dart';
 import 'local_app_data_paths.dart';
+import 'local_backup_atomic.dart';
 import 'local_backup_cadastro_produtos_service.dart';
 import 'local_backup_copy.dart';
 import 'local_backup_preferencias_service.dart';
@@ -78,10 +79,11 @@ class LocalBackupService {
 
     final agora = DateTime.now();
     final timestamp = DateFormat('yyyyMMdd_HHmmss').format(agora);
-    final pastaBackup = Directory(
-      p.join(destinoRaiz.path, 'backup_sistema_vendas_$timestamp'),
-    );
-    pastaBackup.createSync(recursive: true);
+    final pastaTemp = LocalBackupAtomic.pastaTemp(destinoRaiz, timestamp);
+    final pastaFinal = LocalBackupAtomic.pastaFinal(destinoRaiz, timestamp);
+    LocalBackupAtomic.removerPastaTempSeExistir(pastaTemp);
+    pastaTemp.createSync(recursive: true);
+    final pastaBackup = pastaTemp;
 
     if (escopo == LocalBackupEscopo.cadastroProdutos) {
       report(0.08, 'Preparando exportacao de produtos…');
@@ -109,19 +111,30 @@ class LocalBackupService {
         'pastaDados': LocalBackupCadastroProdutosService.subpasta,
         'incluiPreferencias': false,
       };
-      await File(p.join(pastaBackup.path, manifestFileName)).writeAsString(
-        const JsonEncoder.withIndent('  ').convert(manifest),
-      );
-
-      report(1.0, 'Concluido');
-      return LocalBackupResult(
-        pastaBackup: pastaBackup,
-        pastaDados: resumo.pasta,
-        tamanhoBancoKb: resumo.tamanhoTotalKb,
-        criadoEm: agora,
-        escopo: escopo,
-        quantidadeProdutos: resumo.quantidadeProdutos,
-      );
+      try {
+        await File(p.join(pastaBackup.path, manifestFileName)).writeAsString(
+          const JsonEncoder.withIndent('  ').convert(manifest),
+        );
+        report(0.98, 'Finalizando copia…');
+        final promovida = await LocalBackupAtomic.promoverPastaTemp(
+          pastaTemp: pastaTemp,
+          pastaFinal: pastaFinal,
+          dadosValidacao: resumo.pasta,
+          escopo: escopo,
+        );
+        report(1.0, 'Concluido');
+        return LocalBackupResult(
+          pastaBackup: promovida,
+          pastaDados: resumo.pasta,
+          tamanhoBancoKb: resumo.tamanhoTotalKb,
+          criadoEm: agora,
+          escopo: escopo,
+          quantidadeProdutos: resumo.quantidadeProdutos,
+        );
+      } catch (e) {
+        LocalBackupAtomic.removerPastaTempSeExistir(pastaTemp);
+        rethrow;
+      }
     }
 
     final destinoDados = Directory(
@@ -181,6 +194,8 @@ class LocalBackupService {
       final tamanhoKb = mdb == null ? 0.0 : mdb.lengthSync() / 1024.0;
 
       report(0.94, 'Gravando manifesto…');
+      final checksumDataMdb =
+          LocalBackupAtomic.checksumDataMdb(destinoDados);
       final manifest = {
         'app': 'sistema_vendas',
         'versaoApp': versaoApp,
@@ -189,21 +204,36 @@ class LocalBackupService {
         'escopo': escopo.manifestValue,
         'criadoEm': agora.toIso8601String(),
         'tamanhoBancoKb': double.parse(tamanhoKb.toStringAsFixed(2)),
+        'checksumDataMdbSha256': checksumDataMdb,
         'pastaDados': 'dados_aplicacao',
         'incluiPreferencias': escopo == LocalBackupEscopo.completo,
       };
-      await File(p.join(pastaBackup.path, manifestFileName)).writeAsString(
-        const JsonEncoder.withIndent('  ').convert(manifest),
-      );
-
-      report(1.0, 'Concluido');
-      return LocalBackupResult(
-        pastaBackup: pastaBackup,
-        pastaDados: destinoDados,
-        tamanhoBancoKb: tamanhoKb,
-        criadoEm: agora,
-        escopo: escopo,
-      );
+      try {
+        await File(p.join(pastaBackup.path, manifestFileName)).writeAsString(
+          const JsonEncoder.withIndent('  ').convert(manifest),
+        );
+        report(0.98, 'Finalizando copia…');
+        final promovida = await LocalBackupAtomic.promoverPastaTemp(
+          pastaTemp: pastaTemp,
+          pastaFinal: pastaFinal,
+          dadosValidacao: destinoDados,
+          escopo: escopo,
+        );
+        report(1.0, 'Concluido');
+        return LocalBackupResult(
+          pastaBackup: promovida,
+          pastaDados: destinoDados,
+          tamanhoBancoKb: tamanhoKb,
+          criadoEm: agora,
+          escopo: escopo,
+        );
+      } catch (e) {
+        LocalBackupAtomic.removerPastaTempSeExistir(pastaTemp);
+        rethrow;
+      }
+    } catch (e) {
+      LocalBackupAtomic.removerPastaTempSeExistir(pastaTemp);
+      rethrow;
     } finally {
       try {
         await objectBox.reabrirAposCopiaDeArquivos();

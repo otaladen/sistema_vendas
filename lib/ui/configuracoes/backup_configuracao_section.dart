@@ -20,6 +20,7 @@ import '../../data/local_backup_validation.dart';
 import '../../data/objectbox.dart';
 import '../../data/produto_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
+import '../../services/windows_backup_ao_fechar_window_service.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/backup_historico_item.dart';
 import '../../domain/backup_pasta_risco.dart';
@@ -619,6 +620,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   Future<void> _alternarBackupAoFechar(bool value) async {
     setState(() => _backupAoFecharAtivo = value);
     await widget.appConfigRepository.salvarBackupAoFecharAtivo(value);
+    await WindowsBackupAoFecharWindowService.atualizarPreventClose();
   }
 
   void _atualizarProgresso(double v, String etapa) {

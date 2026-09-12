@@ -68,6 +68,7 @@ dependencies:
   shelf_web_socket: ^3.0.0
   mailer: ^6.1.2
   syncfusion_flutter_pdf: ^33.2.13
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:

@@ -16,6 +16,8 @@ class BackupAoFecharService {
   static bool _emExecucao = false;
   static bool _executouNestaSessao = false;
 
+  static bool get emExecucao => _emExecucao;
+
   static Future<void> tentarSeAtivo({
     required AppConfigRepository repository,
     required ObjectBox objectBox,

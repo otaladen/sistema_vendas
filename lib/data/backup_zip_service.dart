@@ -51,15 +51,33 @@ class BackupZipService {
     }
 
     final zipPath = p.join(destinoDir.path, '$nomeBase.zip');
+    final zipPathTmp = '$zipPath.tmp';
+    final zipFileTmp = File(zipPathTmp);
     final zipFile = File(zipPath);
+    if (zipFileTmp.existsSync()) {
+      await zipFileTmp.delete();
+    }
     if (zipFile.existsSync()) {
       await zipFile.delete();
     }
 
-    final encoder = ZipFileEncoder();
-    encoder.create(zipPath);
-    encoder.addDirectorySync(pastaBackup);
-    encoder.closeSync();
+    try {
+      final encoder = ZipFileEncoder();
+      encoder.create(zipPathTmp);
+      encoder.addDirectorySync(pastaBackup);
+      encoder.closeSync();
+
+      final bytes = await zipFileTmp.length();
+      if (bytes <= 0) {
+        throw Exception('Arquivo ZIP temporario vazio apos compactacao.');
+      }
+      await zipFileTmp.rename(zipPath);
+    } catch (e) {
+      if (zipFileTmp.existsSync()) {
+        await zipFileTmp.delete();
+      }
+      rethrow;
+    }
 
     report(0.75, 'Finalizando arquivo…');
     final senhaLimpa = senha?.trim() ?? '';

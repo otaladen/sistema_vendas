@@ -141,8 +141,16 @@ class ObjectBox {
     itemInventarioBox = Box<ItemInventario>(store);
   }
 
-  /// Fecha o banco para copia consistente de `data.mdb` (backup/restauracao).
+  /// Grava filas assincronas e fecha o banco para copia consistente de `data.mdb`.
   Future<void> fecharParaCopiaDeArquivos() async {
+    if (store.isClosed()) return;
+    try {
+      store.awaitQueueSubmitted();
+      store.awaitQueueCompletion();
+    } catch (_) {}
+    try {
+      store.runInTransaction(TxMode.write, () {});
+    } catch (_) {}
     if (!store.isClosed()) {
       store.close();
     }
