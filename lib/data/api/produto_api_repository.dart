@@ -223,7 +223,7 @@ class ProdutoApiRepository extends ChangeNotifier {
       somenteInativos: somenteInativos,
     );
     _mesclarNoCache(items);
-    return items;
+    return reordenarResultadoBuscaProdutos(items, termo);
   }
 
   Produto? obterPorId(int id) => _porId[id];
@@ -342,32 +342,36 @@ class ProdutoApiRepository extends ChangeNotifier {
         somenteInativos: somenteInativos,
       );
     }
-    // Sem texto: pagina o cache (mais rapido). Se vazio, hidrata e tenta remoto.
-    final local = pesquisarPadraoPdv(
+    // Sem texto: cache local com ordenacao natural; senao hidrata / API.
+    List<Produto> local = pesquisar(
       termo,
       offset: offset,
       limite: limite,
       somenteAtivos: somenteAtivos,
       somenteInativos: somenteInativos,
+      excluirProdutosInternos: false,
     );
     if (local.isNotEmpty || _offline) return local;
     if (!_hidratado) {
       await hidratar();
-      return pesquisarPadraoPdv(
+      local = pesquisar(
         termo,
         offset: offset,
         limite: limite,
         somenteAtivos: somenteAtivos,
         somenteInativos: somenteInativos,
+        excluirProdutosInternos: false,
       );
+      if (local.isNotEmpty) return local;
     }
-    return pesquisarRemoto(
+    final remotos = await pesquisarRemoto(
       '',
       offset: offset,
       limite: limite,
       somenteAtivos: somenteAtivos,
       somenteInativos: somenteInativos,
     );
+    return reordenarResultadoBuscaProdutos(remotos, termo);
   }
 
   List<Produto> pesquisarNaBasePadraoPdv(

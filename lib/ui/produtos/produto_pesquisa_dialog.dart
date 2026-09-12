@@ -458,10 +458,16 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           somenteInativos: _somenteInativos,
         ),
       );
-      final pagina = (raw as List).whereType<Produto>().toList();
+      final pagina = reordenarResultadoBuscaProdutos(
+        (raw as List).whereType<Produto>(),
+        _pesquisaController.text,
+      );
       if (!mounted) return;
       setState(() {
-        _carregados = [..._carregados, ...pagina];
+        _carregados = reordenarResultadoBuscaProdutos(
+          [..._carregados, ...pagina],
+          _pesquisaController.text,
+        );
         _exibidos = _carregados.length;
         _temMaisNoRepo = pagina.length >= _kLoteRepoVazio;
         if (_indiceSelecionado.value < 0 && _carregados.isNotEmpty) {
@@ -512,7 +518,10 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           somenteInativos: _somenteInativos,
         ),
       );
-      final lista = (raw as List).whereType<Produto>().toList();
+      final lista = reordenarResultadoBuscaProdutos(
+        (raw as List).whereType<Produto>(),
+        _pesquisaController.text,
+      );
       if (!mounted) return;
       setState(() {
         _carregados = lista;

@@ -1972,6 +1972,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                   child: Text('Todos'),
                                 ),
                                 DropdownMenuItem(
+                                  value: 'com_nfce_eletronico',
+                                  child: Text('Somente NFC-e'),
+                                ),
+                                DropdownMenuItem(
                                   value: 'sem_nfce_eletronico',
                                   child: Text('Sem NFC-e (PIX/cartao)'),
                                 ),

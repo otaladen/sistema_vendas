@@ -314,6 +314,26 @@ class VendaApiRepository extends ChangeNotifier {
       clienteId = filtro.clienteId as int?;
     } catch (_) {}
 
+    if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
+      filtroFiscal,
+    )) {
+      return _hidratarListagemFiscalNoCliente(
+        filtro,
+        filtroFiscal: filtroFiscal,
+        offset: offset,
+        limite: limite,
+        desde: desde,
+        ate: ate,
+        clienteId: clienteId,
+        filtroCancelamento: filtroCancelamento,
+        canceladaPor: canceladaPor,
+        formaPagamento: formaPagamento,
+        tipoEntrega: tipoEntrega,
+        entregaPendente: entregaPendente,
+        busca: busca,
+      );
+    }
+
     final pagina = await _client.listarVendasPagina(
       status: 'finalizada',
       limit: limite,
@@ -329,6 +349,105 @@ class VendaApiRepository extends ChangeNotifier {
       busca: busca,
       canceladaPor: canceladaPor,
     );
+    return _finalizarPaginaListagemHidratada(filtro, pagina);
+  }
+
+  Future<ListagemVendasPagina> _hidratarListagemFiscalNoCliente(
+    dynamic filtro, {
+    required String filtroFiscal,
+    required int offset,
+    required int limite,
+    DateTime? desde,
+    DateTime? ate,
+    int? clienteId,
+    required String filtroCancelamento,
+    required String canceladaPor,
+    required String formaPagamento,
+    required String tipoEntrega,
+    required String entregaPendente,
+    required String busca,
+  }) async {
+    final todas = await _baixarVendasListagemServidor(
+      desde: desde,
+      ate: ate,
+      clienteId: clienteId,
+      filtroCancelamento: filtroCancelamento,
+      canceladaPor: canceladaPor,
+      formaPagamento: formaPagamento,
+      tipoEntrega: tipoEntrega,
+      entregaPendente: entregaPendente,
+      busca: busca,
+      filtroFiscal: 'todos',
+    );
+    final filtradas = todas.where((v) => _correspondeFiltroFiscalListagem(
+          v,
+          filtroFiscal,
+        )).toList();
+    final total = filtradas.length;
+    final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
+    final vendas = offset >= total
+        ? const <Venda>[]
+        : filtradas.skip(offset).take(limite).toList();
+    final pagina = ListagemVendasPagina(
+      vendas: vendas,
+      total: total,
+      totalValor: totalValor,
+    );
+    return _finalizarPaginaListagemHidratada(filtro, pagina);
+  }
+
+  Future<List<Venda>> _baixarVendasListagemServidor({
+    DateTime? desde,
+    DateTime? ate,
+    int? clienteId,
+    required String filtroCancelamento,
+    required String canceladaPor,
+    required String formaPagamento,
+    required String tipoEntrega,
+    required String entregaPendente,
+    required String busca,
+    required String filtroFiscal,
+    int pageSize = 250,
+    int teto = 20000,
+  }) async {
+    final all = <Venda>[];
+    var serverOffset = 0;
+    while (serverOffset < teto) {
+      final pagina = await _client.listarVendasPagina(
+        status: 'finalizada',
+        limit: pageSize,
+        offset: serverOffset,
+        desde: desde,
+        ate: ate,
+        clienteId: clienteId,
+        filtroCancelamento: filtroCancelamento,
+        formaPagamento: formaPagamento,
+        tipoEntrega: tipoEntrega,
+        entregaPendente: entregaPendente,
+        filtroFiscal: filtroFiscal,
+        busca: busca,
+        canceladaPor: canceladaPor,
+      );
+      for (final v in pagina.vendas) {
+        _vincularAlvos(v);
+        _porId[v.id] = v;
+        _cacheItensDaVenda(v);
+      }
+      all.addAll(pagina.vendas);
+      if (pagina.vendas.isEmpty ||
+          pagina.vendas.length < pageSize ||
+          all.length >= pagina.total) {
+        break;
+      }
+      serverOffset += pagina.vendas.length;
+    }
+    return all;
+  }
+
+  ListagemVendasPagina _finalizarPaginaListagemHidratada(
+    dynamic filtro,
+    ListagemVendasPagina pagina,
+  ) {
     for (final v in pagina.vendas) {
       _vincularAlvos(v);
       _porId[v.id] = v;
@@ -769,6 +888,22 @@ class VendaApiRepository extends ChangeNotifier {
     );
   }
 
+  bool _correspondeFiltroFiscalListagem(Venda v, String filtroFiscal) {
+    switch (filtroFiscal) {
+      case 'sem_nfce_eletronico':
+        final nfe55Ext = obterNfe55AutorizadaPorVenda(v.id) != null;
+        return VendaNfceObrigatoriaHelper.correspondeFiltroListagemSemNfceEletronico(
+          v,
+          nfe55AutorizadaRegistroExterno: nfe55Ext,
+        );
+      case 'com_nfce_eletronico':
+        return VendaNfceObrigatoriaHelper
+            .correspondeFiltroListagemSomenteNfceEletronico(v);
+      default:
+        return true;
+    }
+  }
+
   List<Venda> _filtrarListagem(List<Venda> base, dynamic filtro) {
     var out = List<Venda>.from(base);
     if (filtro == null) return out;
@@ -837,9 +972,12 @@ class VendaApiRepository extends ChangeNotifier {
           v.vendedor.targetId != vendedorId) {
         return false;
       }
-      if (filtroFiscal == 'sem_nfce_eletronico' &&
-          !VendaNfceObrigatoriaHelper.ehPendenteEmissao(v)) {
-        return false;
+      if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
+        filtroFiscal,
+      )) {
+        if (!_correspondeFiltroFiscalListagem(v, filtroFiscal)) {
+          return false;
+        }
       }
       if (textoBusca.isNotEmpty) {
         final n = v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '${v.id}';

@@ -473,7 +473,7 @@ class FiltroListagemVendas {
   /// `todos` | `sim` | `nao`
   final String entregaPendente;
 
-  /// `todos` | `sem_nfce_eletronico`
+  /// `todos` | `sem_nfce_eletronico` | `com_nfce_eletronico`
   final String filtroFiscal;
   final int? clienteId;
   final int? vendedorId;
@@ -1283,18 +1283,10 @@ class VendaRepository {
       clienteId: f.clienteId,
       vendedorId: f.vendedorId,
     );
-    var cond = _condicaoListagemVendas(base);
-    cond = cond &
-        Venda_.nfceChaveAcesso.equals('') &
-        Venda_.nfceUrlDanfe.equals('');
-    cond = cond &
-        Venda_.formaPagamento.oneOf([
-          'pix',
-          'cartao_credito',
-          'cartao_debito',
-          'transferencia',
-          'misto',
-        ]);
+    // Criterio fiscal (PIX/cartao sem NFC-e) e aplicado em memoria via
+    // [VendaNfceObrigatoriaHelper.ehPendenteEmissao] — evita pre-filtro
+    // ObjectBox (oneOf / equals '') que excluia vendas elegiveis.
+    final cond = _condicaoListagemVendas(base);
     final query = _queryListagemVendasOrdenada(cond, base);
     try {
       return query.find();
@@ -1307,13 +1299,36 @@ class VendaRepository {
     List<Venda> vendas,
     FiltroListagemVendas f,
   ) {
-    if (f.filtroFiscal != 'sem_nfce_eletronico') return vendas;
-    return vendas.where(VendaNfceObrigatoriaHelper.ehPendenteEmissao).toList();
+    switch (f.filtroFiscal) {
+      case 'sem_nfce_eletronico':
+        return vendas
+            .where(_correspondeFiltroListagemSemNfceEletronico)
+            .toList();
+      case 'com_nfce_eletronico':
+        return vendas
+            .where(
+              VendaNfceObrigatoriaHelper
+                  .correspondeFiltroListagemSomenteNfceEletronico,
+            )
+            .toList();
+      default:
+        return vendas;
+    }
+  }
+
+  bool _correspondeFiltroListagemSemNfceEletronico(Venda venda) {
+    final nfe55Ext = obterNfe55AutorizadaPorVenda(venda.id) != null;
+    return VendaNfceObrigatoriaHelper.correspondeFiltroListagemSemNfceEletronico(
+      venda,
+      nfe55AutorizadaRegistroExterno: nfe55Ext,
+    );
   }
 
   /// Total de vendas finalizadas que obedecem ao filtro (sem paginacao).
   int contarListagemVendas(FiltroListagemVendas f) {
-    if (f.filtroFiscal == 'sem_nfce_eletronico') {
+    if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
+      f.filtroFiscal,
+    )) {
       return _filtrarListagemFiscal(
         _listarCandidatasListagemFiscal(f),
         f,
@@ -1334,7 +1349,9 @@ class VendaRepository {
     required int offset,
     required int limite,
   }) {
-    if (f.filtroFiscal == 'sem_nfce_eletronico') {
+    if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
+      f.filtroFiscal,
+    )) {
       final filtradas = _filtrarListagemFiscal(
         _listarCandidatasListagemFiscal(f),
         f,
@@ -1371,7 +1388,9 @@ class VendaRepository {
 
   /// Todas as vendas do filtro (sem limite). Use com cuidado em exportacoes.
   List<Venda> listarListagemVendasCompleto(FiltroListagemVendas f) {
-    if (f.filtroFiscal == 'sem_nfce_eletronico') {
+    if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
+      f.filtroFiscal,
+    )) {
       return _filtrarListagemFiscal(
         _listarCandidatasListagemFiscal(f),
         f,

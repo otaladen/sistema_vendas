@@ -1,4 +1,5 @@
 import '../../domain/pagamento_orcamento.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../model/venda.dart';
 
 /// Regras de quando a venda exige NFC-e (PIX, cartao, misto eletronico).
@@ -13,35 +14,74 @@ abstract final class VendaNfceObrigatoriaHelper {
   };
 
   static bool pagamentoExigeNfce(Venda venda) {
-    switch (venda.formaPagamento) {
-      case 'pix':
-      case 'cartao_credito':
-      case 'cartao_debito':
-      case 'transferencia':
-        return true;
-      case 'misto':
-        return _mistoExigeNfce(venda);
-      default:
-        return false;
-    }
+    final forma = venda.formaPagamento.trim().toLowerCase();
+    if (_meioExigeNfce(forma)) return true;
+    if (forma == 'misto') return _mistoExigeNfce(venda);
+    return _pagamentosJsonExigeNfce(venda);
   }
 
+  static bool _meioExigeNfce(String meio) => _meiosEletronicos.contains(meio);
+
   static bool _mistoExigeNfce(Venda venda) {
+    return _pagamentosJsonExigeNfce(venda);
+  }
+
+  static bool _pagamentosJsonExigeNfce(Venda venda) {
     final linhas = PagamentoOrcamentoCodec.decode(venda.pagamentosJson);
     if (linhas.isEmpty) return false;
-    return linhas.any((l) => _meiosEletronicos.contains(l.meio));
+    return linhas.any((l) => _meioExigeNfce(l.meio.trim().toLowerCase()));
   }
+
+  /// NF-e 55 considerada autorizada (chave valida), sem status Focus orfao.
+  static bool nfe55AutorizadaConfiavel(Venda venda) {
+    if (venda.nfe55Cancelada) return false;
+    return venda.nfeChaveAcesso.trim().length >= 40;
+  }
+
+  /// Filtro da listagem: "Sem NFC-e (PIX/cartao)".
+  /// Mesma regra visual da coluna DOCUMENTO ([VendaDocumentoRotuloHelper]).
+  static bool correspondeFiltroListagemSemNfceEletronico(
+    Venda venda, {
+    bool nfe55AutorizadaRegistroExterno = false,
+  }) {
+    if (venda.status != 'finalizada' || venda.cancelada) return false;
+    if (!pagamentoExigeNfce(venda)) return false;
+    if (VendaDocumentoRotuloHelper.rotuloNfce(venda) != null) return false;
+    if (VendaDocumentoRotuloHelper.rotuloNfe55DeVenda(venda) != null) {
+      return false;
+    }
+    if (nfe55AutorizadaRegistroExterno) return false;
+    return true;
+  }
+
+  /// Filtro da listagem: "Somente NFC-e" (coluna DOCUMENTO exibe NFC-e).
+  static bool correspondeFiltroListagemSomenteNfceEletronico(Venda venda) {
+    if (venda.status != 'finalizada' || venda.cancelada) return false;
+    return VendaDocumentoRotuloHelper.rotuloNfce(venda) != null;
+  }
+
+  static bool filtroFiscalListagemRequerMemoria(String filtroFiscal) =>
+      filtroFiscal == 'sem_nfce_eletronico' ||
+      filtroFiscal == 'com_nfce_eletronico';
 
   /// Venda finalizada que deveria ter NFC-e mas ainda nao tem documento valido.
   static bool ehPendenteEmissao(Venda venda) {
     if (venda.status != 'finalizada' || venda.cancelada) return false;
     if (!pagamentoExigeNfce(venda)) return false;
-    if (venda.nfceEmitida || venda.nfe55Autorizada) return false;
+    if (_temNfceEletronicaAutorizada(venda) ||
+        nfe55AutorizadaConfiavel(venda)) {
+      return false;
+    }
     if (venda.nfceProcessandoPendenteFocus || venda.nfceEmissaoEmAndamento) {
       return false;
     }
     return true;
   }
+
+  /// Mesma regra de [Venda.nfceEmitida], com trim (listagem / filtros).
+  static bool _temNfceEletronicaAutorizada(Venda venda) =>
+      venda.nfceChaveAcesso.trim().isNotEmpty ||
+      venda.nfceUrlDanfe.trim().isNotEmpty;
 
   static String motivoPendenciaEmissao(Venda venda) {
     final st = venda.nfceStatusFocus.trim().toLowerCase();

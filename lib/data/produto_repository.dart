@@ -375,6 +375,7 @@ class ProdutoRepository extends ChangeNotifier {
         if (curinga == null) return const [];
         return _pesquisarModoCuringa(
           segmentos: curinga.segmentos,
+          consultaNormalizadaParaOrdenacao: _normalizarTexto(consultaBruta),
           clienteId: clienteId,
           offset: offset,
           limite: limite,
@@ -395,7 +396,9 @@ class ProdutoRepository extends ChangeNotifier {
     }.toList();
     if (consultaNormalizada.isEmpty) {
       final ordenados = [..._cacheDocs]
-        ..sort((a, b) => a.nomeNormalizado.compareTo(b.nomeNormalizado));
+        ..sort(
+          (a, b) => compararNomeProdutoBusca(a.produto.nome, b.produto.nome),
+        );
       final docs = ordenados.where(
         (d) => _incluirDocNaPesquisa(
           d,
@@ -407,7 +410,7 @@ class ProdutoRepository extends ChangeNotifier {
       return docs.map((d) => d.produto).skip(offset).take(limite).toList();
     }
 
-    final scorePorProduto = <int, double>{};
+    final scoreMatchPorProduto = <int, double>{};
     final scoreCliente = clienteId == null
         ? const <int, double>{}
         : _pontuacaoPorCliente(clienteId);
@@ -421,7 +424,7 @@ class ProdutoRepository extends ChangeNotifier {
       )) {
         continue;
       }
-      final score = _scoreProduto(
+      final pontuacao = _scoreProduto(
         doc,
         consultaNormalizada: consultaNormalizada,
         consultaCompacta: parseObra.consultaCompacta,
@@ -434,27 +437,28 @@ class ProdutoRepository extends ChangeNotifier {
         scoreHistoricoVenda: _cacheScoreHistorico[doc.produto.id] ?? 0,
         scoreCliente: scoreCliente[doc.produto.id] ?? 0,
       );
-      if (score > 0) {
-        scorePorProduto[doc.produto.id] = score;
+      if (pontuacao != null && pontuacao.total > 0) {
+        scoreMatchPorProduto[doc.produto.id] = pontuacao.match;
       }
     }
 
     final resultados =
         _cacheDocs
-            .where((d) => scorePorProduto.containsKey(d.produto.id))
+            .where((d) => scoreMatchPorProduto.containsKey(d.produto.id))
             .toList()
-          ..sort((a, b) {
-            final scoreA = scorePorProduto[a.produto.id] ?? 0;
-            final scoreB = scorePorProduto[b.produto.id] ?? 0;
-            final byScore = scoreB.compareTo(scoreA);
-            if (byScore != 0) return byScore;
-            return a.nomeNormalizado.compareTo(b.nomeNormalizado);
-          });
+          ..sort((a, b) => compararResultadoBuscaProduto(
+                scoreMatchA: scoreMatchPorProduto[a.produto.id] ?? 0,
+                scoreMatchB: scoreMatchPorProduto[b.produto.id] ?? 0,
+                nomeA: a.produto.nome,
+                nomeB: b.produto.nome,
+                consultaNormalizadaParaOrdenacao: consultaNormalizada,
+              ));
 
     return resultados.map((d) => d.produto).skip(offset).take(limite).toList();
   }
 
-  /// Pagina de busca para listas longas (cadastro, estoque).
+  /// Pagina de busca para listas longas (cadastro, estoque, dialogo de pesquisa).
+  /// Mesmo ranking do PDV ([compararResultadoBuscaProduto] / ordenacao de cabos).
   List<Produto> pesquisarPaginaCadastro(
     String termo, {
     int offset = 0,
@@ -462,12 +466,13 @@ class ProdutoRepository extends ChangeNotifier {
     bool somenteAtivos = true,
     bool somenteInativos = false,
   }) {
-    return pesquisarPadraoPdv(
+    return pesquisar(
       termo,
       offset: offset,
       limite: limite,
       somenteAtivos: somenteAtivos,
       somenteInativos: somenteInativos,
+      excluirProdutosInternos: false,
     );
   }
 
@@ -488,6 +493,7 @@ class ProdutoRepository extends ChangeNotifier {
 
   List<Produto> _pesquisarModoCuringa({
     required List<String> segmentos,
+    String consultaNormalizadaParaOrdenacao = '',
     int? clienteId,
     int offset = 0,
     required int limite,
@@ -495,7 +501,7 @@ class ProdutoRepository extends ChangeNotifier {
     required bool somenteInativos,
     required bool excluirProdutosInternos,
   }) {
-    final scorePorProduto = <int, double>{};
+    final scoreMatchPorProduto = <int, double>{};
     final scoreCliente = clienteId == null
         ? const <int, double>{}
         : _pontuacaoPorCliente(clienteId);
@@ -509,33 +515,34 @@ class ProdutoRepository extends ChangeNotifier {
       )) {
         continue;
       }
-      final score = _scoreProdutoCuringa(
+      final pontuacao = _scoreProdutoCuringa(
         doc,
         segmentos: segmentos,
         scoreHistoricoVenda: _cacheScoreHistorico[doc.produto.id] ?? 0,
         scoreCliente: scoreCliente[doc.produto.id] ?? 0,
       );
-      if (score > 0) {
-        scorePorProduto[doc.produto.id] = score;
+      if (pontuacao != null && pontuacao.total > 0) {
+        scoreMatchPorProduto[doc.produto.id] = pontuacao.match;
       }
     }
 
     final resultados =
         _cacheDocs
-            .where((d) => scorePorProduto.containsKey(d.produto.id))
+            .where((d) => scoreMatchPorProduto.containsKey(d.produto.id))
             .toList()
-          ..sort((a, b) {
-            final scoreA = scorePorProduto[a.produto.id] ?? 0;
-            final scoreB = scorePorProduto[b.produto.id] ?? 0;
-            final byScore = scoreB.compareTo(scoreA);
-            if (byScore != 0) return byScore;
-            return a.nomeNormalizado.compareTo(b.nomeNormalizado);
-          });
+          ..sort((a, b) => compararResultadoBuscaProduto(
+                scoreMatchA: scoreMatchPorProduto[a.produto.id] ?? 0,
+                scoreMatchB: scoreMatchPorProduto[b.produto.id] ?? 0,
+                nomeA: a.produto.nome,
+                nomeB: b.produto.nome,
+                consultaNormalizadaParaOrdenacao:
+                    consultaNormalizadaParaOrdenacao,
+              ));
 
     return resultados.map((d) => d.produto).skip(offset).take(limite).toList();
   }
 
-  double _scoreProdutoCuringa(
+  ProdutoBuscaPontuacao? _scoreProdutoCuringa(
     _ProdutoBuscaDoc doc, {
     required List<String> segmentos,
     required double scoreHistoricoVenda,
@@ -551,30 +558,31 @@ class ProdutoRepository extends ChangeNotifier {
         apelidosNormalizados: doc.apelidosNormalizados,
       );
       match = avaliarMatchCuringa(texto, segmentos);
-      if (match == null) return 0;
+      if (match == null) return null;
       todosNoNome = false;
     }
 
-    var score = 920.0;
-    score += segmentos.length * 200;
-    score += math.max(0, 380 - match.totalSpan);
-    score += math.max(0, 50 - nome.length * 0.12);
+    var scoreMatch = 920.0;
+    scoreMatch += segmentos.length * 200;
+    scoreMatch += math.max(0, 380 - match.totalSpan);
+    scoreMatch += math.max(0, 50 - nome.length * 0.12);
     if (todosNoNome) {
-      score += 300;
+      scoreMatch += 300;
     } else {
-      score -= 80;
+      scoreMatch -= 80;
     }
 
+    var total = scoreMatch;
     if (doc.produto.estoqueReal > 0) {
-      score += math.min(35, doc.produto.estoqueReal.toDouble());
+      total += math.min(35, doc.produto.estoqueReal.toDouble());
     } else {
-      score -= 60;
+      total -= 60;
     }
 
-    score += scoreHistoricoVenda * 0.4;
-    score += scoreCliente * 0.4;
+    total += scoreHistoricoVenda * 0.4;
+    total += scoreCliente * 0.4;
 
-    return score;
+    return ProdutoBuscaPontuacao(match: scoreMatch, total: total);
   }
 
   /// Resolucao exata por GTIN (campo [Produto.codigoBarras] ou digitos em [apelidosBusca]).
@@ -952,7 +960,7 @@ class ProdutoRepository extends ChangeNotifier {
     }
   }
 
-  double _scoreProduto(
+  ProdutoBuscaPontuacao? _scoreProduto(
     _ProdutoBuscaDoc doc, {
     required String consultaNormalizada,
     required String consultaCompacta,
@@ -969,7 +977,7 @@ class ProdutoRepository extends ChangeNotifier {
 
     for (final palavra in palavrasObrigatorias) {
       if (!textoContemTokenObra(nome, palavra)) {
-        return 0;
+        return null;
       }
     }
     final codigoInterno = doc.codigoInternoNormalizado;
@@ -1111,25 +1119,28 @@ class ProdutoRepository extends ChangeNotifier {
         tokensSigMatch == tokensSignificativos.length) {
       score += 120;
     } else if (tokensExpMatch == 0 && tokensSigMatch == 0) {
-      return 0;
+      return null;
     }
 
+    final scoreMatch = score;
+
     // Historico nao deve ultrapassar match forte de dimensao no nome.
-    final bonusHistorico = score >= 900
+    final bonusHistorico = scoreMatch >= 900
         ? scoreHistoricoVenda * 0.35
         : scoreHistoricoVenda;
     final bonusCliente =
-        score >= 900 ? scoreCliente * 0.35 : scoreCliente;
+        scoreMatch >= 900 ? scoreCliente * 0.35 : scoreCliente;
 
+    var total = scoreMatch;
     if (doc.produto.estoqueReal > 0) {
-      score += math.min(40, doc.produto.estoqueReal.toDouble());
+      total += math.min(40, doc.produto.estoqueReal.toDouble());
     } else {
-      score -= 80;
+      total -= 80;
     }
-    score += bonusHistorico;
-    score += bonusCliente;
+    total += bonusHistorico;
+    total += bonusCliente;
 
-    return score;
+    return ProdutoBuscaPontuacao(match: scoreMatch, total: total);
   }
 
   int _limiteDistanciaTypos(String token) {

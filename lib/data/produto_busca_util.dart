@@ -601,10 +601,182 @@ String normalizarTextoBuscaProduto(String texto) {
   return sb.toString().replaceAll(RegExp(r'[^\w\s\/\-\+]'), ' ');
 }
 
+/// Pontuacao de busca: [match] = relevancia textual; [total] inclui estoque/historico.
+class ProdutoBuscaPontuacao {
+  const ProdutoBuscaPontuacao({required this.match, required this.total});
+  final double match;
+  final double total;
+}
+
+/// Ordenacao natural case-insensitive (ex.: 1.5 < 2.5 < 10).
+int compararNomeProdutoBusca(String a, String b) {
+  return _compararNaturalIgnorandoCase(a.trim(), b.trim());
+}
+
+/// Extrai bitola em mm do nome (ex.: "2,5mm" -> 2.5). Null se nao houver.
+double? extrairBitolaMmProduto(String nomeOuDescricao) {
+  final bruto = nomeOuDescricao.toLowerCase().trim();
+  final decimal = RegExp(r'(\d+[.,]\d+)\s*mm\b').firstMatch(bruto);
+  if (decimal != null) {
+    return double.tryParse(decimal.group(1)!.replaceAll(',', '.'));
+  }
+  final inteiro = RegExp(r'(\d+)\s*mm\b').firstMatch(bruto);
+  if (inteiro != null) {
+    return double.tryParse(inteiro.group(1)!);
+  }
+  // Nome pre-normalizado (ponto vira espaco): "cabo 1 5mm flexivel".
+  final n = normalizarTextoBuscaProduto(nomeOuDescricao);
+  final fracionarioEspaco =
+      RegExp(r'(\d+)\s+(\d+)\s*mm\b').firstMatch(n);
+  if (fracionarioEspaco != null) {
+    return double.tryParse(
+      '${fracionarioEspaco.group(1)}.${fracionarioEspaco.group(2)}',
+    );
+  }
+  final inteiroNorm = RegExp(r'(\d+)\s*mm\b').firstMatch(n);
+  if (inteiroNorm != null) {
+    return double.tryParse(inteiroNorm.group(1)!);
+  }
+  return null;
+}
+
+/// Busca focada em cabos (PDV: "cabo", "cabo 2.5", etc.).
+bool ordenacaoContextualCaboAtiva(String? consultaNormalizada) {
+  if (consultaNormalizada == null) return false;
+  final norm = normalizarTextoBuscaProduto(consultaNormalizada.trim());
+  if (norm.isEmpty) return false;
+  if (norm == 'cabo' || norm == 'cabos') return true;
+  final tokens = tokenizarConsultaObra(norm).tokensSignificativos;
+  return tokens.any((t) => t == 'cabo' || t == 'cabos');
+}
+
+/// Cabos atipicos (ferramenta, rede) ficam apos bitolas eletricas em mm.
+bool caboProdutoTipoEspecial(String nome) {
+  final n = normalizarTextoBuscaProduto(nome);
+  if (n.contains('martelo')) return true;
+  final compacto = n.replaceAll(RegExp(r'\s'), '');
+  if (compacto.contains('rj45')) return true;
+  if (RegExp(r'\brede\b').hasMatch(n) &&
+      (RegExp(r'\blan\b').hasMatch(n) || compacto.contains('rj45'))) {
+    return true;
+  }
+  return false;
+}
+
+/// 0 = eletrico com bitola mm; 1 = cabo generico sem bitola; 2 = especial.
+int _grupoOrdenacaoCabo(String nome) {
+  if (caboProdutoTipoEspecial(nome)) return 2;
+  if (extrairBitolaMmProduto(nome) != null) return 0;
+  return 1;
+}
+
+/// Ordena cabos: bitola numerica, depois marca/descricao; especiais por ultimo.
+int compararProdutosBuscaCabo(String nomeA, String nomeB) {
+  final ga = _grupoOrdenacaoCabo(nomeA);
+  final gb = _grupoOrdenacaoCabo(nomeB);
+  if (ga != gb) return ga.compareTo(gb);
+  if (ga == 0) {
+    final ba = extrairBitolaMmProduto(nomeA);
+    final bb = extrairBitolaMmProduto(nomeB);
+    if (ba != null && bb != null) {
+      final byBitola = ba.compareTo(bb);
+      if (byBitola != 0) return byBitola;
+    }
+  }
+  return compararNomeProdutoBusca(nomeA, nomeB);
+}
+
+int _compararNomesAposMatch({
+  required String nomeA,
+  required String nomeB,
+  String? consultaNormalizadaParaOrdenacao,
+}) {
+  if (ordenacaoContextualCaboAtiva(consultaNormalizadaParaOrdenacao)) {
+    return compararProdutosBuscaCabo(nomeA, nomeB);
+  }
+  return compararNomeProdutoBusca(nomeA, nomeB);
+}
+
+/// Desempate apos pontuacao de match (mesmo nivel de correspondencia).
+int compararResultadoBuscaProduto({
+  required double scoreMatchA,
+  required double scoreMatchB,
+  required String nomeA,
+  required String nomeB,
+  String? consultaNormalizadaParaOrdenacao,
+}) {
+  final byMatch = scoreMatchB.compareTo(scoreMatchA);
+  if (byMatch != 0) return byMatch;
+  return _compararNomesAposMatch(
+    nomeA: nomeA,
+    nomeB: nomeB,
+    consultaNormalizadaParaOrdenacao: consultaNormalizadaParaOrdenacao,
+  );
+}
+
+bool _charEhDigito(String s, int index) {
+  final c = s.codeUnitAt(index);
+  return c >= 48 && c <= 57;
+}
+
+({String text, int end}) _lerBlocoNumerico(String s, int start) {
+  var i = start;
+  while (i < s.length && _charEhDigito(s, i)) {
+    i++;
+  }
+  if (i < s.length &&
+      (s[i] == '.' || s[i] == ',') &&
+      i + 1 < s.length &&
+      _charEhDigito(s, i + 1)) {
+    i++;
+    while (i < s.length && _charEhDigito(s, i)) {
+      i++;
+    }
+  }
+  return (text: s.substring(start, i), end: i);
+}
+
+int _compararBlocosNumericos(String a, String b) {
+  final da = double.tryParse(a.replaceAll(',', '.'));
+  final db = double.tryParse(b.replaceAll(',', '.'));
+  if (da != null && db != null) {
+    final c = da.compareTo(db);
+    if (c != 0) return c;
+  }
+  return a.compareTo(b);
+}
+
+int _compararNaturalIgnorandoCase(String a, String b) {
+  final la = a.toLowerCase();
+  final lb = b.toLowerCase();
+  var ia = 0;
+  var ib = 0;
+  while (ia < la.length && ib < lb.length) {
+    final da = _charEhDigito(la, ia);
+    final db = _charEhDigito(lb, ib);
+    if (da && db) {
+      final ba = _lerBlocoNumerico(la, ia);
+      final bb = _lerBlocoNumerico(lb, ib);
+      ia = ba.end;
+      ib = bb.end;
+      final cmp = _compararBlocosNumericos(ba.text, bb.text);
+      if (cmp != 0) return cmp;
+      continue;
+    }
+    final ca = la.codeUnitAt(ia);
+    final cb = lb.codeUnitAt(ib);
+    if (ca != cb) return ca.compareTo(cb);
+    ia++;
+    ib++;
+  }
+  return la.length.compareTo(lb.length);
+}
+
 class _ProdutoMemoriaScore {
-  const _ProdutoMemoriaScore(this.produto, this.score);
+  const _ProdutoMemoriaScore(this.produto, this.match, this.total);
   final Produto produto;
-  final double score;
+  final double match;
+  final double total;
 }
 
 /// Busca em memoria (Terminal Leve / cache) com curingas `%` e campos basicos.
@@ -629,7 +801,8 @@ List<Produto> pesquisarProdutosEmMemoria(
 
   final consultaBruta = termo.trim();
   if (consultaBruta.isEmpty) {
-    final lista = base.toList();
+    final lista = base.toList()
+      ..sort((a, b) => compararNomeProdutoBusca(a.nome, b.nome));
     if (offset >= lista.length) return const [];
     return lista.skip(offset).take(limite).toList();
   }
@@ -644,14 +817,19 @@ List<Produto> pesquisarProdutosEmMemoria(
       if (curinga == null) return const [];
       final scored = <_ProdutoMemoriaScore>[];
       for (final p in base) {
-        final score = _scoreCuringaEmMemoria(p, curinga.segmentos);
-        if (score > 0) scored.add(_ProdutoMemoriaScore(p, score));
+        final pontuacao = _pontuacaoCuringaEmMemoria(p, curinga.segmentos);
+        if (pontuacao != null && pontuacao.total > 0) {
+          scored.add(_ProdutoMemoriaScore(p, pontuacao.match, pontuacao.total));
+        }
       }
-      scored.sort((a, b) {
-        final byScore = b.score.compareTo(a.score);
-        if (byScore != 0) return byScore;
-        return a.produto.nome.toLowerCase().compareTo(b.produto.nome.toLowerCase());
-      });
+      final consultaOrdenacao = normalizarTextoBuscaProduto(consultaBruta);
+      scored.sort((a, b) => compararResultadoBuscaProduto(
+            scoreMatchA: a.match,
+            scoreMatchB: b.match,
+            nomeA: a.produto.nome,
+            nomeB: b.produto.nome,
+            consultaNormalizadaParaOrdenacao: consultaOrdenacao,
+          ));
       return scored.skip(offset).take(limite).map((e) => e.produto).toList();
     }
   }
@@ -664,18 +842,95 @@ List<Produto> pesquisarProdutosEmMemoria(
       .toList();
   final scored = <_ProdutoMemoriaScore>[];
   for (final p in base) {
-    final score = _scoreContemEmMemoria(p, consulta, tokens);
-    if (score > 0) scored.add(_ProdutoMemoriaScore(p, score));
+    final pontuacao = _pontuacaoContemEmMemoria(p, consulta, tokens);
+    if (pontuacao != null && pontuacao.total > 0) {
+      scored.add(_ProdutoMemoriaScore(p, pontuacao.match, pontuacao.total));
+    }
   }
-  scored.sort((a, b) {
-    final byScore = b.score.compareTo(a.score);
-    if (byScore != 0) return byScore;
-    return a.produto.nome.toLowerCase().compareTo(b.produto.nome.toLowerCase());
-  });
+  scored.sort((a, b) => compararResultadoBuscaProduto(
+        scoreMatchA: a.match,
+        scoreMatchB: b.match,
+        nomeA: a.produto.nome,
+        nomeB: b.produto.nome,
+        consultaNormalizadaParaOrdenacao: consulta,
+      ));
   return scored.skip(offset).take(limite).map((e) => e.produto).toList();
 }
 
-double _scoreCuringaEmMemoria(Produto p, List<String> segmentos) {
+/// Mesmo ranking do PDV sobre lista ja carregada (retorno API/ObjectBox).
+List<Produto> reordenarResultadoBuscaProdutos(
+  Iterable<Produto> produtos,
+  String termo, {
+  bool preservarItensSemMatch = true,
+}) {
+  final consultaBruta = termo.trim();
+  final lista =
+      produtos is List<Produto> ? List<Produto>.from(produtos) : produtos.toList();
+  if (lista.isEmpty) return lista;
+
+  if (consultaBruta.isEmpty) {
+    lista.sort((a, b) => compararNomeProdutoBusca(a.nome, b.nome));
+    return lista;
+  }
+
+  if (consultaBruta.contains('%')) {
+    final consultaCuringa = normalizarConsultaCuringa(
+      consultaBruta,
+      normalizarTextoBuscaProduto,
+    );
+    if (consultaUsaModoCuringa(consultaCuringa)) {
+      final curinga = parseConsultaCuringa(consultaCuringa);
+      if (curinga == null) return lista;
+      final consultaOrdenacao = normalizarTextoBuscaProduto(consultaBruta);
+      final scored = <_ProdutoMemoriaScore>[];
+      for (final p in lista) {
+        final pontuacao = _pontuacaoCuringaEmMemoria(p, curinga.segmentos);
+        if (pontuacao != null && pontuacao.total > 0) {
+          scored.add(_ProdutoMemoriaScore(p, pontuacao.match, pontuacao.total));
+        } else if (preservarItensSemMatch) {
+          scored.add(_ProdutoMemoriaScore(p, 0, 0));
+        }
+      }
+      scored.sort((a, b) => compararResultadoBuscaProduto(
+            scoreMatchA: a.match,
+            scoreMatchB: b.match,
+            nomeA: a.produto.nome,
+            nomeB: b.produto.nome,
+            consultaNormalizadaParaOrdenacao: consultaOrdenacao,
+          ));
+      return scored.map((e) => e.produto).toList();
+    }
+  }
+
+  final consulta = normalizarTextoBuscaProduto(consultaBruta);
+  if (consulta.isEmpty) return lista;
+  final tokens = consulta
+      .split(RegExp(r'\s+'))
+      .where((t) => t.length >= 2)
+      .toList();
+  final scored = <_ProdutoMemoriaScore>[];
+  for (final p in lista) {
+    final pontuacao = _pontuacaoContemEmMemoria(p, consulta, tokens);
+    if (pontuacao != null && pontuacao.total > 0) {
+      scored.add(_ProdutoMemoriaScore(p, pontuacao.match, pontuacao.total));
+    } else if (preservarItensSemMatch) {
+      scored.add(_ProdutoMemoriaScore(p, 0, 0));
+    }
+  }
+  scored.sort((a, b) => compararResultadoBuscaProduto(
+        scoreMatchA: a.match,
+        scoreMatchB: b.match,
+        nomeA: a.produto.nome,
+        nomeB: b.produto.nome,
+        consultaNormalizadaParaOrdenacao: consulta,
+      ));
+  return scored.map((e) => e.produto).toList();
+}
+
+ProdutoBuscaPontuacao? _pontuacaoCuringaEmMemoria(
+  Produto p,
+  List<String> segmentos,
+) {
   final nome = normalizarTextoBuscaProduto(p.nome);
   var match = avaliarMatchCuringa(nome, segmentos);
   var todosNoNome = match != null;
@@ -694,31 +949,32 @@ double _scoreCuringaEmMemoria(Produto p, List<String> segmentos) {
       final barras = normalizarTextoBuscaProduto(p.codigoBarras);
       final extra = '$codigo $barras'.trim();
       match = avaliarMatchCuringa(extra, segmentos);
-      if (match == null) return 0;
+      if (match == null) return null;
       todosNoNome = false;
     } else {
       todosNoNome = false;
     }
   }
 
-  var score = 920.0;
-  score += segmentos.length * 200;
-  score += (380 - match.totalSpan).clamp(0, 380);
-  score += (50 - nome.length * 0.12).clamp(0, 50);
+  var scoreMatch = 920.0;
+  scoreMatch += segmentos.length * 200;
+  scoreMatch += (380 - match.totalSpan).clamp(0, 380);
+  scoreMatch += (50 - nome.length * 0.12).clamp(0, 50);
   if (todosNoNome) {
-    score += 300;
+    scoreMatch += 300;
   } else {
-    score -= 80;
+    scoreMatch -= 80;
   }
+  var total = scoreMatch;
   if (p.estoqueReal > 0) {
-    score += p.estoqueReal > 35 ? 35 : p.estoqueReal.toDouble();
+    total += p.estoqueReal > 35 ? 35 : p.estoqueReal.toDouble();
   } else {
-    score -= 60;
+    total -= 60;
   }
-  return score;
+  return ProdutoBuscaPontuacao(match: scoreMatch, total: total);
 }
 
-double _scoreContemEmMemoria(
+ProdutoBuscaPontuacao? _pontuacaoContemEmMemoria(
   Produto p,
   String consulta,
   List<String> tokens,
@@ -730,23 +986,29 @@ double _scoreContemEmMemoria(
   final impressao = normalizarTextoBuscaProduto(p.nomeImpressao);
   final blob = '$nome $impressao $codigo $barras $apelidos';
 
-  if (codigo == consulta || barras == consulta) return 2000;
-  if (codigo.startsWith(consulta) || barras.startsWith(consulta)) return 1500;
-  if (nome.startsWith(consulta)) return 1200;
+  if (codigo == consulta || barras == consulta) {
+    return const ProdutoBuscaPontuacao(match: 2000, total: 2000);
+  }
+  if (codigo.startsWith(consulta) || barras.startsWith(consulta)) {
+    return const ProdutoBuscaPontuacao(match: 1500, total: 1500);
+  }
+  if (nome.startsWith(consulta)) {
+    return const ProdutoBuscaPontuacao(match: 1200, total: 1200);
+  }
 
   if (tokens.isEmpty) {
-    if (!blob.contains(consulta)) return 0;
-    var score = 400.0;
-    if (nome.contains(consulta)) score += 200;
-    if (p.estoqueReal > 0) score += 20;
-    return score;
+    if (!blob.contains(consulta)) return null;
+    var match = 400.0;
+    if (nome.contains(consulta)) match += 200;
+    final total = match + (p.estoqueReal > 0 ? 20 : 0);
+    return ProdutoBuscaPontuacao(match: match, total: total);
   }
 
   for (final t in tokens) {
-    if (!blob.contains(t)) return 0;
+    if (!blob.contains(t)) return null;
   }
-  var score = 500.0 + tokens.length * 40;
-  if (tokens.every(nome.contains)) score += 180;
-  if (p.estoqueReal > 0) score += 20;
-  return score;
+  var match = 500.0 + tokens.length * 40;
+  if (tokens.every(nome.contains)) match += 180;
+  final total = match + (p.estoqueReal > 0 ? 20 : 0);
+  return ProdutoBuscaPontuacao(match: match, total: total);
 }

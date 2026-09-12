@@ -204,6 +204,51 @@ void main() {
     });
   });
 
+  group('ordenacao cabos', () {
+    test('extrai bitola mm com virgula ou ponto', () {
+      expect(extrairBitolaMmProduto('Cabo 2,5mm Flex'), 2.5);
+      expect(extrairBitolaMmProduto('Cabo 10mm Preto'), 10);
+      expect(extrairBitolaMmProduto('Cabo p/Martelo 35cm'), isNull);
+    });
+
+    test('ordena por bitola e desempata marca na mesma bitola', () {
+      final nomes = [
+        'Cabo 10mm Flexivel 750v Preto',
+        'Cabo 2.5mm SIL Flex',
+        'Cabo 2.5mm Megatron Flex',
+        'Cabo 2.5mm Cobrecom Flex',
+        'Cabo 1.5mm Flexivel',
+        'Cabo 4.0mm Flexivel',
+        'Cabo 6.0mm Flex',
+        'Cabo 2.5mm Conduscabos Flex',
+        'Cabo p/Martelo 35cm',
+        'Cabo Rj45 3m Rede LAN',
+      ];
+      nomes.sort(compararProdutosBuscaCabo);
+      expect(
+        nomes,
+        [
+          'Cabo 1.5mm Flexivel',
+          'Cabo 2.5mm Cobrecom Flex',
+          'Cabo 2.5mm Conduscabos Flex',
+          'Cabo 2.5mm Megatron Flex',
+          'Cabo 2.5mm SIL Flex',
+          'Cabo 4.0mm Flexivel',
+          'Cabo 6.0mm Flex',
+          'Cabo 10mm Flexivel 750v Preto',
+          'Cabo p/Martelo 35cm',
+          'Cabo Rj45 3m Rede LAN',
+        ],
+      );
+    });
+
+    test('ordenacao contextual so quando consulta menciona cabo', () {
+      expect(ordenacaoContextualCaboAtiva('cabo'), isTrue);
+      expect(ordenacaoContextualCaboAtiva('cabo 2.5'), isTrue);
+      expect(ordenacaoContextualCaboAtiva('tubo 25'), isFalse);
+    });
+  });
+
   group('pesquisarProdutosEmMemoria (terminal)', () {
     Produto p(String nome, {String codigo = '', bool ativo = true}) => Produto(
           codigoInterno: codigo.isEmpty ? nome : codigo,
@@ -248,6 +293,65 @@ void main() {
         excluirProdutosInternos: true,
       );
       expect(r.map((e) => e.nome), ['Tubo PVC']);
+    });
+
+    test('reordenar lista simula retorno da API fora de ordem', () {
+      Produto p(String nome) => Produto(
+            codigoInterno: nome,
+            nome: nome,
+            quantidadeMinima: 0,
+            precoCusto: 0,
+            precoVenda: 10,
+          );
+      final api = [
+        p('Cabo 10mm Flexivel 750v Preto'),
+        p('Cabo p/Martelo 35cm'),
+        p('Cabo 2.5mm Cobrecom Flex'),
+        p('Cabo Rj45 3m Rede LAN'),
+        p('Cabo 1.5mm Flexivel'),
+      ];
+      final ordenado = reordenarResultadoBuscaProdutos(api, 'cabo');
+      expect(
+        ordenado.map((e) => e.nome),
+        [
+          'Cabo 1.5mm Flexivel',
+          'Cabo 2.5mm Cobrecom Flex',
+          'Cabo 10mm Flexivel 750v Preto',
+          'Cabo p/Martelo 35cm',
+          'Cabo Rj45 3m Rede LAN',
+        ],
+      );
+    });
+
+    test('busca cabo agrupa bitolas e desempata marcas', () {
+      final lista = [
+        p('Cabo 10mm Flexivel 750v Preto'),
+        p('Cabo 2.5mm SIL Flex'),
+        p('Cabo 2.5mm Megatron Flex'),
+        p('Cabo 2.5mm Cobrecom Flex'),
+        p('Cabo 1.5mm Flexivel'),
+        p('Cabo 4.0mm Flexivel'),
+        p('Cabo 6.0mm Flex'),
+        p('Cabo 2.5mm Conduscabos Flex'),
+        p('Cabo p/Martelo 35cm'),
+        p('Cabo Rj45 3m Rede LAN'),
+      ];
+      final r = pesquisarProdutosEmMemoria(lista, 'cabo');
+      expect(
+        r.map((e) => e.nome),
+        [
+          'Cabo 1.5mm Flexivel',
+          'Cabo 2.5mm Cobrecom Flex',
+          'Cabo 2.5mm Conduscabos Flex',
+          'Cabo 2.5mm Megatron Flex',
+          'Cabo 2.5mm SIL Flex',
+          'Cabo 4.0mm Flexivel',
+          'Cabo 6.0mm Flex',
+          'Cabo 10mm Flexivel 750v Preto',
+          'Cabo p/Martelo 35cm',
+          'Cabo Rj45 3m Rede LAN',
+        ],
+      );
     });
   });
 }
