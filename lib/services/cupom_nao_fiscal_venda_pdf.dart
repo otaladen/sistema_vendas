@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
@@ -18,8 +17,10 @@ import 'impressoes_service.dart';
 import '../model/item_venda.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import 'configuracoes_service.dart';
 import 'cupom_pdf_gerado.dart';
 import 'cupom_pdf_layout.dart';
+import 'fiscal_config_store.dart';
 
 /// PDF do cupom nao fiscal (venda finalizada), reutilizado no Caixa e na listagem.
 class CupomNaoFiscalVendaPdf {
@@ -246,16 +247,33 @@ class CupomNaoFiscalVendaPdf {
     return DateTime.now();
   }
 
+  static Future<FiscalConfigDados> _fiscalParaGeracao(
+    FiscalConfigDados? explicit,
+  ) async {
+    if (explicit != null) return explicit;
+    final svc = ConfiguracoesService.tryGlobal;
+    if (svc != null) return svc.carregarFiscalGlobal();
+    return ImpressoesService.fiscalDeCache();
+  }
+
+  static pw.Widget _faixaHomologacaoFiscal(ConfigLayoutImpressao layout) =>
+      CupomPdfLayout.faixaContingenciaNfce(
+        layout: layout,
+        titulo: 'EMISSAO EM AMBIENTE DE HOMOLOGACAO',
+        subtitulo: 'SEM VALOR FISCAL',
+      );
+
   static String _chaveRodapeCupom({
     required Venda venda,
     required String numeroDocumento,
     required String serieDocumento,
     required String dataLinhaPrincipal,
+    required FiscalConfigDados fiscal,
   }) {
     if (_chaveNfceValida(venda)) return venda.nfceChaveAcesso;
     return CupomPdfLayout.gerarChaveAcessoDecorativaNfce(
-      cnpj: FiscalConfig.cnpjEmitente,
-      uf: FiscalConfig.ufEmitente,
+      cnpj: fiscal.cnpjEmitente,
+      uf: fiscal.ufEmitente,
       numeroNota: numeroDocumento,
       serie: serieDocumento,
       emissao: _dataEmissaoCupom(venda, dataLinhaPrincipal),
@@ -299,6 +317,7 @@ class CupomNaoFiscalVendaPdf {
     required Venda venda,
     required EmpresaConfig config,
     required ConfigLayoutImpressao layout,
+    required FiscalConfigDados fiscal,
     Cliente? cliente,
     Vendedor? vendedor,
     required double totalRecebido,
@@ -338,19 +357,22 @@ class CupomNaoFiscalVendaPdf {
       numeroDocumento: numeroDocumento,
       serieDocumento: serieDocumento,
       dataLinhaPrincipal: dataLinhaPrincipal,
+      fiscal: fiscal,
     );
+    final homolog = fiscal.homologacao;
 
     final widgets = <pw.Widget>[
       ...CupomPdfLayout.cabecalhoLegadoLdv(
         layout: layout,
-        razaoSocial: FiscalConfig.razaoSocialEmitente,
+        razaoSocial: fiscal.razaoSocialEmitente,
         nomeLoja: config.nomeLoja,
-        cnpj: FiscalConfig.cnpjEmitente,
-        inscricaoEstadual: FiscalConfig.inscricaoEstadualEmitente,
+        cnpj: fiscal.cnpjEmitente,
+        inscricaoEstadual: fiscal.inscricaoEstadualEmitente,
         telefone: config.telefone,
         endereco: config.endereco,
         logoBytes: null,
       ),
+      if (homolog) _faixaHomologacaoFiscal(layout),
       CupomPdfLayout.faixaTituloDocumentoLegadoLdv(
         layout: layout,
         linha1: CupomPdfLayout.tituloDanfeNfceLegadoLinha1,
@@ -428,20 +450,29 @@ class CupomNaoFiscalVendaPdf {
         layout: layout,
         chaveAcesso: chaveRodape,
       ),
-      () {
-        final linhasConsumidor = _linhasConsumidorLegado(cliente);
-        return CupomPdfLayout.textoConsumidorLegadoLdv(
+      if (homolog && temNfceIdentificada)
+        CupomPdfLayout.textoConsumidorLegadoLdv(
           layout: layout,
-          textoPrincipal: linhasConsumidor.first,
-          linhasExtras: linhasConsumidor.length > 1
-              ? linhasConsumidor.sublist(1)
-              : const [],
-        );
-      }(),
+          textoPrincipal:
+              'Cliente: NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL',
+          linhasExtras: const [],
+        )
+      else
+        () {
+          final linhasConsumidor = _linhasConsumidorLegado(cliente);
+          return CupomPdfLayout.textoConsumidorLegadoLdv(
+            layout: layout,
+            textoPrincipal: linhasConsumidor.first,
+            linhasExtras: linhasConsumidor.length > 1
+                ? linhasConsumidor.sublist(1)
+                : const [],
+          );
+        }(),
       CupomPdfLayout.qrCodeNfceDanfe(
         layout: layout,
         payload: _payloadQrNfce(venda, chaveRodape),
       ),
+      if (homolog) _faixaHomologacaoFiscal(layout),
       CupomPdfLayout.espacoFinalDocumento(layout),
     ];
     return widgets;
@@ -451,6 +482,7 @@ class CupomNaoFiscalVendaPdf {
     required Venda venda,
     required EmpresaConfig config,
     required ConfigLayoutImpressao layout,
+    required FiscalConfigDados fiscal,
     Cliente? cliente,
     Vendedor? vendedor,
     required double totalRecebido,
@@ -473,6 +505,7 @@ class CupomNaoFiscalVendaPdf {
       venda,
       itens: itensCupom,
     );
+    final homolog = fiscal.homologacao;
     return [
       ...CupomPdfLayout.cabecalhoEmpresa(
         layout: layout,
@@ -480,7 +513,9 @@ class CupomNaoFiscalVendaPdf {
         logoBytes: comLogo ? logoBytes : null,
         telefone: config.telefone,
         endereco: config.endereco,
+        cnpj: fiscal.cnpjEmitente,
       ),
+      if (homolog) _faixaHomologacaoFiscal(layout),
       CupomPdfLayout.faixaTipoDocumento(
         layout: layout,
         titulo: layout.tituloDocumentoEfetivoCupom,
@@ -609,6 +644,7 @@ class CupomNaoFiscalVendaPdf {
         destaque: layout.destacarTroco,
         colunas: layout.alinharPagamentoColunas,
       ),
+      if (homolog) _faixaHomologacaoFiscal(layout),
       CupomPdfLayout.espacoFinalDocumento(layout),
     ];
   }
@@ -623,6 +659,7 @@ class CupomNaoFiscalVendaPdf {
     bool segundaVia = false,
     DateTime? dataCabecalhoVenda,
     List<ItemVenda>? itens,
+    FiscalConfigDados? fiscalEmitente,
   }) async {
     return (await gerar(
       venda: venda,
@@ -634,6 +671,7 @@ class CupomNaoFiscalVendaPdf {
       segundaVia: segundaVia,
       dataCabecalhoVenda: dataCabecalhoVenda,
       itens: itens,
+      fiscalEmitente: fiscalEmitente,
     ))
         .bytes;
   }
@@ -648,7 +686,9 @@ class CupomNaoFiscalVendaPdf {
     bool segundaVia = false,
     DateTime? dataCabecalhoVenda,
     List<ItemVenda>? itens,
+    FiscalConfigDados? fiscalEmitente,
   }) async {
+    final fiscal = await _fiscalParaGeracao(fiscalEmitente);
     final itensCupom = _itensDaVenda(venda, itens);
     final logoBytes = config.logoPath.trim().isNotEmpty
         ? await File(
@@ -670,6 +710,7 @@ class CupomNaoFiscalVendaPdf {
     late final int linhasTexto;
     late final int qtdItens;
     late final int linhasExtras;
+    final extraHomolog = fiscal.homologacao ? (layout.estiloCupomNfce ? 8 : 6) : 0;
     if (layout.estiloCupomNfce) {
       linhasTexto = 0;
       qtdItens = 0;
@@ -680,7 +721,8 @@ class CupomNaoFiscalVendaPdf {
         layout,
         config.rodapeNota,
         itens: itensCupom,
-      );
+      ) +
+          extraHomolog;
     } else {
       linhasTexto = _contarLinhasCupom(
         venda,
@@ -688,7 +730,8 @@ class CupomNaoFiscalVendaPdf {
         segundaVia,
         itens: itensCupom,
       );
-      linhasExtras = CupomPdfLayout.linhasTexto(config.rodapeNota).length + 2;
+      linhasExtras =
+          CupomPdfLayout.linhasTexto(config.rodapeNota).length + 2 + extraHomolog;
       final unidades = CupomPdfLayout.unidadesAlturaItensTermico(
         itensCupom.map(ProdutoNomeExibicao.paraImpressaoItem),
       );
@@ -714,6 +757,7 @@ class CupomNaoFiscalVendaPdf {
                   venda: venda,
                   config: config,
                   layout: layout,
+                  fiscal: fiscal,
                   cliente: cliente,
                   vendedor: vendedor,
                   totalRecebido: totalRecebido,
@@ -728,6 +772,7 @@ class CupomNaoFiscalVendaPdf {
                   venda: venda,
                   config: config,
                   layout: layout,
+                  fiscal: fiscal,
                   cliente: cliente,
                   vendedor: vendedor,
                   totalRecebido: totalRecebido,
