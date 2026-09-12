@@ -10119,10 +10119,7 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
 
   bool get usaArmazenamentoFracionado {
     if (quantidadeEmUnidadeCompra) return false;
-    return QuantidadeVendaUtil.armazenadoEmMilesimos(
-      quantidade,
-      cadastroFracionado: produto.permiteQuantidadeFracionada,
-    );
+    return ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, quantidade);
   }
 
   double get quantidadeVendaEfetiva {

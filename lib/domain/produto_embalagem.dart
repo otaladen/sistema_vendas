@@ -545,10 +545,7 @@ class ProdutoEmbalagem {
   }) {
     final uVenda = normalizarUnidade(produto.unidade);
     if (!emUnidadeCompra || !vendaPodeUsarUnidadeCompra(produto)) {
-      final fracionada = QuantidadeVendaUtil.armazenadoEmMilesimos(
-        quantidadeDigitada,
-        cadastroFracionado: produto.permiteQuantidadeFracionada,
-      );
+      final fracionada = leituraUsaEscalaFracionada(produto, quantidadeDigitada);
       if (fracionada) {
         final qTxt = QuantidadeVendaUtil.formatarExibicao(
           QuantidadeVendaUtil.valorExibicao(

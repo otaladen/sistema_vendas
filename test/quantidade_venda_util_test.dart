@@ -4,6 +4,29 @@ import 'package:sistema_vendas/domain/quantidade_venda_util.dart';
 import 'package:sistema_vendas/model/produto.dart';
 
 void main() {
+  test('parseEntradaPdv aceita quantidades fracionadas PT-BR', () {
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('0,50', fracionada: true),
+      closeTo(0.5, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('0.5', fracionada: true),
+      closeTo(0.5, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('1,5', fracionada: true),
+      closeTo(1.5, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('1,00', fracionada: true),
+      closeTo(1.0, 0.0001),
+    );
+    expect(
+      QuantidadeVendaUtil.parseEntradaPdv('500', fracionada: true),
+      closeTo(500.0, 0.0001),
+    );
+  });
+
   test('parseEntradaPdv aceita duas casas (5,75)', () {
     expect(
       QuantidadeVendaUtil.parseEntradaPdv('5,75', fracionada: true),
@@ -100,6 +123,46 @@ void main() {
     );
     expect(arm, 240);
     expect(QuantidadeVendaUtil.paraEstoqueInteiro(produto, arm), 1);
+  });
+
+  test('500 milesimos exibe 0,5 e nao 500 unidades no PDV', () {
+    final produto = Produto(
+      id: 3,
+      codigoInterno: 'TUBO',
+      nome: 'Tubo',
+      unidade: 'M',
+      quantidadeMinima: 0,
+      precoCusto: 50,
+      precoVenda: 85,
+      permiteQuantidadeFracionada: true,
+    );
+    const armazenado = 500;
+    expect(
+      QuantidadeVendaUtil.armazenadoEmMilesimos(
+        armazenado,
+        cadastroFracionado: true,
+      ),
+      isTrue,
+    );
+    expect(
+      QuantidadeVendaUtil.valorExibicao(armazenado, fracionada: true),
+      closeTo(0.5, 0.0001),
+    );
+    final qEfetiva = QuantidadeVendaUtil.valorExibicao(
+      armazenado,
+      fracionada: QuantidadeVendaUtil.armazenadoEmMilesimos(
+        armazenado,
+        cadastroFracionado: produto.permiteQuantidadeFracionada,
+      ),
+    );
+    expect(qEfetiva * produto.precoVenda, closeTo(42.5, 0.01));
+    expect(
+      QuantidadeVendaUtil.armazenadoEmMilesimos(
+        5,
+        cadastroFracionado: true,
+      ),
+      isFalse,
+    );
   });
 
   test('paraEstoqueInteiro inteira continua igual', () {

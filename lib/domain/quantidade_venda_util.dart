@@ -35,9 +35,18 @@ class QuantidadeVendaUtil {
     int armazenado, {
     required bool cadastroFracionado,
   }) {
-    if (cadastroFracionado) return true;
-    if (armazenado < escalaFracionada) return false;
-    return armazenado % escalaFracionada != 0;
+    if (armazenado <= 0) return false;
+    if (armazenado >= escalaFracionada) {
+      if (cadastroFracionado) return true;
+      return armazenado % escalaFracionada != 0;
+    }
+    // Abaixo de 1000: ex. 500 = 0,5 na unidade de venda; 5 legado continua inteiro.
+    if (cadastroFracionado &&
+        armazenado >= passoFracionadoArmazenado &&
+        armazenado % passoFracionadoArmazenado == 0) {
+      return true;
+    }
+    return false;
   }
 
   /// Interpreta texto do PDV (aceita vírgula ou ponto).
