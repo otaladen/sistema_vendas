@@ -8,6 +8,7 @@ import '../../domain/filtro_listagem_entregas.dart';
 import '../../domain/fiscal/nfe_venda_sync.dart';
 import '../../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import '../../domain/limite_credito_helper.dart';
+import '../../domain/listagem_vendas_dedupe.dart';
 import '../../domain/listagem_vendas_periodo.dart';
 import '../../domain/pagamento_orcamento.dart';
 import '../../domain/ultimas_vendas_finalizadas_ordenacao.dart';
@@ -379,10 +380,12 @@ class VendaApiRepository extends ChangeNotifier {
       busca: busca,
       filtroFiscal: 'todos',
     );
-    final filtradas = todas.where((v) => _correspondeFiltroFiscalListagem(
-          v,
-          filtroFiscal,
-        )).toList();
+    final filtradas = ListagemVendasDedupe.sanitizar(
+      todas.where((v) => _correspondeFiltroFiscalListagem(
+            v,
+            filtroFiscal,
+          )),
+    );
     final total = filtradas.length;
     final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
     final vendas = offset >= total
@@ -444,10 +447,24 @@ class VendaApiRepository extends ChangeNotifier {
     return all;
   }
 
+  ListagemVendasPagina _paginaListagemSanitizada(ListagemVendasPagina pagina) {
+    final unicas = ListagemVendasDedupe.sanitizar(pagina.vendas);
+    if (identical(unicas, pagina.vendas) ||
+        unicas.length == pagina.vendas.length) {
+      return pagina;
+    }
+    return ListagemVendasPagina(
+      vendas: unicas,
+      total: pagina.total,
+      totalValor: pagina.totalValor,
+    );
+  }
+
   ListagemVendasPagina _finalizarPaginaListagemHidratada(
     dynamic filtro,
     ListagemVendasPagina pagina,
   ) {
+    pagina = _paginaListagemSanitizada(pagina);
     for (final v in pagina.vendas) {
       _vincularAlvos(v);
       _porId[v.id] = v;
@@ -989,7 +1006,7 @@ class VendaApiRepository extends ChangeNotifier {
     }).toList();
 
     out.sort((a, b) => b.data.compareTo(a.data));
-    return out;
+    return ListagemVendasDedupe.sanitizar(out);
   }
 
   void _cacheItensDaVenda(Venda v) {

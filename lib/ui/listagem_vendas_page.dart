@@ -17,6 +17,7 @@ import '../data/venda_repository.dart';
 import 'shell/main_menu_deps.dart';
 import '../domain/cancelada_por_rotulo.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/listagem_vendas_dedupe.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/venda_finalizacao_caixa_helper.dart';
 import '../domain/pagamento_orcamento.dart';
@@ -1135,14 +1136,15 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
           .listarDistintosCanceladaPor();
       if (!mounted || seq != _pesquisaSeq) return;
       final scheme = Theme.of(context).colorScheme;
-      final vendas = (pagina.vendas as List).whereType<Venda>().toList();
+      final vendasBrutas = (pagina.vendas as List).whereType<Venda>().toList();
+      final vendas = ListagemVendasDedupe.sanitizar(vendasBrutas);
       final itensUi = _mapearVendasParaItensUi(vendas, scheme);
       setState(() {
         _resultados = vendas;
         _itensUi = itensUi;
         _totalListagemVendas = pagina.total;
         _valorTotalFiltro = pagina.totalValor;
-        _offsetListagem = vendas.length;
+        _offsetListagem = vendasBrutas.length;
         _carregandoListagem = false;
         _distintosCanceladaPor =
             (distintosCancel as List?)?.whereType<String>().toList() ??
@@ -1181,7 +1183,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       final scheme = Theme.of(context).colorScheme;
       final novas = (pagina.vendas as List).whereType<Venda>().toList();
       setState(() {
-        _resultados.addAll(novas);
+        _resultados = ListagemVendasDedupe.sanitizar([..._resultados, ...novas]);
         _offsetListagem += novas.length;
         _totalListagemVendas = pagina.total;
         _valorTotalFiltro = pagina.totalValor;
@@ -1283,7 +1285,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     }
 
     return [
-      for (final v in vendas)
+      for (final v in ListagemVendasDedupe.sanitizar(vendas))
         () {
           try {
             return _montarItemUi(

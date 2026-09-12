@@ -102,6 +102,9 @@ Future<Map<String, dynamic>> lanApiEmitirNfce({
                 ? resultado.statusFocus
                 : 'autorizado'),
         urlXmlCancelamento: resultado.urlXmlCancelamento,
+        referenciaFocus: resultado.referencia.isNotEmpty
+            ? resultado.referencia
+            : FocusNfeService.referenciaVendaNfce(venda),
         permitirVendaSemEstoque: permitirVendaSemEstoque,
       );
       d.notificar('venda');

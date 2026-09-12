@@ -211,6 +211,9 @@ abstract final class NfceEmissaoPendenteFlow {
                   : 'autorizado'),
           urlXmlCancelamento: resultado.urlXmlCancelamento,
           permitirVendaSemEstoque: permitirVendaSemEstoque,
+          referenciaFocus: resultado.referencia.isNotEmpty
+              ? resultado.referencia
+              : FocusNfeService.referenciaVendaNfce(vendaAtual),
         );
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(

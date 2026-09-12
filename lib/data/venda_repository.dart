@@ -20,8 +20,10 @@ import '../domain/operacao_permissao_guard.dart';
 import '../domain/entregas/agenda_carreto_ocupacao.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
+import '../domain/listagem_vendas_dedupe.dart';
 import '../config/fiscal_config.dart';
 import '../domain/fiscal/fiscal_emissao_lock.dart';
+import '../domain/fiscal/focus_nfe_referencia.dart';
 import '../domain/fiscal/focus_documento_fiscal_url.dart';
 import '../domain/fiscal/nfce_xml_local_service.dart';
 import '../domain/fiscal/nfe_xml_local_service.dart';
@@ -1269,6 +1271,9 @@ class VendaRepository {
     return c & textoCond;
   }
 
+  List<Venda> _sanitizarListagemVendas(List<Venda> vendas) =>
+      ListagemVendasDedupe.sanitizar(vendas);
+
   List<Venda> _listarCandidatasListagemFiscal(FiltroListagemVendas f) {
     final base = FiltroListagemVendas(
       textoBusca: f.textoBusca,
@@ -1289,7 +1294,7 @@ class VendaRepository {
     final cond = _condicaoListagemVendas(base);
     final query = _queryListagemVendasOrdenada(cond, base);
     try {
-      return query.find();
+      return _sanitizarListagemVendas(query.find());
     } finally {
       query.close();
     }
@@ -1375,7 +1380,7 @@ class VendaRepository {
     try {
       query.offset = offset;
       query.limit = limite;
-      final vendas = query.find();
+      final vendas = _sanitizarListagemVendas(query.find());
       return ListagemVendasPagina(
         vendas: vendas,
         total: total,
@@ -1399,7 +1404,7 @@ class VendaRepository {
     final cond = _condicaoListagemVendas(f);
     final query = _queryListagemVendasOrdenada(cond, f);
     try {
-      return query.find();
+      return _sanitizarListagemVendas(query.find());
     } finally {
       query.close();
     }
@@ -3625,11 +3630,19 @@ class VendaRepository {
     String urlXml = '',
     String statusFocus = 'autorizado',
     String urlXmlCancelamento = '',
+    String referenciaFocus = '',
   }) {
-    _db.store.runInTransaction(TxMode.write, () {
-      final venda = _db.vendaBox.get(vendaId);
+    final persistidoId = _db.store.runInTransaction(TxMode.write, () {
+      final venda = _resolverVendaParaAtualizacaoNfce(
+        vendaId: vendaId,
+        referenciaFocus: referenciaFocus,
+        chaveAcesso: chaveAcesso,
+      );
       if (venda == null) {
-        throw StateError('Venda $vendaId nao encontrada.');
+        throw StateError(
+          'Venda $vendaId nao encontrada para atualizar NFC-e '
+          '(ref $referenciaFocus).',
+        );
       }
       _preencherVendaNfceEmitida(
         venda,
@@ -3643,8 +3656,9 @@ class VendaRepository {
         urlXmlCancelamento: urlXmlCancelamento,
       );
       _db.vendaBox.put(venda);
+      return venda.id;
     });
-    _notificarRedeAposEscrita(vendaId: vendaId);
+    _notificarRedeAposEscrita(vendaId: persistidoId);
     _arquivarXmlNfceEmitida(
       chaveAcesso: chaveAcesso,
       urlXml: urlXml,
@@ -3663,11 +3677,19 @@ class VendaRepository {
     String statusFocus = 'autorizado',
     String urlXmlCancelamento = '',
     bool permitirVendaSemEstoque = true,
+    String referenciaFocus = '',
   }) {
-    _db.store.runInTransaction(TxMode.write, () {
-      final venda = _db.vendaBox.get(vendaId);
+    final persistidoId = _db.store.runInTransaction(TxMode.write, () {
+      final venda = _resolverVendaParaAtualizacaoNfce(
+        vendaId: vendaId,
+        referenciaFocus: referenciaFocus,
+        chaveAcesso: chaveAcesso,
+      );
       if (venda == null) {
-        throw StateError('Venda $vendaId nao encontrada.');
+        throw StateError(
+          'Venda $vendaId nao encontrada para atualizar NFC-e '
+          '(ref $referenciaFocus).',
+        );
       }
       _preencherVendaNfceEmitida(
         venda,
@@ -3685,12 +3707,42 @@ class VendaRepository {
         permitirVendaSemEstoque: permitirVendaSemEstoque,
       );
       _db.vendaBox.put(venda);
+      return venda.id;
     });
-    _notificarRedeAposEscrita(vendaId: vendaId);
+    _notificarRedeAposEscrita(vendaId: persistidoId);
     _arquivarXmlNfceEmitida(
       chaveAcesso: chaveAcesso,
       urlXml: urlXml,
     );
+  }
+
+  /// Localiza a venda existente para gravar a NFC-e. Nunca cria registro novo.
+  Venda? _resolverVendaParaAtualizacaoNfce({
+    required int vendaId,
+    String referenciaFocus = '',
+    String chaveAcesso = '',
+  }) {
+    if (vendaId > 0) {
+      final direta = _db.vendaBox.get(vendaId);
+      if (direta != null) return direta;
+    }
+    final idRef = FocusNfeReferencia.idVenda(referenciaFocus);
+    if (idRef != null && idRef > 0) {
+      final porRef = _db.vendaBox.get(idRef);
+      if (porRef != null) return porRef;
+    }
+    final chave = chaveAcesso.trim();
+    if (chave.length >= 40) {
+      final q = _db.vendaBox
+          .query(Venda_.nfceChaveAcesso.equals(chave))
+          .build();
+      try {
+        return q.findFirst();
+      } finally {
+        q.close();
+      }
+    }
+    return null;
   }
 
   void _preencherVendaNfceEmitida(
@@ -3704,7 +3756,11 @@ class VendaRepository {
     String statusFocus = 'autorizado',
     String urlXmlCancelamento = '',
   }) {
-    venda.nfceChaveAcesso = chaveAcesso.trim();
+    final chaveNova = chaveAcesso.trim();
+    final mesmaChave = chaveNova.isNotEmpty &&
+        venda.nfceChaveAcesso.trim() == chaveNova &&
+        venda.nfceEmitidaEm != null;
+    venda.nfceChaveAcesso = chaveNova;
     venda.nfceNumero = numero.trim();
     venda.nfceSerie = serie.trim();
     venda.nfceProtocolo = protocolo.trim();
@@ -3721,7 +3777,9 @@ class VendaRepository {
         : statusFocus.trim();
     venda.nfceUrlXmlCancelamento = urlXmlCancelamento.trim();
     venda.nfceUltimoErro = '';
-    venda.nfceEmitidaEm = DateTime.now().toUtc();
+    if (!mesmaChave) {
+      venda.nfceEmitidaEm = DateTime.now().toUtc();
+    }
   }
 
   void _preencherVendaNfe55Situacao(

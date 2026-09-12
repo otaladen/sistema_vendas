@@ -439,6 +439,9 @@ abstract final class EmitirNfceVendaFlow {
                   : (r.statusFocus.isNotEmpty ? r.statusFocus : 'autorizado'),
               urlXmlCancelamento: r.urlXmlCancelamento,
               permitirVendaSemEstoque: config.permitirVendaSemEstoque,
+              referenciaFocus: r.referencia.isNotEmpty
+                  ? r.referencia
+                  : FocusNfeService.referenciaVendaNfce(vSalvar),
             );
           } catch (e) {
             messenger.showSnackBar(

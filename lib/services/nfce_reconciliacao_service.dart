@@ -73,6 +73,9 @@ class NfceReconciliacaoService {
                   ? resultado.statusFocus
                   : 'autorizado'),
           urlXmlCancelamento: resultado.urlXmlCancelamento,
+          referenciaFocus: resultado.referencia.isNotEmpty
+              ? resultado.referencia
+              : FocusNfeService.referenciaVendaNfce(venda),
         );
       } catch (e) {
         return NfceReconciliacaoResultado(

@@ -4,6 +4,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../data/venda_repository.dart';
+import '../domain/fiscal/focus_nfe_referencia.dart';
+import '../domain/listagem_vendas_dedupe.dart';
 import '../model/venda.dart';
 
 class ResumoFinanceiroPeriodo {
@@ -81,6 +83,58 @@ class VendaService {
     return _vendaRepository.registrarVenda(itens);
   }
 
+  /// Garante um unico item por `id`/Controle/NFC-e na Listagem de Vendas.
+  List<Venda> sanitizarListagemVendas(Iterable<Venda> vendas) =>
+      ListagemVendasDedupe.sanitizar(vendas);
+
+  /// Retorno de autorizacao Focus: UPDATE na venda da ref `venda_XXX`, sem inserir.
+  void aplicarAutorizacaoNfceFocus({
+    required String chaveAcesso,
+    String numero = '',
+    String serie = '',
+    String protocolo = '',
+    String urlDanfe = '',
+    String urlXml = '',
+    String statusFocus = 'autorizado',
+    String urlXmlCancelamento = '',
+    String referenciaFocus = '',
+    int? vendaId,
+    bool comBaixaEstoque = false,
+    bool permitirVendaSemEstoque = true,
+  }) {
+    final id = (vendaId != null && vendaId > 0)
+        ? vendaId
+        : (FocusNfeReferencia.idVenda(referenciaFocus) ?? 0);
+    if (comBaixaEstoque) {
+      _vendaRepository.registrarNfceEmitidaComBaixaEstoque(
+        vendaId: id,
+        chaveAcesso: chaveAcesso,
+        numero: numero,
+        serie: serie,
+        protocolo: protocolo,
+        urlDanfe: urlDanfe,
+        urlXml: urlXml,
+        statusFocus: statusFocus,
+        urlXmlCancelamento: urlXmlCancelamento,
+        permitirVendaSemEstoque: permitirVendaSemEstoque,
+        referenciaFocus: referenciaFocus,
+      );
+      return;
+    }
+    _vendaRepository.registrarNfceEmitida(
+      vendaId: id,
+      chaveAcesso: chaveAcesso,
+      numero: numero,
+      serie: serie,
+      protocolo: protocolo,
+      urlDanfe: urlDanfe,
+      urlXml: urlXml,
+      statusFocus: statusFocus,
+      urlXmlCancelamento: urlXmlCancelamento,
+      referenciaFocus: referenciaFocus,
+    );
+  }
+
   int registrarOrcamento(
     List<ItemVendaInput> itens, {
     required DadosPagamentoOrcamento pagamento,
@@ -128,7 +182,9 @@ class VendaService {
   List<HistoricoVendaDetalhado> listarHistoricoDetalhado(
     PeriodoFiltro periodo,
   ) {
-    final vendas = _vendaRepository.listarPorPeriodo(periodo);
+    final vendas = sanitizarListagemVendas(
+      _vendaRepository.listarPorPeriodo(periodo),
+    );
     return vendas.map((venda) {
       final descricaoItens = venda.itens
           .map(

@@ -20,6 +20,7 @@ import '../config/fiscal_config.dart';
 import '../domain/fiscal/endereco_fiscal_ibge_resolver.dart';
 import '../domain/fiscal/fiscal_texto_schema.dart';
 import '../domain/fiscal/focus_documento_fiscal_url.dart';
+import '../domain/fiscal/focus_nfe_referencia.dart';
 import '../domain/fiscal/icms_focus_item_helper.dart';
 import '../domain/fiscal/ibscbs_focus_item_helper.dart';
 import '../domain/fiscal/venda_documento_fiscal_mutex.dart';
@@ -1841,6 +1842,10 @@ class FocusNfeService {
   static String referenciaVendaNfce(Venda venda) => _referenciaVenda(venda, 'nfce');
 
   static String referenciaVendaNfe(Venda venda) => _referenciaVenda(venda, 'nfe');
+
+  /// Id local de `venda_834` / `venda_834_nfe` (retorno Focus).
+  static int? idVendaDaReferencia(String referencia) =>
+      FocusNfeReferencia.idVenda(referencia);
 
   Map<String, dynamic> montarPayloadNfce(
     Venda venda, {
