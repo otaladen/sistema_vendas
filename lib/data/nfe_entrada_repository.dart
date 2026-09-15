@@ -300,6 +300,13 @@ class NfeEntradaRepository {
   NfeImportadaRegistro? obterImportacaoPorId(int id) =>
       _db.nfeImportadaRegistroBox.get(id);
 
+  /// Registro de importacao pela chave de 44 digitos (normalizada).
+  NfeImportadaRegistro? obterImportacaoPorChave(String chaveAcesso) {
+    final chave = chaveAcesso.replaceAll(RegExp(r'\D'), '');
+    if (chave.length != 44) return null;
+    return _buscarImportacaoPorChave(chave);
+  }
+
   /// XML original gravado no disco do PC servidor (fechamento / espelho).
   String? lerXmlImportacao(String chaveAcesso) => _xmlStore.lerXml(chaveAcesso);
 

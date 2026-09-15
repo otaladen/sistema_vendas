@@ -212,7 +212,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     // KPIs primeiro — nunca esperar bootstrap de rede.
     await _carregarFavoritos();
     if (!CaixaStatusHub.instance.hidratado) {
-      await CaixaStatusHub.instance.sincronizarDoRepositorio();
+      await CaixaStatusHub.instance.sincronizarDoRepositorio(
+        repararInconsistentes: true,
+      );
     }
     await _carregarPainel();
     if (mounted) _sincronizarTimersComVisibilidade();
@@ -549,8 +551,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       if (!mounted) return;
 
       // Status da loja (qualquer terminal), alinhado a /api/dashboard/resumo.
-      final sessoesCaixa =
-          await CaixaSessaoRepository().listarTodasSessoes();
+      final sessoesCaixa = await CaixaSessaoRepository().listarTodasSessoes(
+        repararInconsistentes: true,
+      );
       final fromPrefs = sessoesCaixa.values.any((s) => s.aberto);
       // Nao sobrescrever hub "aberto" com prefs vazios/atrasados.
       if (fromPrefs) {
@@ -605,7 +608,8 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         debugPrint('MainMenuDashboard.vendasHoje: $e');
         listaVendas = <Venda>[];
       }
-      final faturamento = listaVendas.fold<double>(0, (s, v) => s + v.total);
+      final faturamento =
+          listaVendas.fold<double>(0.0, (s, v) => s + v.total);
 
       // Celular: so KPI do dia + caixa. Nada de entregas/financeiro/alertas/fiscal.
       if (celular) {
@@ -695,12 +699,12 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
           final titulosAbertos = deps.vendaRepository.titulos
               .listarTodosAbertos();
           totalAReceber = titulosAbertos.fold<double>(
-            0,
+            0.0,
             (s, l) => s + l.titulo.saldo,
           );
           totalFiadoVencido = titulosAbertos
               .where(ContasReceberHelper.ehVencido)
-              .fold<double>(0, (s, l) => s + l.titulo.saldo);
+              .fold<double>(0.0, (s, l) => s + l.titulo.saldo);
         }
 
         final backupManual = await deps.configuracoesService.repository

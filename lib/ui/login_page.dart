@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/auditoria_catalogo.dart';
 import '../model/usuario_sistema.dart';
+import '../services/app_boot_log.dart';
 import '../services/auditoria_registrar.dart';
 import 'layout/app_layout.dart';
 import 'theme/app_fundo_scope.dart';
@@ -17,7 +18,7 @@ class LoginPage extends StatefulWidget {
 
   /// [UsuarioRepository] (servidor) ou [UsuarioApiRepository] (terminal).
   final dynamic usuarioRepository;
-  final ValueChanged<UsuarioSistema> onLoginSuccess;
+  final Future<void> Function(UsuarioSistema) onLoginSuccess;
 
   /// Terminal leve: autentica no PC servidor; nao cria admin local.
   final bool terminalRemoto;
@@ -167,7 +168,14 @@ class _LoginPageState extends State<LoginPage> {
         detalhes: {'login': login},
       );
       if (!mounted) return;
-      widget.onLoginSuccess(admin);
+      await widget.onLoginSuccess(admin);
+    } catch (e, st) {
+      AppBootLog.registrar('login_pos_admin', e, stack: st);
+      if (!mounted) return;
+      setState(
+        () => _erro =
+            'Nao foi possivel abrir o sistema apos o cadastro. Tente novamente.',
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -214,10 +222,14 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
       if (!mounted) return;
-      widget.onLoginSuccess(usuario);
-    } catch (e) {
+      await widget.onLoginSuccess(usuario);
+    } catch (e, st) {
+      AppBootLog.registrar('login_pos_entrar', e, stack: st);
       if (!mounted) return;
-      setState(() => _erro = '$e');
+      setState(
+        () => _erro =
+            'Nao foi possivel abrir o sistema apos o login. Tente novamente.',
+      );
     } finally {
       if (mounted) {
         setState(() {

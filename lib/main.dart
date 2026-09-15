@@ -61,6 +61,9 @@ import 'services/windows_app_startup_helper.dart';
 import 'services/windows_backup_ao_fechar_window_service.dart';
 import 'ui/app_startup_error_page.dart';
 import 'ui/app_global_error_handler.dart';
+import 'services/app_boot_log.dart';
+import 'services/app_pos_login_startup.dart';
+import 'ui/widgets/app_pos_login_aviso_dialog.dart';
 import 'ui/layout/app_layout.dart';
 import 'ui/login_page.dart';
 import 'ui/main_menu_page.dart';
@@ -304,6 +307,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _terminalHidratando = false;
   bool _terminalCarregandoDados = false;
   String? _terminalErro;
+  List<AppPosLoginAviso> _posLoginAvisosPendentes = const [];
 
   // Repos API (terminal).
   LanApiClient? _apiClient;
@@ -465,34 +469,106 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _entrar(UsuarioSistema usuario) async {
-    AuditoriaRegistrar.definirUsuarioSessao(usuario.login);
-    AuditoriaRegistrar.registrar(
-      modulo: AuditoriaModulo.autenticacao,
-      acao: AuditoriaAcao.login,
-      usuarioLogin: usuario.login,
-      resumo: 'Login: ${usuario.nome} (${usuario.login})',
+    AppBootLog.info('login', 'Credenciais validadas: ${usuario.login}');
+    try {
+      AuditoriaRegistrar.definirUsuarioSessao(usuario.login);
+      AuditoriaRegistrar.registrar(
+        modulo: AuditoriaModulo.autenticacao,
+        acao: AuditoriaAcao.login,
+        usuarioLogin: usuario.login,
+        resumo: 'Login: ${usuario.nome} (${usuario.login})',
+      );
+      final personalizacao = await Future.wait([
+        AppTemaRepository.carregar(login: usuario.login),
+        AppMenuModoRepository.carregar(login: usuario.login),
+        AppFundoRepository.carregar(login: usuario.login),
+      ]);
+      if (!mounted) return;
+
+      if (widget.terminalLeve && _produtoApi == null) {
+        await _prepararTerminalLeve();
+      }
+      if (widget.terminalLeve && _produtoApi != null) {
+        await _hidratarTerminalPosLogin();
+      }
+      if (!mounted) return;
+
+      final boot = await AppPosLoginStartup.executarAntesDoDashboard(
+        usuario: usuario,
+        terminalLeve: widget.terminalLeve,
+        configuracoesService: widget.configuracoesService,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _usuarioLogado = usuario;
+        _temaAtual = personalizacao[0] as AppTemaId;
+        _menuModoAtual = personalizacao[1] as AppMenuModoId;
+        _fundoAtual = personalizacao[2] as AppFundoId;
+        _posLoginAvisosPendentes = boot.avisos;
+      });
+
+      if (boot.avisos.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(_mostrarAvisosPosLoginSePendente(usuario));
+        });
+      }
+    } catch (e, st) {
+      AppBootLog.registrar(
+        'pos_login_fatal',
+        e,
+        stack: st,
+        contexto: usuario.login,
+      );
+      if (!mounted) return;
+      final ctx = appNavigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await mostrarFalhaPosLoginDialog(
+          ctx,
+          mensagem: _mensagemFalhaPosLogin(e),
+          onTentarNovamente: () => _entrar(usuario),
+        );
+      }
+    }
+  }
+
+  String _mensagemFalhaPosLogin(Object e) {
+    final raw = e.toString().toLowerCase();
+    if (raw.contains('caixa')) {
+      return 'Erro ao carregar o estado do caixa apos o login.\n\n$e';
+    }
+    if (raw.contains('objectbox') || raw.contains('database')) {
+      return 'Erro ao acessar dados locais apos o login.\n\n$e';
+    }
+    return 'Erro ao abrir o menu principal apos o login.\n\n$e';
+  }
+
+  Future<void> _mostrarAvisosPosLoginSePendente(UsuarioSistema usuario) async {
+    if (!mounted || _posLoginAvisosPendentes.isEmpty) return;
+    final avisos = List<AppPosLoginAviso>.from(_posLoginAvisosPendentes);
+    setState(() => _posLoginAvisosPendentes = const []);
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) return;
+    await mostrarAvisosPosLogin(
+      ctx,
+      avisos: avisos,
+      onTentarNovamente: () async {
+        final boot = await AppPosLoginStartup.executarAntesDoDashboard(
+          usuario: usuario,
+          terminalLeve: widget.terminalLeve,
+          configuracoesService: widget.configuracoesService,
+        );
+        if (!mounted) return;
+        if (boot.avisos.isEmpty) return;
+        final ctx2 = appNavigatorKey.currentContext;
+        if (ctx2 == null || !ctx2.mounted) return;
+        await mostrarAvisosPosLogin(
+          ctx2,
+          avisos: boot.avisos,
+          onTentarNovamente: () => _mostrarAvisosPosLoginSePendente(usuario),
+        );
+      },
     );
-    final personalizacao = await Future.wait([
-      AppTemaRepository.carregar(login: usuario.login),
-      AppMenuModoRepository.carregar(login: usuario.login),
-      AppFundoRepository.carregar(login: usuario.login),
-    ]);
-    if (!mounted) return;
-
-    if (widget.terminalLeve && _produtoApi == null) {
-      await _prepararTerminalLeve();
-    }
-    if (widget.terminalLeve && _produtoApi != null) {
-      await _hidratarTerminalPosLogin();
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _usuarioLogado = usuario;
-      _temaAtual = personalizacao[0] as AppTemaId;
-      _menuModoAtual = personalizacao[1] as AppMenuModoId;
-      _fundoAtual = personalizacao[2] as AppFundoId;
-    });
   }
 
   Future<void> _prepararTerminalLeve() async {

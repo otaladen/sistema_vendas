@@ -20,8 +20,11 @@ import '../../domain/modo_terminal_leve.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/usuario_sistema.dart';
+import '../../services/app_boot_log.dart';
+import '../../services/app_pos_login_startup.dart';
 import '../../services/lan_servidor_bootstrap.dart';
 import '../../services/print_service.dart';
+import '../widgets/app_pos_login_aviso_dialog.dart';
 import '../layout/app_layout.dart';
 import '../listagem_vendas_page.dart';
 import '../main_menu_dashboard.dart';
@@ -138,9 +141,54 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       (_) => unawaited(_atualizarBadgesMenu()),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _iniciarSyncSeNecessario();
-      _configurarChatInterno();
+      unawaited(_bootPosLoginShell());
     });
+  }
+
+  Future<void> _bootPosLoginShell() async {
+    final avisos = <AppPosLoginAviso>[];
+
+    try {
+      _configurarChatInterno();
+    } catch (e, st) {
+      AppBootLog.registrar('chat_interno_boot', e, stack: st);
+      avisos.add(
+        AppPosLoginAviso(
+          etapaId: 'chat_interno',
+          tituloAmigavel: 'Erro ao iniciar chat interno',
+          detalhe: '$e',
+        ),
+      );
+    }
+
+    try {
+      await _iniciarSyncSeNecessario();
+    } catch (e, st) {
+      AppBootLog.registrar('sync_boot', e, stack: st);
+      avisos.add(
+        AppPosLoginAviso(
+          etapaId: 'sync_lan',
+          tituloAmigavel: 'Erro ao iniciar sincronizacao de rede',
+          detalhe: '$e',
+        ),
+      );
+    }
+
+    try {
+      final shellBoot = await AppPosLoginStartup.executarAoAbrirShell(
+        terminalLeve: widget.terminalLeve,
+      );
+      avisos.addAll(shellBoot.avisos);
+    } catch (e, st) {
+      AppBootLog.registrar('shell_boot', e, stack: st);
+    }
+
+    if (!mounted || avisos.isEmpty) return;
+    await mostrarAvisosPosLogin(
+      context,
+      avisos: avisos,
+      onTentarNovamente: _bootPosLoginShell,
+    );
   }
 
   void _configurarChatInterno() {

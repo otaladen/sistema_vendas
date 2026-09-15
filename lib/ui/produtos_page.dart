@@ -7623,11 +7623,17 @@ class _ProdutosPageState extends State<ProdutosPage>
                               ),
                               ColoredBox(
                                 color: const Color(0xFFF8FAFC),
-                                child: AbasHistoricoProdutoWidget(
-                                key: ValueKey(_historicoVersao),
-                                produtoRepository: widget.produtoRepository,
-                                produtoId: _produtoEmEdicaoId,
-                              ),
+                                child: SizedBox.expand(
+                                  child: AbasHistoricoProdutoWidget(
+                                    key: ValueKey(_historicoVersao),
+                                    produtoRepository: widget.produtoRepository,
+                                    produtoId: _produtoEmEdicaoId,
+                                    produto: _produtoEmEdicaoId != null
+                                        ? widget.produtoRepository
+                                            .obterPorId(_produtoEmEdicaoId!)
+                                        : null,
+                                  ),
+                                ),
                               ),
                               ColoredBox(
                                 color: const Color(0xFFF8FAFC),

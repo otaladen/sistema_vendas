@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../model/caixa_sessao.dart';
+import '../../services/app_boot_log.dart';
 import '../caixa_sessao_repository.dart';
 
 /// Status de caixa da **loja** (alguma sessao aberta), compartilhado entre
@@ -54,11 +55,14 @@ class CaixaStatusHub extends ChangeNotifier {
     );
   }
 
-  Future<void> sincronizarDoRepositorio() async {
+  Future<void> sincronizarDoRepositorio({bool repararInconsistentes = false}) async {
     try {
-      final todas = await CaixaSessaoRepository().listarTodasSessoes();
+      final todas = await CaixaSessaoRepository().listarTodasSessoes(
+        repararInconsistentes: repararInconsistentes,
+      );
       publicarDasSessoes(todas);
-    } catch (_) {
+    } catch (e, st) {
+      AppBootLog.registrar('caixa_status_hub_sync', e, stack: st);
       // Mantem ultimo status conhecido.
     }
   }

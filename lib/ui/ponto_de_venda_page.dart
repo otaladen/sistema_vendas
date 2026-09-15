@@ -62,6 +62,7 @@ import '../data/sync/sync_service.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
+import '../data/vendedor_repository.dart';
 import 'vales/vale_credito_busca_dialog.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
@@ -230,6 +231,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Evita envio duplo (F10 + clique) e corrida com fechamento do dialogo.
   /// Permanece true tambem durante imprimir/PDF pos-save.
   bool _salvandoOrcamento = false;
+  bool _confirmandoEnvioCheckout = false;
+
+  /// Modal "Quem esta vendendo?" aberto (bloqueia atalhos 1-6 do checkout).
+  bool _dialogoSelecionarVendedorPdvAberto = false;
 
   /// Overlay "Processando orcamento..." — so durante o save no servidor.
   bool _overlaySalvandoOrcamento = false;
@@ -1874,7 +1879,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     // precisam funcionar (F10 enviar, F6/F3, Esc).
     if (_checkoutDialogAberto && event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.f10) {
-        unawaited(_checkoutDialogAcaoF10Async());
+        if (!_confirmandoEnvioCheckout && !_salvandoOrcamento) {
+          unawaited(_checkoutDialogAcaoF10Async());
+        }
         return true;
       }
       if (event.logicalKey == LogicalKeyboardKey.f6) {
@@ -2757,6 +2764,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return _vendedoresAtivos.where((v) => v.id == id).firstOrNull;
   }
 
+  /// [vendedorRepository] e dynamic (ObjectBox ou API); tipagem explicita evita
+  /// falha em `.where((v) => v.ativo)` sobre lista dinamica.
+  List<Vendedor> _pesquisarVendedoresAtivosPdv(String termo) {
+    final resultado = widget.vendedorRepository.pesquisar(termo);
+    final Iterable<Vendedor> lista = resultado is List<Vendedor>
+        ? resultado
+        : List<Vendedor>.from(resultado as Iterable);
+    return lista.where((Vendedor v) => v.ativo).take(60).toList();
+  }
+
   /// Quando [pdvExigirVendedor] esta ativo, abre dialogo para escolher vendedor.
   /// Retorna `false` se o usuario cancelar ou nao houver vendedores ativos.
   Future<bool> _garantirVendedorPdvObrigatorio() async {
@@ -2800,27 +2817,41 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
 
     int? vendedorSelecionadoId;
-    final confirmar = await showDialog<bool>(
-      context: context,
-      useRootNavigator: true,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return _DialogoSelecionarVendedorPdv(
-          vendedoresAtivos: vendedoresAtivos,
-          pesquisarVendedores: (termo) => widget.vendedorRepository
-              .pesquisar(termo)
-              .where((v) => v.ativo)
-              .take(60)
-              .toList(),
-          onConfirmar: (id) {
-            vendedorSelecionadoId = id;
-            Navigator.pop(dialogContext, true);
-          },
-          onCancelar: () => Navigator.pop(dialogContext, false),
-        );
-      },
-    );
-    if (confirmar != true || vendedorSelecionadoId == null) return false;
+    // Com checkout aberto, o dialogo precisa ir no mesmo Navigator do fechamento
+    // (nao no root), senao fica atras do modal e a tela parece travada.
+    final checkoutAberto = _checkoutDialogAberto;
+    final ctxVendedor =
+        checkoutAberto && _checkoutDialogFechamentoContext != null
+        ? _checkoutDialogFechamentoContext!
+        : context;
+    _dialogoSelecionarVendedorPdvAberto = true;
+    if (checkoutAberto) {
+      _focusPagamentoPdV.unfocus();
+    }
+    bool confirmar = false;
+    try {
+      confirmar =
+          await showDialog<bool>(
+            context: ctxVendedor,
+            useRootNavigator: !checkoutAberto,
+            barrierDismissible: false,
+            builder: (dialogContext) {
+              return _DialogoSelecionarVendedorPdv(
+                vendedoresAtivos: vendedoresAtivos,
+                pesquisarVendedores: _pesquisarVendedoresAtivosPdv,
+                onConfirmar: (id) {
+                  vendedorSelecionadoId = id;
+                  Navigator.pop(dialogContext, true);
+                },
+                onCancelar: () => Navigator.pop(dialogContext, false),
+              );
+            },
+          ) ==
+          true;
+    } finally {
+      _dialogoSelecionarVendedorPdvAberto = false;
+    }
+    if (!confirmar || vendedorSelecionadoId == null) return false;
     if (!mounted) return false;
     _vendedorSelecionadoId = vendedorSelecionadoId;
     if (_checkoutDialogAberto) {
@@ -5209,6 +5240,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     StateSetter setDialogState,
   ) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (_dialogoSelecionarVendedorPdvAberto) {
+      return KeyEventResult.ignored;
+    }
     if (_pagamentoMistoPdV) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
@@ -5339,21 +5373,28 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   Future<void> _confirmarCheckoutEEnviar({
     BuildContext? fechamentoDialogContext,
   }) async {
-    if (_salvandoOrcamento) return;
-    if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
-    if (_descontoPdVUltrapassaTetoSemAutorizacao()) {
-      final ok = await _solicitarAutorizacaoDescontoAcimaTetoPdV();
-      if (!ok || !mounted) return;
-      _checkoutDialogSetState?.call(() {});
+    if (_salvandoOrcamento || _confirmandoEnvioCheckout) return;
+    _confirmandoEnvioCheckout = true;
+    try {
+      if (!LanApiEventHub.instance.garantirOnlineOuAvisar(context)) return;
+      if (_descontoPdVUltrapassaTetoSemAutorizacao()) {
+        final ok = await _solicitarAutorizacaoDescontoAcimaTetoPdV();
+        if (!ok || !mounted) return;
+        _checkoutDialogSetState?.call(() {});
+      }
+      if (!await _garantirVendedorPdvObrigatorio()) return;
+      final erro = _mensagemErroConfirmarCheckout();
+      if (erro != null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(erro)),
+        );
+        return;
+      }
+      await _salvarOrcamento(fechamentoDialogContext: fechamentoDialogContext);
+    } finally {
+      _confirmandoEnvioCheckout = false;
     }
-    if (!await _garantirVendedorPdvObrigatorio()) return;
-    final erro = _mensagemErroConfirmarCheckout();
-    if (erro != null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro)));
-      return;
-    }
-    await _salvarOrcamento(fechamentoDialogContext: fechamentoDialogContext);
   }
 
   Future<void> _checkoutDialogAcaoF10Async() async {
@@ -5457,12 +5498,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         : 'Enviar ao caixa';
     final celular = _pdvUiCelular;
     final viewInsets = MediaQuery.viewInsetsOf(context);
+    final enviando = _confirmandoEnvioCheckout || _salvandoOrcamento;
     final botaoConfirmar = Focus(
       focusNode: _focusCheckoutAcaoPrimaria,
       child: FilledButton.icon(
-        onPressed: () => unawaited(
-          _confirmarCheckoutEEnviar(fechamentoDialogContext: dialogContext),
-        ),
+        onPressed: enviando
+            ? null
+            : () => unawaited(
+                _confirmarCheckoutEEnviar(
+                  fechamentoDialogContext: dialogContext,
+                ),
+              ),
         style: celular
             ? FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
@@ -10257,18 +10303,50 @@ class _DialogoSelecionarVendedorPdvState
   late List<Vendedor> _vendedoresExibidos;
   int? _vendedorSelecionadoId;
   late final TextEditingController _pesquisaController;
+  final _focusPesquisa = FocusNode();
 
   @override
   void initState() {
     super.initState();
     _vendedoresExibidos = widget.vendedoresAtivos.take(60).toList();
     _pesquisaController = TextEditingController();
+    HardwareKeyboard.instance.addHandler(_handlerTeclasHardwareVendedor);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _focusPesquisa.canRequestFocus) {
+        _focusPesquisa.requestFocus();
+      }
+    });
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwareVendedor);
     _pesquisaController.dispose();
+    _focusPesquisa.dispose();
     super.dispose();
+  }
+
+  bool _handlerTeclasHardwareVendedor(KeyEvent event) {
+    if (!mounted || event is! KeyDownEvent) return false;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return false;
+
+    final digito = _digitoDeTecla(event.logicalKey);
+    if (digito != null) {
+      // Com texto na busca, o digito filtra nome/codigo — nao atalho rapido.
+      if (_pesquisaController.text.trim().isNotEmpty) return false;
+      final v = _vendedorPorCodigo(digito);
+      if (v != null) {
+        widget.onConfirmar(v.id);
+        return true;
+      }
+      return false;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      widget.onCancelar();
+      return true;
+    }
+    return false;
   }
 
   void _atualizarBusca(String termo) {
@@ -10280,11 +10358,86 @@ class _DialogoSelecionarVendedorPdvState
     });
   }
 
+  void _onBuscaAlterada(String termo) {
+    _atualizarBusca(termo);
+    final t = termo.trim();
+    if (t.isEmpty) return;
+    final v = _vendedorPorCodigo(t);
+    if (v != null && v.codigoInterno.trim() == t) {
+      widget.onConfirmar(v.id);
+    }
+  }
+
   String _nomeVendedor(Vendedor v) {
     final nome = v.apelido.trim().isNotEmpty
         ? v.apelido.trim()
         : v.nomeCompleto.trim();
     return nome.isEmpty ? 'Vendedor ${v.id}' : nome;
+  }
+
+  String? _digitoDeTecla(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
+      return '0';
+    }
+    if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
+      return '1';
+    }
+    if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) {
+      return '2';
+    }
+    if (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) {
+      return '3';
+    }
+    if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) {
+      return '4';
+    }
+    if (key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5) {
+      return '5';
+    }
+    if (key == LogicalKeyboardKey.digit6 || key == LogicalKeyboardKey.numpad6) {
+      return '6';
+    }
+    if (key == LogicalKeyboardKey.digit7 || key == LogicalKeyboardKey.numpad7) {
+      return '7';
+    }
+    if (key == LogicalKeyboardKey.digit8 || key == LogicalKeyboardKey.numpad8) {
+      return '8';
+    }
+    if (key == LogicalKeyboardKey.digit9 || key == LogicalKeyboardKey.numpad9) {
+      return '9';
+    }
+    return null;
+  }
+
+  /// Codigo exibido na lista (ex.: `1`, `2`) — unico match entre os ativos.
+  Vendedor? _vendedorPorCodigo(String codigo) {
+    final c = codigo.trim();
+    if (c.isEmpty) return null;
+    final alvo = int.tryParse(c);
+    Vendedor? unicoPorInt;
+    for (final v in widget.vendedoresAtivos) {
+      final ci = v.codigoInterno.trim();
+      if (ci == c) return v;
+      if (alvo != null) {
+        final n = VendedorRepository.codigoInternoComoInteiro(ci);
+        if (n == alvo) {
+          if (unicoPorInt != null) return null;
+          unicoPorInt = v;
+        }
+      }
+    }
+    return unicoPorInt;
+  }
+
+  void _confirmar() {
+    if (_vendedorSelecionadoId != null) {
+      widget.onConfirmar(_vendedorSelecionadoId!);
+      return;
+    }
+    final v = _vendedorPorCodigo(_pesquisaController.text);
+    if (v != null) {
+      widget.onConfirmar(v.id);
+    }
   }
 
   @override
@@ -10301,15 +10454,25 @@ class _DialogoSelecionarVendedorPdvState
               'Selecione o vendedor responsavel por esta venda.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            const SizedBox(height: 4),
+            Text(
+              'Tecla numerica = codigo (1, 2, 3...) confirma na hora',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _pesquisaController,
+              focusNode: _focusPesquisa,
               autofocus: true,
+              textInputAction: TextInputAction.done,
               decoration: const InputDecoration(
                 labelText: 'Buscar vendedor',
                 prefixIcon: Icon(Icons.search),
               ),
-              onChanged: _atualizarBusca,
+              onChanged: _onBuscaAlterada,
+              onSubmitted: (_) => _confirmar(),
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -10338,9 +10501,7 @@ class _DialogoSelecionarVendedorPdvState
       actions: [
         TextButton(onPressed: widget.onCancelar, child: const Text('Cancelar')),
         ElevatedButton(
-          onPressed: _vendedorSelecionadoId == null
-              ? null
-              : () => widget.onConfirmar(_vendedorSelecionadoId!),
+          onPressed: _vendedorSelecionadoId == null ? null : _confirmar,
           child: const Text('Confirmar'),
         ),
       ],

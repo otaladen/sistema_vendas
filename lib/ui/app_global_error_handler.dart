@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/api/lan_api_client.dart';
+import '../services/app_boot_log.dart';
 
 /// Chaves globais para SnackBar/navegacao fora de um [BuildContext] local
 /// (ex.: erros em [runZonedGuarded] / [FlutterError.onError]).
@@ -27,14 +28,14 @@ void configurarTratamentoErrosGlobais() {
         'FlutterError: ${details.exceptionAsString()}\n${details.stack}',
       );
     }
-    reportarErroGlobal(details.exception);
+    reportarErroGlobal(details.exception, details.stack);
   };
 
   PlatformDispatcher.instance.onError = (error, stack) {
     if (kDebugMode) {
       debugPrint('PlatformDispatcher.onError: $error\n$stack');
     }
-    reportarErroGlobal(error);
+    reportarErroGlobal(error, stack);
     return true;
   };
 
@@ -62,6 +63,9 @@ void configurarTratamentoErrosGlobais() {
 
 /// Entrada unica para erros de zona / background (SnackBar, sem crash).
 void reportarErroGlobal(Object erro, [StackTrace? stack]) {
+  if (!_ehErroLayoutIgnoravel(erro) && !_ehErroRedeOuApiBackground(erro)) {
+    AppBootLog.registrar('erro_global', erro, stack: stack);
+  }
   if (_ehErroLayoutIgnoravel(erro)) {
     if (kDebugMode) {
       debugPrint('Layout (sem SnackBar): $erro');

@@ -6948,6 +6948,14 @@ class _CaixaPageState extends State<CaixaPage> {
     await _vincularClienteIdAoOrcamento(clienteSelecionadoId);
   }
 
+  List<Vendedor> _pesquisarVendedoresAtivosCaixa(String termo) {
+    final resultado = widget.vendedorRepository.pesquisar(termo);
+    final Iterable<Vendedor> lista = resultado is List<Vendedor>
+        ? resultado
+        : List<Vendedor>.from(resultado as Iterable);
+    return lista.where((Vendedor v) => v.ativo).take(60).toList();
+  }
+
   Future<void> _vincularVendedorAgora() async {
     final venda = _selecionado;
     if (venda == null) return;
@@ -6981,11 +6989,7 @@ class _CaixaPageState extends State<CaixaPage> {
               setDialogState(() {
                 vendedoresExibidos = t.isEmpty
                     ? vendedoresAtivos.take(60).toList()
-                    : widget.vendedorRepository
-                        .pesquisar(t)
-                        .where((v) => v.ativo)
-                        .take(60)
-                        .toList();
+                    : _pesquisarVendedoresAtivosCaixa(t);
               });
             }
 

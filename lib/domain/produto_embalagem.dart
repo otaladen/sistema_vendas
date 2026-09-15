@@ -136,6 +136,56 @@ class ProdutoEmbalagem {
     return bruto.round();
   }
 
+  /// Corrige entradas NF-e legadas gravadas em milésimos (ex.: 6 PC → 6000 UN).
+  static int quantidadeEntradaHistoricoNormalizada({
+    required Produto produto,
+    required int quantidadeEntradaArmazenada,
+    required double quantidadeFornecedor,
+    required double fatorConversaoUtilizado,
+    required String unidadeFornecedor,
+  }) {
+    if (quantidadeEntradaArmazenada <= 0) return 0;
+    if (estoqueUsaEscalaFracionada(produto)) {
+      return quantidadeEntradaArmazenada;
+    }
+    final esperado = quantidadeNotaParaEstoque(
+      quantidadeComercial: quantidadeFornecedor,
+      fator: fatorConversaoUtilizado,
+      embalagemMultiplica: produto.embalagemMultiplica,
+      produto: produto,
+      unidadeComercial: unidadeFornecedor,
+      unidadeInterna: produto.unidade,
+    );
+    if (esperado <= 0) return quantidadeEntradaArmazenada;
+    final escala = QuantidadeVendaUtil.escalaFracionada;
+    if (quantidadeEntradaArmazenada == esperado * escala && esperado < escala) {
+      return esperado;
+    }
+    return quantidadeEntradaArmazenada;
+  }
+
+  /// Quantidade de estoque (+) de uma linha do historico de compras.
+  static String formatarQuantidadeEntradaHistorico({
+    required Produto? produto,
+    required int quantidadeEntradaArmazenada,
+    required double quantidadeFornecedor,
+    required double fatorConversaoUtilizado,
+    required String unidadeFornecedor,
+    bool comUnidade = false,
+  }) {
+    if (produto == null) {
+      return quantidadeEntradaArmazenada.toString();
+    }
+    final normalizada = quantidadeEntradaHistoricoNormalizada(
+      produto: produto,
+      quantidadeEntradaArmazenada: quantidadeEntradaArmazenada,
+      quantidadeFornecedor: quantidadeFornecedor,
+      fatorConversaoUtilizado: fatorConversaoUtilizado,
+      unidadeFornecedor: unidadeFornecedor,
+    );
+    return formatarEstoque(produto, normalizada, comUnidade: comUnidade);
+  }
+
   /// Texto da quantidade convertida da nota para exibicao na conferencia.
   static String formatarQuantidadeNotaEstoque({
     required int estoqueArmazenado,

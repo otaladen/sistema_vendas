@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../model/caixa_sessao.dart';
+import '../services/app_boot_log.dart';
 import '../services/lan_api_server.dart';
 import 'sync/caixa_status_hub.dart';
 import 'sync/sync_write_trigger.dart';
@@ -56,12 +57,21 @@ class CaixaSessaoRepository {
     return id;
   }
 
-  Future<Map<String, CaixaSessao>> listarTodasSessoes({bool migrarLegado = true}) async {
-    return _serializar(() => _listarTodasSessoesInterno(migrarLegado: migrarLegado));
+  Future<Map<String, CaixaSessao>> listarTodasSessoes({
+    bool migrarLegado = true,
+    bool repararInconsistentes = false,
+  }) async {
+    return _serializar(
+      () => _listarTodasSessoesInterno(
+        migrarLegado: migrarLegado,
+        repararInconsistentes: repararInconsistentes,
+      ),
+    );
   }
 
   Future<Map<String, CaixaSessao>> _listarTodasSessoesInterno({
     bool migrarLegado = true,
+    bool repararInconsistentes = false,
   }) async {
     if (migrarLegado) {
       await _migrarLegadoSeNecessario();
@@ -76,18 +86,124 @@ class CaixaSessaoRepository {
       if (decoded is! Map) return {};
       final out = <String, CaixaSessao>{};
       for (final e in decoded.entries) {
-        if (e.value is Map) {
+        if (e.value is! Map) continue;
+        try {
           final m = Map<String, dynamic>.from(e.value as Map);
+          final chave = e.key.toString().trim();
           final s = CaixaSessao.fromMap(m);
-          if (s.terminalId.isNotEmpty) {
-            out[s.terminalId] = s;
-          }
+          final id = s.terminalId.isNotEmpty ? s.terminalId : chave;
+          if (id.isEmpty) continue;
+          out[id] = s.copyWith(terminalId: id);
+        } catch (err, st) {
+          AppBootLog.registrar(
+            'caixa_sessao_parse',
+            err,
+            stack: st,
+            contexto: 'terminal=${e.key}',
+          );
         }
       }
+      if (repararInconsistentes) {
+        return _repararMapaInconsistente(out);
+      }
       return out;
-    } catch (_) {
+    } catch (err, st) {
+      AppBootLog.registrar('caixa_sessao_json', err, stack: st);
       return {};
     }
+  }
+
+  /// Corrige flags "aberto" orfas (fechamento interrompido) sem derrubar leitura.
+  Future<Map<String, CaixaSessao>> _repararMapaInconsistente(
+    Map<String, CaixaSessao> mapa,
+  ) async {
+    var alterou = false;
+    final out = <String, CaixaSessao>{};
+    for (final e in mapa.entries) {
+      final antes = e.value;
+      final depois = _normalizarSessao(antes);
+      if (!_sessoesEquivalentes(antes, depois)) {
+        alterou = true;
+        AppBootLog.info(
+          'caixa_sessao_reparo',
+          'Terminal ${e.key}: aberto=${antes.aberto} -> ${depois.aberto} '
+          '(operador="${antes.operador}" -> "${depois.operador}")',
+        );
+      }
+      out[e.key] = depois;
+    }
+    if (alterou) {
+      try {
+        await _persistirMapa(out);
+        CaixaStatusHub.instance.publicarDasSessoes(out);
+      } catch (err, st) {
+        AppBootLog.registrar('caixa_sessao_persistir_reparo', err, stack: st);
+      }
+    }
+    return out;
+  }
+
+  static bool _sessoesEquivalentes(CaixaSessao a, CaixaSessao b) {
+    return a.terminalId == b.terminalId &&
+        a.aberto == b.aberto &&
+        a.operador == b.operador &&
+        a.aberturaEm == b.aberturaEm &&
+        a.fundoTroco == b.fundoTroco &&
+        a.suprimentos == b.suprimentos &&
+        a.sangrias == b.sangrias;
+  }
+
+  static CaixaSessao _normalizarSessao(CaixaSessao s) {
+    var aberto = s.aberto;
+    var operador = s.operador.trim();
+    var abertura = s.aberturaEm;
+    final fundo = s.fundoTroco.isFinite ? s.fundoTroco : 0.0;
+    final sup = s.suprimentos.isFinite ? s.suprimentos : 0.0;
+    final sang = s.sangrias.isFinite ? s.sangrias : 0.0;
+
+    if (aberto && operador.isEmpty) {
+      // Fechamento interrompido: flag aberto sem operador — trata como fechado.
+      aberto = false;
+      operador = '';
+      abertura = null;
+    } else if (aberto && abertura == null) {
+      abertura = s.atualizadoEm ?? DateTime.now();
+    } else if (!aberto) {
+      operador = '';
+      abertura = null;
+    }
+
+    if (!aberto && (fundo != 0 || sup != 0 || sang != 0 || operador.isNotEmpty)) {
+      return s.copyWith(
+        aberto: false,
+        operador: '',
+        limparAbertura: true,
+        fundoTroco: 0,
+        suprimentos: 0,
+        sangrias: 0,
+        atualizadoEm: DateTime.now(),
+      );
+    }
+
+    if (aberto == s.aberto &&
+        operador == s.operador &&
+        abertura == s.aberturaEm &&
+        fundo == s.fundoTroco &&
+        sup == s.suprimentos &&
+        sang == s.sangrias) {
+      return s;
+    }
+
+    return s.copyWith(
+      aberto: aberto,
+      operador: operador,
+      aberturaEm: abertura,
+      limparAbertura: !aberto && s.aberturaEm != null,
+      fundoTroco: aberto ? fundo : 0,
+      suprimentos: aberto ? sup : 0,
+      sangrias: aberto ? sang : 0,
+      atualizadoEm: DateTime.now(),
+    );
   }
 
   Future<CaixaSessao> carregarSessaoLocal() async {

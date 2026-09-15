@@ -11,12 +11,14 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
     this.quantidadeNoOrcamento = 0,
     this.mostrarNumero = true,
     this.nivelPrecalculado,
+    this.compacto = false,
   });
 
   final Produto produto;
   final num quantidadeNoOrcamento;
   final bool mostrarNumero;
   final PdvEstoqueSemaforoNivel? nivelPrecalculado;
+  final bool compacto;
 
   @override
   Widget build(BuildContext context) {
@@ -38,10 +40,11 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
     );
     final estiloNumero = Theme.of(context).textTheme.labelSmall?.copyWith(
           fontWeight: FontWeight.w600,
-          fontSize: 11,
+          fontSize: compacto ? 10 : 11,
           color: scheme.onSurface,
           height: 1.0,
         );
+    final tamanhoPonto = compacto ? 5.0 : 6.0;
 
     return Tooltip(
       message: tooltip,
@@ -53,15 +56,15 @@ class PdvConsultaSemaforoEstoque extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             Container(
-              width: 6,
-              height: 6,
+              width: tamanhoPonto,
+              height: tamanhoPonto,
               decoration: BoxDecoration(
                 color: cor,
                 shape: BoxShape.circle,
               ),
             ),
             if (mostrarNumero) ...[
-              const SizedBox(width: 5),
+              SizedBox(width: compacto ? 4 : 5),
               Flexible(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,

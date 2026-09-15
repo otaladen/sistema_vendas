@@ -398,6 +398,42 @@ void main() {
     );
   });
 
+  test('quantidadeEntradaHistoricoNormalizada corrige legado 6 PC -> 6000', () {
+    final produto = Produto(
+      id: 1,
+      codigoInterno: 'TEST',
+      nome: 'Arco',
+      unidade: 'UN',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 0,
+      preco1: 0,
+      embalagemMultiplica: true,
+      quantidadePorEmbalagem: 1,
+    );
+    expect(
+      ProdutoEmbalagem.quantidadeEntradaHistoricoNormalizada(
+        produto: produto,
+        quantidadeEntradaArmazenada: 6000,
+        quantidadeFornecedor: 6,
+        fatorConversaoUtilizado: 1,
+        unidadeFornecedor: 'PC1',
+      ),
+      6,
+    );
+    expect(
+      ProdutoEmbalagem.formatarQuantidadeEntradaHistorico(
+        produto: produto,
+        quantidadeEntradaArmazenada: 6000,
+        quantidadeFornecedor: 6,
+        fatorConversaoUtilizado: 1,
+        unidadeFornecedor: 'PC1',
+        comUnidade: true,
+      ),
+      '6 UN',
+    );
+  });
+
   test('quantidadeNotaParaEstoque NF-e RL100/UN fator 1 permanece inteiro', () {
     expect(
       ProdutoEmbalagem.quantidadeNotaParaEstoque(
