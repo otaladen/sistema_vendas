@@ -30,22 +30,23 @@ class TrocaComNotaPdvBanner extends StatelessWidget {
     String detalheDesconto;
     if (creditoAplicadoNoDesconto != null && creditoAplicadoNoDesconto! > 0) {
       detalheDesconto =
-          'Desconto F3 preenchido com R\$ ${moeda.format(creditoAplicadoNoDesconto!)} '
-          '(credito da devolucao).';
+          'Credito de $creditoFmt da $refVenda abatido automaticamente '
+          '(R\$ ${moeda.format(creditoAplicadoNoDesconto!)} neste carrinho). '
+          'Esse abatimento nao usa o teto de desconto (F8).';
       if (intent.creditoDevolucaoReais > creditoAplicadoNoDesconto! + 0.01) {
         detalheDesconto +=
-            ' Parte do credito (${moeda.format(intent.creditoDevolucaoReais - creditoAplicadoNoDesconto!)}) '
-            'excede o teto do PDV — combine com o gerente.';
+            ' Saldo do credito (${moeda.format(intent.creditoDevolucaoReais - creditoAplicadoNoDesconto!)}) '
+            'fica para outra compra ou inclua mais produtos aqui.';
       }
-    } else if (maxDescontoPermitidoReais <= 0) {
-      detalheDesconto =
-          'Seu usuario nao tem desconto no PDV. Credito sugerido: $creditoFmt — '
-          'registre na observacao do orcamento ou ajuste com gerente.';
     } else {
       detalheDesconto =
-          'Ao incluir produtos novos, o desconto (F3) sera sugerido ate '
-          'R\$ ${moeda.format(maxDescontoPermitidoReais.clamp(0, intent.creditoDevolucaoReais))} '
-          '(credito $creditoFmt da $refVenda).';
+          'Ao incluir produtos novos, o credito $creditoFmt da $refVenda '
+          'sera abatido automaticamente (sem contar no teto de desconto F8).';
+      if (maxDescontoPermitidoReais > 0) {
+        detalheDesconto +=
+            ' Desconto comercial extra (F8) continua limitado a '
+            'R\$ ${moeda.format(maxDescontoPermitidoReais)} neste subtotal.';
+      }
     }
 
     return Card(

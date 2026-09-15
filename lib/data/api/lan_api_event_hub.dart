@@ -55,6 +55,9 @@ class LanApiEventHub extends ChangeNotifier {
   bool get emStandby => _standby;
   String get stationId => _stationId;
 
+  /// Rotulo amigavel deste terminal (WS register / heartbeat).
+  String get estacaoLabel => _label;
+
   /// Terminais/celular com WS na API (mesmo [activeCount] do rodape do PC1).
   int? get activeCount => _activeCount;
   List<String> get labels => _labels;

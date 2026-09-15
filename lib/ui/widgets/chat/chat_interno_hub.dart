@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../../data/api/chat_api_repository.dart';
 import '../../../data/api/lan_api_client.dart';
 import '../../../data/api/lan_api_event_hub.dart';
+import '../../../data/sync/sync_cursor_storage.dart';
 import '../../../data/chat_interno_leitura_storage.dart';
 import '../../../data/chat_interno_outbox.dart';
 import '../../../data/mensagem_interna_repository.dart';
@@ -30,6 +32,7 @@ class ChatInternoHub extends ChangeNotifier {
   String _autorPadrao = '';
   String _perfilUsuario = '';
   String _loginUsuario = '';
+  String _rotuloRemetente = '';
   UsuarioSistema? _usuarioLogado;
   bool _painelAberto = false;
   int _naoLidos = 0;
@@ -49,6 +52,7 @@ class ChatInternoHub extends ChangeNotifier {
   String get autorPadrao => _autorPadrao;
   String get perfilUsuario => _perfilUsuario;
   String get loginUsuario => _loginUsuario;
+  String get rotuloRemetente => _rotuloRemetente;
   UsuarioSistema? get usuarioLogado => _usuarioLogado;
   bool get configurado => _localRepo != null || _apiRepo != null;
   bool get painelAberto => _painelAberto;
@@ -77,6 +81,7 @@ class ChatInternoHub extends ChangeNotifier {
         ? loginUsuario.trim()
         : (usuarioLogado?.login ?? '');
     AutorizacaoPdvChatHub.instance.garantirOuvintes();
+    unawaited(_atualizarRotuloRemetente());
     _garantirOuvinteWs();
     if (localRepo != null) {
       _garantirOuvinteServidorLocal();
@@ -107,12 +112,63 @@ class ChatInternoHub extends ChangeNotifier {
     _autorPadrao = '';
     _perfilUsuario = '';
     _loginUsuario = '';
+    _rotuloRemetente = '';
     _painelAberto = false;
     _naoLidos = 0;
     _mensagens = [];
     try {
       notifyListeners();
     } catch (_) {}
+  }
+
+  /// Nome do terminal exibido no mural (ex.: hostname / Android).
+  String remetenteMural() {
+    if (_rotuloRemetente.trim().isNotEmpty) return _rotuloRemetente.trim();
+    if (_autorPadrao.trim().isNotEmpty) return _autorPadrao.trim();
+    return 'Equipe';
+  }
+
+  /// Mensagem enviada por este terminal (balao a direita).
+  bool ehMensagemDesteTerminal(MensagemInterna m) {
+    if (m.pendenteLocal) return true;
+    final rotulo = remetenteMural();
+    final autor = _autorPadrao.trim();
+    final v = m.vendedor.trim();
+    if (v.isEmpty) return false;
+    if (v == rotulo) return true;
+    if (autor.isNotEmpty && v == autor) return true;
+    return false;
+  }
+
+  Future<void> _atualizarRotuloRemetente() async {
+    _rotuloRemetente = await _resolverRotuloRemetente();
+    notifyListeners();
+  }
+
+  Future<String> _resolverRotuloRemetente() async {
+    final ws = LanApiEventHub.instance.estacaoLabel.trim();
+    if (ws.isNotEmpty) {
+      final curto = ws.split('·').first.trim();
+      return curto.isNotEmpty ? curto : ws;
+    }
+    if (kIsWeb) return 'Web';
+    try {
+      if (Platform.isAndroid) return 'Celular';
+      if (Platform.isIOS) return 'Celular iOS';
+      if (Platform.isWindows) {
+        final n = Platform.environment['COMPUTERNAME']?.trim();
+        if (n != null && n.isNotEmpty) return n;
+      }
+      final host = Platform.localHostname.trim();
+      if (host.isNotEmpty) return host;
+    } catch (_) {}
+    try {
+      final id = await SyncCursorStorage().obterOuCriarDeviceId();
+      final sufixo = id.length >= 6 ? id.substring(0, 6) : id;
+      return 'Terminal · $sufixo';
+    } catch (_) {
+      return 'Terminal';
+    }
   }
 
   Future<void> _iniciar() async {
@@ -363,7 +419,7 @@ class ChatInternoHub extends ChangeNotifier {
   }
 
   Future<void> enviar(String texto) async {
-    final autor = _autorPadrao.isEmpty ? 'Equipe' : _autorPadrao;
+    final autor = remetenteMural();
     final msg = texto.trim();
     if (msg.isEmpty) return;
     final pendente = ChatInternoPendente(
@@ -382,7 +438,8 @@ class ChatInternoHub extends ChangeNotifier {
     if (!configurado) {
       throw StateError('Chat interno nao configurado.');
     }
-    final autor = _autorPadrao.isEmpty ? payload.operadorNome : _autorPadrao;
+    final autorPadrao = _autorPadrao.trim();
+    final autor = autorPadrao.isEmpty ? payload.operadorNome : remetenteMural();
     final pendente = ChatInternoPendente(
       clientId: payload.solicitacaoId.isEmpty
           ? _novoClientId()

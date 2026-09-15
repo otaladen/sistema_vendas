@@ -29,3 +29,14 @@ double creditoDevolucaoReaisDeEntradas({
   }
   return total;
 }
+
+/// Credito da devolucao abatido no subtotal do PDV (nao entra no teto de desconto).
+double creditoDevolucaoAplicavelNoSubtotalPdv({
+  required double creditoDevolucaoReais,
+  required double subtotalElegivelDesconto,
+}) {
+  if (creditoDevolucaoReais <= 0.004 || subtotalElegivelDesconto <= 0.004) {
+    return 0;
+  }
+  return creditoDevolucaoReais.clamp(0.0, subtotalElegivelDesconto);
+}

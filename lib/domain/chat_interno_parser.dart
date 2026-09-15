@@ -16,8 +16,29 @@ class ChatInternoParse {
 abstract final class ChatInternoParser {
   ChatInternoParser._();
 
-  static final _pedidoRe = RegExp(r'#(\d{1,9})');
+  static final pedidoNumeroPattern = RegExp(r'#(\d{1,9})');
+  static final _pedidoRe = pedidoNumeroPattern;
   static final _mencaoRe = RegExp(r'(?:^|[^\w@])@([A-Za-zÀ-ÿ]{2,20})');
+
+  /// Frases prontas para o mural (menu rapido ao lado do campo).
+  static const frasesRapidas = <String>[
+    'Cliente aguardando retirada no pátio',
+    'Solicitação de autorização de desconto',
+    'Separação de piso concluída',
+  ];
+
+  /// Todos os `#1234` citados no texto (ordem de aparicao, sem repetir).
+  static List<int> numerosPedidoNoTexto(String texto) {
+    final vistos = <int>{};
+    final out = <int>[];
+    for (final m in _pedidoRe.allMatches(texto)) {
+      final n = int.tryParse(m.group(1) ?? '');
+      if (n == null || n <= 0 || vistos.contains(n)) continue;
+      vistos.add(n);
+      out.add(n);
+    }
+    return out;
+  }
 
   static const aliases = <String, String>{
     'caixa': 'caixa',

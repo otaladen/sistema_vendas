@@ -6536,9 +6536,8 @@ class VendaRepository {
         throw StateError('Produto interno de complemento de troca nao encontrado.');
       }
 
-      final refOrigem = origem.numeroOrcamento > 0
-          ? '${origem.numeroOrcamento}'
-          : '$vendaOrigemId';
+      // Mesmo numero da listagem (Controle), nao o orcamento antigo.
+      final refOrigem = VendaDocumentoRotuloHelper.badgeNumeroCurto(origem);
       final proximoNumero = _proximoNumeroOrcamento();
       final venda = Venda(
         status: 'orcamento',
@@ -6550,7 +6549,7 @@ class VendaRepository {
         entregaPendente: false,
         uuidLocal: uuid,
         observacaoEntrega:
-            'Complemento de troca da venda $refOrigem (registro #$registroDevolucaoId).',
+            'Complemento de troca do Controle $refOrigem (registro #$registroDevolucaoId).',
       );
       final cliId = origem.cliente.targetId;
       if (cliId != 0) {

@@ -802,8 +802,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   int? _sugestoesCarrinhoOrigemId;
   final Set<int> _sugestoesCarrinhoAceitasIds = {};
   bool _trocaComNotaIntentAplicado = false;
-  bool _trocaComNotaDescontoAplicado = false;
-  double? _trocaComNotaCreditoAplicadoReais;
   bool _orcamentoInicialAplicado = false;
 
   /// Agrupa varios KeyDown do F7 no mesmo ciclo (Windows); senao executa dois passos de uma vez.
@@ -1273,35 +1271,26 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         duration: const Duration(seconds: 5),
       ),
     );
-    _aplicarDescontoCreditoTrocaComNotaSePossivel();
   }
 
-  void _aplicarDescontoCreditoTrocaComNotaSePossivel() {
+  /// Credito da devolucao (troca com nota): fora do teto de desconto comercial.
+  double _valorCreditoTrocaComNotaReais() {
     final intent = widget.intentTrocaComNota;
-    if (intent == null ||
-        _trocaComNotaDescontoAplicado ||
-        intent.creditoDevolucaoReais <= 0.004) {
-      return;
-    }
-    if (_maxDescontoPercentualPdv <= 0) return;
-    final sub = _subtotalElegivelDescontoPdV;
-    if (sub <= 0.004) return;
-
-    final maxReais = _valorMaximoDescontoReaisPdV();
-    final aplicar = intent.creditoDevolucaoReais
-        .clamp(0.0, maxReais)
-        .clamp(0.0, sub);
-    if (aplicar <= 0.004) return;
-
-    setState(() {
-      _tipoDescontoPdV = 'valor';
-      _descontoPdVController.text = aplicar
-          .toStringAsFixed(2)
-          .replaceAll('.', ',');
-      _trocaComNotaDescontoAplicado = true;
-      _trocaComNotaCreditoAplicadoReais = aplicar;
-    });
+    if (intent == null) return 0;
+    return creditoDevolucaoAplicavelNoSubtotalPdv(
+      creditoDevolucaoReais: intent.creditoDevolucaoReais,
+      subtotalElegivelDesconto: _subtotalElegivelDescontoPdV,
+    );
   }
+
+  double? _creditoTrocaComNotaExibidoNoBanner() {
+    final v = _valorCreditoTrocaComNotaReais();
+    return v > 0.004 ? v : null;
+  }
+
+  bool get _pdvAplicaAbatimentoNoTotal =>
+      _maxDescontoPercentualPdv > 0.004 ||
+      _valorCreditoTrocaComNotaReais() > 0.004;
 
   @override
   void dispose() {
@@ -2233,7 +2222,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       }
       _recalcularPromocoesCarrinho();
     });
-    _aplicarDescontoCreditoTrocaComNotaSePossivel();
     _registrarProdutoRecente(produto);
     if (mostrarSugestoesAgregadas) {
       _atualizarSugestoesAposAdicionar(produto);
@@ -4370,8 +4358,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       subtotalProdutos: _totalOrcamento,
       valorFrete: _valorFreteAtual,
       valorDesconto: _valorDescontoReaisPdV(),
-      descontoConfigAtivo: _maxDescontoPercentualPdv > 0.004,
-      totalDestaqueValor: _maxDescontoPercentualPdv > 0.004
+      descontoConfigAtivo: _pdvAplicaAbatimentoNoTotal,
+      totalDestaqueValor: _pdvAplicaAbatimentoNoTotal
           ? _totalLiquidoPagamentoPdV()
           : _totalGeralComFrete,
       formatarMoeda: _formatarMoeda,
@@ -8105,7 +8093,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   bool _descontoPdVDigitadoUltrapassaTeto() {
     if (_maxDescontoPercentualPdv <= 0) return false;
     final maxPct = _percentualMaximoEfetivoDescontoPdV();
-    final maxReais = _valorMaximoDescontoReaisPdV();
+    final maxReais = _valorMaximoDescontoComercialReaisPdV();
     const eps = 1e-6;
     if (_tipoDescontoPdV == 'percentual') {
       final bruto = _percentualDigitadoBrutoSemLimitePdV();
@@ -8162,7 +8150,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       context,
       _usuarioRepository,
       usuarioLogado: widget.usuarioLogado,
-      maximoPermitidoReais: _valorMaximoDescontoReaisPdV(),
+      maximoPermitidoReais: _valorMaximoDescontoComercialReaisPdV(),
       descontoSolicitadoReais: _descontoSolicitadoReaisBrutoPdV(),
       formatarMoeda: _formatarMoeda,
       vendaId: _orcamentoEmEdicaoId ?? 0,
@@ -8183,17 +8171,31 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   String _mensagemErroDescontoPdVUltrapassaTeto() {
     final maxPct = _percentualMaximoEfetivoDescontoPdV();
-    final maxReais = _valorMaximoDescontoReaisPdV();
+    final maxReais = _valorMaximoDescontoComercialReaisPdV();
     return 'Acima do permitido. Maximo: ${maxPct.toStringAsFixed(1)}% '
         'do subtotal = ${_formatarMoeda(maxReais)}.';
   }
 
-  /// Desconto apenas sobre o subtotal; frete entra inteiro no total a pagar.
-  double _valorDescontoReaisPdV() {
+  /// Teto de desconto comercial (F8), descontando o credito de troca ja aplicado.
+  double _valorMaximoDescontoComercialReaisPdV() {
     if (_maxDescontoPercentualPdv <= 0) return 0;
     final sub = _subtotalElegivelDescontoPdV;
     if (sub <= 0) return 0;
-    final maxReais = _valorMaximoDescontoReaisPdV();
+    final creditoTroca = _valorCreditoTrocaComNotaReais();
+    final subRestante = (sub - creditoTroca).clamp(0.0, sub);
+    if (subRestante <= 0.004) return 0;
+    final tetoReais = _valorMaximoDescontoReaisPdV();
+    return tetoReais.clamp(0.0, subRestante);
+  }
+
+  /// Desconto comercial (F8) sobre o subtotal; nao inclui credito de devolucao.
+  double _valorDescontoComercialReaisPdV() {
+    if (_maxDescontoPercentualPdv <= 0) return 0;
+    final sub = _subtotalElegivelDescontoPdV;
+    if (sub <= 0) return 0;
+    final maxReais = _valorMaximoDescontoComercialReaisPdV();
+    final tetoSubtotal =
+        (sub - _valorCreditoTrocaComNotaReais()).clamp(0.0, sub);
     final acimaAutorizado = _descontoAcimaTetoAutorizadoPdv;
     if (_tipoDescontoPdV == 'percentual') {
       final bruto = _percentualDigitadoBrutoSemLimitePdV() ?? 0;
@@ -8201,13 +8203,23 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           ? bruto.clamp(0.0, 100.0)
           : bruto.clamp(0.0, _percentualMaximoEfetivoDescontoPdV());
       final valor = sub * pct / 100;
-      return acimaAutorizado
-          ? valor.clamp(0.0, sub)
-          : valor.clamp(0.0, maxReais);
+      if (acimaAutorizado) {
+        return valor.clamp(0.0, tetoSubtotal);
+      }
+      return valor.clamp(0.0, maxReais).clamp(0.0, tetoSubtotal);
     }
     final digitado = _parseValorMonetario(_descontoPdVController.text);
-    if (acimaAutorizado) return digitado.clamp(0.0, sub);
-    return digitado.clamp(0.0, maxReais).clamp(0.0, sub);
+    if (acimaAutorizado) return digitado.clamp(0.0, tetoSubtotal);
+    return digitado.clamp(0.0, maxReais).clamp(0.0, tetoSubtotal);
+  }
+
+  /// Desconto comercial + credito de troca; frete entra inteiro no total a pagar.
+  double _valorDescontoReaisPdV() {
+    final sub = _subtotalElegivelDescontoPdV;
+    if (sub <= 0) return 0;
+    final credito = _valorCreditoTrocaComNotaReais();
+    final comercial = _valorDescontoComercialReaisPdV();
+    return (credito + comercial).clamp(0.0, sub);
   }
 
   double _totalLiquidoPagamentoPdV() =>
@@ -8486,9 +8498,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                             TrocaComNotaPdvBanner(
                               intent: widget.intentTrocaComNota!,
                               creditoAplicadoNoDesconto:
-                                  _trocaComNotaCreditoAplicadoReais,
+                                  _creditoTrocaComNotaExibidoNoBanner(),
                               maxDescontoPermitidoReais:
-                                  _valorMaximoDescontoReaisPdV(),
+                                  _valorMaximoDescontoComercialReaisPdV(),
                               onFechar: () {
                                 setState(
                                   () => _trocaComNotaBannerVisivel = false,

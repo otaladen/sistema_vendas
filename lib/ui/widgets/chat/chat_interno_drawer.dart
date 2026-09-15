@@ -9,6 +9,8 @@ import '../../../domain/main_menu_destino.dart';
 import '../../../domain/usuario_permissao_helper.dart';
 import '../../../model/mensagem_interna.dart';
 import '../../../model/usuario_sistema.dart';
+import '../../../model/venda.dart';
+import '../../orcamento_pdv_navigation.dart';
 import '../../shell/app_shell_scope.dart';
 import '../../shell/main_menu_deps.dart';
 import 'autorizacao_pdv_chat_card.dart';
@@ -200,15 +202,147 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
     _ctrl.selection = TextSelection.collapsed(offset: _ctrl.text.length);
   }
 
-  void _abrirPedido(int numero) {
+  Future<void> _abrirPedido(int numero) async {
+    if (numero <= 0 || !mounted) return;
+    final nav = Navigator.of(context);
+    final deps = MainMenuDeps.maybeOf(context);
+    if (deps != null) {
+      try {
+        final repo = deps.vendaRepository;
+        Venda? orcamento;
+        try {
+          orcamento = repo.buscarOrcamentoPendentePorNumero(numero) as Venda?;
+        } catch (_) {}
+        if (orcamento == null && deps.vendaApiRepository != null) {
+          orcamento = await deps.vendaApiRepository!
+              .buscarOrcamentoPendentePorNumeroRemoto(numero);
+        }
+        if (!mounted) return;
+        if (orcamento != null) {
+          nav.maybePop();
+          await abrirPdvComOrcamento(
+            context,
+            orcamentoId: orcamento.id,
+            produtoRepository: deps.produtoRepository,
+            clienteRepository: deps.clienteRepository,
+            vendaRepository: deps.vendaRepository,
+            vendedorRepository: deps.vendedorRepository,
+            configuracoesService: deps.configuracoesService,
+            printService: deps.printService,
+            usuarioLogado: deps.usuarioLogado,
+          );
+          return;
+        }
+
+        Venda? venda;
+        try {
+          venda = repo.buscarVendaFinalizadaPorNumeroOuId(numero) as Venda?;
+        } catch (_) {}
+        if (venda == null && deps.vendaApiRepository != null) {
+          venda = await deps.vendaApiRepository!
+              .buscarVendaFinalizadaPorNumeroOuIdRemoto(numero);
+        }
+        if (!mounted) return;
+        if (venda != null) {
+          nav.maybePop();
+          AppShellScope.maybeOf(context)?.irPara(MainMenuDestino.vendas);
+          final rotulo =
+              venda.numeroControle > 0 ? venda.numeroControle : numero;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Venda #$rotulo — abra a lista de vendas.',
+              ),
+            ),
+          );
+          return;
+        }
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
     EntregasFocoHub.instance.focarPedido(numero);
-    Navigator.of(context).maybePop();
+    nav.maybePop();
     widget.onAbrirEntregas?.call();
-    if (widget.onAbrirEntregas == null && context.mounted) {
+    if (widget.onAbrirEntregas == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Abra Entregas e busque o pedido #$numero.')),
       );
     }
+  }
+
+  Future<void> _mostrarFrasesRapidas() async {
+    final escolha = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Text(
+                  'Mensagens rapidas',
+                  style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              for (final frase in ChatInternoParser.frasesRapidas)
+                ListTile(
+                  leading: const Icon(Icons.chat_bubble_outline, size: 20),
+                  title: Text(frase),
+                  onTap: () => Navigator.pop(ctx, frase),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (escolha == null || !mounted) return;
+    _ctrl.text = escolha;
+    _ctrl.selection = TextSelection.collapsed(offset: _ctrl.text.length);
+  }
+
+  Widget _textoComPedidos(String texto, ThemeData theme) {
+    final re = ChatInternoParser.pedidoNumeroPattern;
+    final partes = <InlineSpan>[];
+    var last = 0;
+    for (final m in re.allMatches(texto)) {
+      if (m.start > last) {
+        partes.add(TextSpan(text: texto.substring(last, m.start)));
+      }
+      final n = int.tryParse(m.group(1) ?? '') ?? 0;
+      partes.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: ActionChip(
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              label: Text('#$n', style: const TextStyle(fontSize: 12)),
+              onPressed: n > 0 ? () => unawaited(_abrirPedido(n)) : null,
+            ),
+          ),
+        ),
+      );
+      last = m.end;
+    }
+    if (last < texto.length) {
+      partes.add(TextSpan(text: texto.substring(last)));
+    }
+    if (partes.isEmpty) {
+      return Text(texto, style: theme.textTheme.bodyMedium);
+    }
+    return Text.rich(
+      TextSpan(
+        style: theme.textTheme.bodyMedium,
+        children: partes,
+      ),
+    );
   }
 
   @override
@@ -275,60 +409,85 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
               },
             ),
           ),
-          if (_erro != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-              child: Text(
-                _erro!,
-                style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                for (final a in ChatInternoParser.atalhosUi)
-                  ActionChip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(a.rotulo, style: const TextStyle(fontSize: 12)),
-                    onPressed: () => _inserirAtalho(a.token),
-                  ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ctrl,
-                    minLines: 1,
-                    maxLines: 3,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => unawaited(_enviar()),
-                    decoration: const InputDecoration(
-                      hintText: '@caixa #1234 recado rapido...',
-                      isDense: true,
-                      border: OutlineInputBorder(),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_erro != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: Text(
+                    _erro!,
+                    style: TextStyle(
+                      color: theme.colorScheme.error,
+                      fontSize: 12,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _enviando ? null : () => unawaited(_enviar()),
-                  child: _enviando
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.send),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                child: Row(
+                  children: [
+                    for (final a in ChatInternoParser.atalhosUi)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ActionChip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            a.rotulo,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          onPressed: () => _inserirAtalho(a.token),
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: 12,
+                  right: 12,
+                  top: 8,
+                  bottom: 12,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    IconButton(
+                      tooltip: 'Mensagens rapidas',
+                      onPressed: _enviando ? null : () => unawaited(_mostrarFrasesRapidas()),
+                      icon: const Icon(Icons.bolt_outlined),
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: _ctrl,
+                        minLines: 1,
+                        maxLines: 3,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => unawaited(_enviar()),
+                        decoration: const InputDecoration(
+                          hintText: '@caixa #1234 recado rapido...',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: _enviando ? null : () => unawaited(_enviar()),
+                      child: _enviando
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.send),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -341,91 +500,116 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
       ChatInternoHub.instance.perfilUsuario,
       m.mencoes,
     );
+    final minha = ChatInternoHub.instance.ehMensagemDesteTerminal(m);
     final scheme = theme.colorScheme;
+    const verdeSuave = Color(0xFFDCF8C6);
+    final fundo = minha
+        ? verdeSuave
+        : (paraMim
+            ? scheme.tertiaryContainer.withValues(alpha: 0.45)
+            : scheme.surface);
+    final borda = minha
+        ? const Color(0xFFB8E0B0)
+        : (paraMim ? scheme.tertiary : const Color(0xFFE2E8F0));
+    final maxLargura = MediaQuery.sizeOf(context).width.clamp(320, 420) * 0.78;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: paraMim
-              ? scheme.tertiaryContainer.withValues(alpha: 0.55)
-              : scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: paraMim ? scheme.tertiary : const Color(0xFFE2E8F0),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      m.vendedor,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  if (m.pendenteLocal)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Text(
-                        'Enviando...',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: scheme.outline,
-                        ),
-                      ),
-                    ),
-                  Text(
-                    hora,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Align(
+        alignment: minha ? Alignment.centerRight : Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxLargura),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: fundo,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(12),
+                topRight: const Radius.circular(12),
+                bottomLeft: Radius.circular(minha ? 12 : 4),
+                bottomRight: Radius.circular(minha ? 4 : 12),
               ),
-              const SizedBox(height: 4),
-              if (m.ehAutorizacaoPdv)
-                AutorizacaoPdvChatCard(
-                  mensagem: m,
-                  usuarioLogado: widget.usuarioLogado,
-                )
-              else
-                Text(m.texto, style: theme.textTheme.bodyMedium),
-              if (!m.ehAutorizacaoPdv &&
-                  (m.mencoes.isNotEmpty || m.pedidoNumero > 0)) ...[
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    for (final id in m.mencoes)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        label: Text(
-                          '@${ChatInternoParser.rotuloMencao(id)}',
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                      ),
-                    if (m.pedidoNumero > 0)
-                      ActionChip(
-                        visualDensity: VisualDensity.compact,
-                        avatar: const Icon(Icons.local_shipping_outlined, size: 16),
-                        label: Text(
-                          'Pedido #${m.pedidoNumero}',
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        onPressed: () => _abrirPedido(m.pedidoNumero),
-                      ),
-                  ],
+              border: Border.all(color: borda),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 2,
+                  offset: const Offset(0, 1),
                 ),
               ],
-            ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: Column(
+                crossAxisAlignment:
+                    minha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          m.vendedor.trim().isNotEmpty
+                              ? m.vendedor.trim()
+                              : 'Terminal',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 11,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (m.pendenteLocal) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          'Enviando...',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.outline,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 8),
+                      Text(
+                        hora,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  if (m.ehAutorizacaoPdv)
+                    AutorizacaoPdvChatCard(
+                      mensagem: m,
+                      usuarioLogado: widget.usuarioLogado,
+                    )
+                  else
+                    _textoComPedidos(m.texto, theme),
+                  if (!m.ehAutorizacaoPdv && m.mencoes.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      alignment:
+                          minha ? WrapAlignment.end : WrapAlignment.start,
+                      children: [
+                        for (final id in m.mencoes)
+                          Chip(
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            label: Text(
+                              '@${ChatInternoParser.rotuloMencao(id)}',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
