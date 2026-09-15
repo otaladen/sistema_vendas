@@ -1,3 +1,4 @@
+import '../../domain/orcamento_totais_impressao.dart';
 import '../../model/cliente.dart';
 import '../../model/item_venda.dart';
 import '../../model/produto.dart';
@@ -375,9 +376,9 @@ class SyncEntityCodec {
     return Venda(
       id: (m['id'] as num?)?.toInt() ?? 0,
       data: DateTime.tryParse((m['data'] ?? '').toString())?.toUtc(),
-      total: (m['total'] as num?)?.toDouble() ?? 0,
-      custoTotal: (m['custoTotal'] as num?)?.toDouble() ?? 0,
-      lucroTotal: (m['lucroTotal'] as num?)?.toDouble() ?? 0,
+      total: OrcamentoTotaisImpressao.parseMoeda(m['total']),
+      custoTotal: OrcamentoTotaisImpressao.parseMoeda(m['custoTotal']),
+      lucroTotal: OrcamentoTotaisImpressao.parseMoeda(m['lucroTotal']),
       status: (m['status'] ?? 'orcamento').toString(),
       numeroOrcamento: (m['numeroOrcamento'] as num?)?.toInt() ?? 0,
       numeroControle: (m['numeroControle'] as num?)?.toInt() ?? 0,
@@ -386,7 +387,7 @@ class SyncEntityCodec {
       pagamentosJson: (m['pagamentosJson'] ?? '').toString(),
       planoFiadoJson: (m['planoFiadoJson'] ?? '').toString(),
       tipoEntrega: (m['tipoEntrega'] ?? 'retirada').toString(),
-      valorFrete: (m['valorFrete'] as num?)?.toDouble() ?? 0,
+      valorFrete: OrcamentoTotaisImpressao.parseMoeda(m['valorFrete']),
       enderecoEntrega: (m['enderecoEntrega'] ?? '').toString(),
       observacaoEntrega: (m['observacaoEntrega'] ?? '').toString(),
       motoristaEntrega: (m['motoristaEntrega'] ?? '').toString(),
@@ -438,8 +439,10 @@ class SyncEntityCodec {
       nfceEmitidaEm: DateTime.tryParse(
         (m['nfceEmitidaEm'] ?? '').toString(),
       )?.toUtc(),
-      valorRecebidoCaixa: (m['valorRecebidoCaixa'] as num?)?.toDouble() ?? 0,
-      valorTrocoCaixa: (m['valorTrocoCaixa'] as num?)?.toDouble() ?? 0,
+      valorRecebidoCaixa:
+          OrcamentoTotaisImpressao.parseMoeda(m['valorRecebidoCaixa']),
+      valorTrocoCaixa:
+          OrcamentoTotaisImpressao.parseMoeda(m['valorTrocoCaixa']),
       nfeReferenciaFocus: (m['nfeReferenciaFocus'] ?? '').toString(),
       nfeChaveAcesso: (m['nfeChaveAcesso'] ?? '').toString(),
       nfeNumero: (m['nfeNumero'] ?? '').toString(),
@@ -478,8 +481,9 @@ class SyncEntityCodec {
       quantidadeDevolvida: quantidadeDevolvida,
       tipoEntregaItem: (m['tipoEntregaItem'] ?? 'retirada').toString(),
       precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
-      precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
-      precoCustoUnitario: (m['precoCustoUnitario'] as num?)?.toDouble() ?? 0,
+      precoUnitario: OrcamentoTotaisImpressao.parseMoeda(m['precoUnitario']),
+      precoCustoUnitario:
+          OrcamentoTotaisImpressao.parseMoeda(m['precoCustoUnitario']),
       promocaoId: (m['promocaoId'] as num?)?.toInt() ?? 0,
       promocaoNomeSnapshot: (m['promocaoNomeSnapshot'] ?? '').toString(),
       loteConsumosJson: (m['loteConsumosJson'] ?? '').toString(),

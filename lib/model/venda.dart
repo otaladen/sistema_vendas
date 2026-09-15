@@ -290,10 +290,20 @@ class Venda {
 
   /// Desconto aplicado sobre o bruto (itens + frete) ate chegar em [total], quando
   /// [total] foi reduzido sem alterar [precoUnitario] nas linhas (ex.: PDV e caixa).
+  ///
+  /// Usa [itens] ligados a esta venda. Na impressao remota, prefira
+  /// [OrcamentoTotaisImpressao.calcular] com a lista de itens ja hidratada.
   double get descontoImplicitoTotal {
-    final bruto = somaSubtotalItens + valorFrete;
+    return descontoImplicitoSobreItens(
+      itens.isNotEmpty ? itens.toList() : const [],
+    );
+  }
+
+  /// Desconto implicito com base em linhas explicitas (impressao ESC/POS/PDF).
+  double descontoImplicitoSobreItens(List<ItemVenda> linhas) {
+    final bruto = linhas.fold<double>(0, (s, i) => s + i.subtotal) + valorFrete;
     final d = bruto - total;
-    if (d <= 0.009) {
+    if (d <= 0.009 || !d.isFinite) {
       return 0;
     }
     return d;

@@ -6,6 +6,7 @@ import '../data/app_config_repository.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
+import '../domain/orcamento_totais_impressao.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
@@ -211,23 +212,22 @@ abstract final class EscPosOrcamentoBuilder {
     out.add(EscPosCommands.line('RESUMO'));
     out.add(EscPosCommands.boldOff);
 
-    final subtotalItens = itens.fold<double>(0, (s, i) => s + i.subtotal);
-    final desconto = venda.descontoImplicitoTotal;
-    final temFrete = venda.valorFrete > 0;
-    final bruto = subtotalItens + (temFrete ? venda.valorFrete : 0);
-    final total = itens.isEmpty
-        ? venda.total
-        : (bruto - desconto).clamp(0.0, double.infinity);
+    final totais = OrcamentoTotaisImpressao.calcular(venda: venda, itens: itens);
+    final subtotalItens = totais.subtotalItens;
+    final desconto = totais.desconto;
+    final total = totais.total;
+    final temFrete = OrcamentoTotaisImpressao.freteInformado(venda) > 0;
+    final valorFrete = OrcamentoTotaisImpressao.freteInformado(venda);
 
     out.add(EscPosCommands.line(
       _padCols('Subtotal produtos:', 'R\$ ${_moeda.format(subtotalItens)}', cols),
     ));
     if (temFrete) {
       out.add(EscPosCommands.line(
-        _padCols('Frete/Entrega:', 'R\$ ${_moeda.format(venda.valorFrete)}', cols),
+        _padCols('Frete/Entrega:', 'R\$ ${_moeda.format(valorFrete)}', cols),
       ));
     }
-    if (desconto > 0) {
+    if (OrcamentoTotaisImpressao.imprimirLinhaDesconto(desconto)) {
       out.add(EscPosCommands.line(
         _padCols('Desconto:', '- R\$ ${_moeda.format(desconto)}', cols),
       ));

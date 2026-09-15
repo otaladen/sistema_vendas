@@ -204,6 +204,54 @@ void main() {
     expect(texto, isNot(contains('DADOS PARA ENTREGA / CARRETO')));
   });
 
+  test('ESC/POS nao aplica desconto fantasma com itens hidratados no terminal', () {
+    final produto = Produto(
+      id: 2,
+      codigoInterno: 'CIM',
+      nome: 'Cimento 50kg',
+      unidade: 'UN',
+      quantidadeMinima: 0,
+      precoCusto: 0,
+      precoVenda: 500,
+      preco1: 500,
+    );
+    final itemImpressao = ItemVenda(
+      nomeProduto: 'Cimento 50kg',
+      quantidade: 1,
+      precoUnitario: 500,
+      precoCustoUnitario: 300,
+      precoTipo: 'preco1',
+    )..produto.target = produto;
+
+    final itemCru = ItemVenda(
+      nomeProduto: 'Cimento 50kg',
+      quantidade: 1000,
+      precoUnitario: 500,
+      precoCustoUnitario: 300,
+      precoTipo: 'preco1',
+    );
+    final venda = Venda(
+      numeroOrcamento: 1116,
+      total: 500,
+      formaPagamento: 'dinheiro',
+    )..itens.add(itemCru);
+
+    final bytes = EscPosOrcamentoBuilder.montar(
+      OrcamentoEscPosDados(
+        venda: venda,
+        config: const EmpresaConfig(nomeLoja: 'Comprou Levou'),
+        itens: [itemImpressao],
+        validadeDias: 7,
+        produtosPorItem: {0: produto},
+      ),
+    );
+    final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
+    expect(texto, contains('500,00'));
+    expect(texto, isNot(contains('499.500,00')));
+    expect(texto, isNot(contains('Desconto:')));
+    expect(texto, contains('Dinheiro a vista - Total: R\$ 500,00'));
+  });
+
   test('montar orcamento ESC/POS imprime so o credito escolhido', () {
     final venda = Venda(
       numeroOrcamento: 2,

@@ -17,6 +17,7 @@ import '../../domain/entregas/agenda_carreto_ocupacao.dart';
 import '../../domain/pagamento_orcamento.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../sync/sync_auth.dart';
+import '../../domain/orcamento_totais_impressao.dart';
 import '../sync/sync_entity_codec.dart';
 import '../sync/sync_entity_codec_extras.dart';
 import '../venda_repository.dart';
@@ -713,8 +714,9 @@ class LanApiClient {
         quantidadeDevolvida: (e['quantidadeDevolvida'] as num?)?.toInt() ?? 0,
         tipoEntregaItem: (e['tipoEntregaItem'] ?? 'retirada').toString(),
         precoTipo: (e['precoTipo'] ?? 'preco1').toString(),
-        precoUnitario: (e['precoUnitario'] as num?)?.toDouble() ?? 0,
-        precoCustoUnitario: (e['precoCustoUnitario'] as num?)?.toDouble() ?? 0,
+        precoUnitario: OrcamentoTotaisImpressao.parseMoeda(e['precoUnitario']),
+        precoCustoUnitario:
+            OrcamentoTotaisImpressao.parseMoeda(e['precoCustoUnitario']),
         promocaoId: (e['promocaoId'] as num?)?.toInt() ?? 0,
         promocaoNomeSnapshot: (e['promocaoNomeSnapshot'] ?? '').toString(),
         precoUnitarioManual: e['precoUnitarioManual'] == true,

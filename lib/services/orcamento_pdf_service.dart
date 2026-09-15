@@ -8,6 +8,7 @@ import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
+import '../domain/orcamento_totais_impressao.dart';
 import '../domain/plano_fiado.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
@@ -97,17 +98,15 @@ abstract final class OrcamentoPdfService {
       produtos[i] = produto;
     }
 
-    final subtotalItens = itensOrcamento.fold<double>(
-      0,
-      (s, item) => s + item.subtotal,
+    final totais = OrcamentoTotaisImpressao.calcular(
+      venda: venda,
+      itens: itensOrcamento,
     );
-    final bruto =
-        subtotalItens + (venda.valorFrete > 0 ? venda.valorFrete : 0);
-    final total = itensOrcamento.isEmpty
-        ? venda.total
-        : (bruto - venda.descontoImplicitoTotal).clamp(0.0, double.infinity);
-    final desconto = venda.descontoImplicitoTotal;
-    final temFrete = venda.valorFrete > 0;
+    final subtotalItens = totais.subtotalItens;
+    final total = totais.total;
+    final desconto = totais.desconto;
+    final valorFrete = OrcamentoTotaisImpressao.freteInformado(venda);
+    final temFrete = valorFrete > 0;
 
     Uint8List logoBytes = logoBytesOverride ?? Uint8List(0);
     if (logoBytes.isEmpty) {
@@ -194,7 +193,7 @@ abstract final class OrcamentoPdfService {
             pagamentosJson: venda.pagamentosJson,
           ) +
           (temFrete ? 1 : 0) +
-          (desconto > 0 ? 1 : 0) +
+          (OrcamentoTotaisImpressao.imprimirLinhaDesconto(desconto) ? 1 : 0) +
           (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda) ? 3 : 0) +
           linhasEntregaExtra +
           (empresa.rodapeOrcamento.trim().isEmpty ? 0 : 2),
@@ -317,9 +316,9 @@ abstract final class OrcamentoPdfService {
                 CupomPdfLayout.linhaTotal(
                   layout: layout,
                   rotulo: 'Frete/Entrega:',
-                  valor: formatar(venda.valorFrete),
+                  valor: formatar(valorFrete),
                 ),
-              if (desconto > 0)
+              if (OrcamentoTotaisImpressao.imprimirLinhaDesconto(desconto))
                 CupomPdfLayout.linhaTotal(
                   layout: layout,
                   rotulo: 'Desconto:',
