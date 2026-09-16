@@ -14,6 +14,7 @@ abstract final class ClienteFiscalHelper {
     if (cliente.tipoPessoa.trim().toLowerCase() == 'juridica') {
       return true;
     }
-    return documentoEhCnpj(cliente.documento);
+    return documentoEhCnpj(cliente.documento) ||
+        documentoEhCnpj(cliente.nomeRazao);
   }
 }

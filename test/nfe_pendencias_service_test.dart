@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/nfe_saida_fiscal_store.dart';
 import 'package:sistema_vendas/domain/fiscal/nfe_painel_resumo.dart';
 import 'package:sistema_vendas/domain/fiscal/nfe_pendencias_service.dart';
+import 'package:sistema_vendas/model/cliente.dart';
+import 'package:sistema_vendas/model/venda.dart';
 
 void main() {
   test('NfePainelResumoBuilder conta status', () {
@@ -145,5 +147,70 @@ void main() {
           ),
     );
     expect(rejeitadas, isEmpty);
+  });
+
+  test('fila NF-e 55 ignora venda com NFC-e autorizada', () {
+    final comNfce = Venda()
+      ..nfceChaveAcesso = '29260632662298000191650010000000051626070139';
+    final semDocumento = Venda();
+    final processandoNfce = Venda()
+      ..nfceStatusFocus = 'processando_autorizacao'
+      ..nfceProtocolo = 'focus_pendente:abc';
+
+    expect(NfePendenciasService.ocultaPorNfce(comNfce), isTrue);
+    expect(NfePendenciasService.ocultaPorNfce(semDocumento), isFalse);
+    expect(NfePendenciasService.ocultaPorNfce(processandoNfce), isTrue);
+  });
+
+  test('fila NF-e 55 so entra cliente CNPJ sem documento de saida', () {
+    final pf = Cliente(id: 1, nomeRazao: 'Miguel', documento: '12345678901');
+    final pj = Cliente(
+      id: 2,
+      nomeRazao: 'Construtora',
+      tipoPessoa: 'juridica',
+      documento: '00756455000131',
+    );
+    final vendaPfCupom = Venda(id: 10, formaPagamento: 'dinheiro')
+      ..cupomNaoFiscalEmitidoEm = DateTime.now();
+    final vendaPjPix = Venda(id: 11, formaPagamento: 'pix');
+    final vendaPjDinheiro = Venda(id: 14, formaPagamento: 'dinheiro');
+    final vendaPjComNfce = Venda(id: 12, formaPagamento: 'pix')
+      ..nfceChaveAcesso = '29260632662298000191650010000000051626070139';
+
+    expect(
+      NfePendenciasService.entraNaFilaVendasSemNfe55(vendaPfCupom, cliente: pf),
+      isFalse,
+    );
+    expect(
+      NfePendenciasService.entraNaFilaVendasSemNfe55(vendaPjPix, cliente: pj),
+      isTrue,
+    );
+    expect(
+      NfePendenciasService.entraNaFilaVendasSemNfe55(
+        vendaPjDinheiro,
+        cliente: pj,
+      ),
+      isFalse,
+    );
+    expect(
+      NfePendenciasService.entraNaFilaVendasSemNfe55(
+        vendaPjComNfce,
+        cliente: pj,
+      ),
+      isFalse,
+    );
+    final pjNomeCnpj = Cliente(
+      id: 3,
+      nomeRazao: '00756455000131',
+      tipoPessoa: 'fisica',
+      documento: '',
+    );
+    expect(
+      NfePendenciasService.entraNaFilaVendasSemNfe55(
+        Venda(id: 13, formaPagamento: 'dinheiro'),
+        cliente: pjNomeCnpj,
+      ),
+      isFalse,
+    );
   });
 }

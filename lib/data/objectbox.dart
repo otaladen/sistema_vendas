@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:objectbox/objectbox.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -45,6 +44,7 @@ import '../model/obrigacao_mensal_fixa.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../objectbox.g.dart';
+import 'objectbox_lifecycle_hub.dart';
 
 class ObjectBox {
   ObjectBox._create(this.store) {
@@ -144,6 +144,7 @@ class ObjectBox {
   /// Grava filas assincronas e fecha o banco para copia consistente de `data.mdb`.
   Future<void> fecharParaCopiaDeArquivos() async {
     if (store.isClosed()) return;
+    await ObjectBoxLifecycleHub.notificarAntesDeFecharStore();
     try {
       store.awaitQueueSubmitted();
       store.awaitQueueCompletion();
@@ -159,8 +160,14 @@ class ObjectBox {
   /// Reabre o banco apos backup manual sem reiniciar o app.
   Future<void> reabrirAposCopiaDeArquivos() async {
     if (!store.isClosed()) return;
-    store = await openStore(directory: storeDirectoryPath);
-    _inicializarBoxes();
+    try {
+      store = await openStore(directory: storeDirectoryPath);
+      _inicializarBoxes();
+      ObjectBoxLifecycleHub.notificarStoreReaberta();
+    } catch (e, st) {
+      ObjectBoxLifecycleHub.resetAposFalhaReabertura(e, stack: st);
+      rethrow;
+    }
   }
 
   static Future<ObjectBox> create() async {

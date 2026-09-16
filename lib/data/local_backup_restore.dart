@@ -82,7 +82,7 @@ Future<CadastroProdutosImportResumo?> restaurarDadosLocais({
     }
     final destinoOb = Directory(p.join(destinoBase.path, 'objectbox'));
     if (destinoOb.existsSync()) {
-      await destinoOb.delete(recursive: true);
+      await excluirEntidadeComRetry(destinoOb);
     }
     destinoOb.createSync(recursive: true);
     await copiarComProgresso(
@@ -100,7 +100,7 @@ Future<CadastroProdutosImportResumo?> restaurarDadosLocais({
   if (LocalBackupValidation.ehPastaObjectBox(origemDados)) {
     final destinoOb = Directory(p.join(destinoBase.path, 'objectbox'));
     if (destinoOb.existsSync()) {
-      await destinoOb.delete(recursive: true);
+      await excluirEntidadeComRetry(destinoOb);
     }
     destinoOb.createSync(recursive: true);
     await copiarComProgresso(

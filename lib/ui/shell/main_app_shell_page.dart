@@ -10,6 +10,7 @@ import '../../data/api/lan_api_client.dart';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/menu_favoritos_repository.dart';
 import '../../data/objectbox.dart';
+import '../../data/objectbox_lifecycle_hub.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/backup_status_helper.dart';
@@ -103,7 +104,8 @@ class MainAppShellPage extends StatefulWidget {
   State<MainAppShellPage> createState() => _MainAppShellPageState();
 }
 
-class _MainAppShellPageState extends State<MainAppShellPage> {
+class _MainAppShellPageState extends State<MainAppShellPage>
+    implements ObjectBoxStoreLifecycleListener {
   late MainMenuDestino _destino;
   MainMenuSubDestino? _subDestino;
   final Set<MainMenuDestino> _gruposExpandidos = {};
@@ -113,6 +115,7 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
   int _fiscalPendencias = 0;
   bool _backupAlerta = false;
   Timer? _fiscalPendenciasTimer;
+  bool _registradoObjectBoxLifecycle = false;
 
   final List<AppShellTab> _abas = [];
   int _indiceAbaAtiva = 0;
@@ -132,14 +135,11 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
       _paginaModuloMobile = _conteudoAba(destino: inicial);
     }
     _carregarFavoritos();
-    // Badge fiscal no celular: nao na entrada (congela). So no timer de 60s+.
-    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
-      unawaited(_atualizarBadgesMenu());
+    if (!widget.terminalLeve && widget.objectBox != null) {
+      ObjectBoxLifecycleHub.registrar(this);
+      _registradoObjectBoxLifecycle = true;
     }
-    _fiscalPendenciasTimer = Timer.periodic(
-      const Duration(seconds: 120),
-      (_) => unawaited(_atualizarBadgesMenu()),
-    );
+    _iniciarTimerBadgesFiscais();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_bootPosLoginShell());
     });
@@ -216,11 +216,45 @@ class _MainAppShellPageState extends State<MainAppShellPage> {
 
   @override
   void dispose() {
-    _fiscalPendenciasTimer?.cancel();
+    if (_registradoObjectBoxLifecycle) {
+      ObjectBoxLifecycleHub.remover(this);
+      _registradoObjectBoxLifecycle = false;
+    }
+    _pararTimerBadgesFiscais();
     super.dispose();
   }
 
+  void _iniciarTimerBadgesFiscais() {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
+    _pararTimerBadgesFiscais();
+    // Badge fiscal no celular: nao na entrada (congela). So no timer de 120s+.
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+      unawaited(_atualizarBadgesMenu());
+    }
+    _fiscalPendenciasTimer = Timer.periodic(
+      const Duration(seconds: 120),
+      (_) => unawaited(_atualizarBadgesMenu()),
+    );
+  }
+
+  void _pararTimerBadgesFiscais() {
+    _fiscalPendenciasTimer?.cancel();
+    _fiscalPendenciasTimer = null;
+  }
+
+  @override
+  Future<void> onObjectBoxClosingForCopy() async {
+    _pararTimerBadgesFiscais();
+  }
+
+  @override
+  void onObjectBoxReopenedAfterCopy() {
+    if (!mounted || widget.terminalLeve || widget.objectBox == null) return;
+    _iniciarTimerBadgesFiscais();
+  }
+
   Future<void> _atualizarBadgesMenu() async {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
     if (widget.terminalLeve) {
       var fiscal = 0;
       if (UsuarioPermissaoHelper.podeVerBadgeFiscalDashboard(

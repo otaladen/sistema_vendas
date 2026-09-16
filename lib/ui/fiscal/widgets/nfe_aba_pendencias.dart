@@ -83,9 +83,10 @@ class NfeAbaPendencias extends StatelessWidget {
         const SizedBox(height: 12),
         _secao(
           theme,
-          titulo: 'Vendas sem NF-e autorizada (30 dias)',
+          titulo: 'Vendas CNPJ sem NF-e autorizada (30 dias)',
           subtitulo:
-              'Orcamentos finalizados com cliente, ainda sem nota modelo 55.'
+              'Somente cliente CNPJ/PJ ainda sem nota modelo 55. '
+              'Dinheiro, NFC-e e cupom de consumidor nao entram nesta fila.'
               '${filtro.ativo ? " · filtros ativos" : ""}',
           filho: vendasSemNfe.isEmpty
               ? const Text('Nenhuma venda pendente de faturamento NF-e.')

@@ -1496,6 +1496,7 @@ class VendaRepository {
     DateTime? ate,
     int? limit,
   }) {
+    if (_db.store.isClosed()) return const [];
     var cond = Venda_.status
         .equals('orcamento')
         .and(Venda_.cancelada.equals(false));
@@ -4019,6 +4020,7 @@ class VendaRepository {
 
   /// Vendas finalizadas com NFC-e pendente na Focus (reconsulta no caixa).
   List<Venda> listarComNfcePendenteFocus({int limite = 80}) {
+    if (_db.store.isClosed()) return const [];
     final cond = Venda_.status
         .equals('finalizada')
         .and(Venda_.nfceChaveAcesso.equals(''))
@@ -4045,6 +4047,7 @@ class VendaRepository {
     int limite = 200,
     DateTime? desde,
   }) {
+    if (_db.store.isClosed()) return const [];
     final cond = Venda_.status
         .equals('finalizada')
         .and(Venda_.cancelada.equals(false))

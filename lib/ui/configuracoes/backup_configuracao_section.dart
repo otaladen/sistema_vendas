@@ -15,6 +15,7 @@ import '../../data/backup_pos_execucao_service.dart';
 import '../../data/backup_tarefa_windows_service.dart';
 import '../../data/backup_zip_service.dart';
 import '../../data/local_app_data_paths.dart';
+import '../../data/local_backup_copy.dart';
 import '../../data/local_backup_restore.dart';
 import '../../data/local_backup_service.dart';
 import '../../data/local_backup_validation.dart';
@@ -1501,17 +1502,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   }
 
   Future<void> _limparDiretorio(Directory diretorio) async {
-    if (!diretorio.existsSync()) {
-      diretorio.createSync(recursive: true);
-      return;
-    }
-    await for (final entidade in diretorio.list(recursive: false)) {
-      if (entidade is Directory) {
-        await entidade.delete(recursive: true);
-      } else if (entidade is File) {
-        await entidade.delete();
-      }
-    }
+    await limparDiretorioDestinoRestauracao(diretorio);
   }
 
   Color _corSaude(BuildContext context) {

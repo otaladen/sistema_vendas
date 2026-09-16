@@ -16,6 +16,17 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      ClienteFiscalHelper.clienteExigeNfe55(
+        Cliente(
+          id: 2,
+          nomeRazao: '00756455000131',
+          tipoPessoa: 'fisica',
+          documento: '',
+        ),
+      ),
+      isTrue,
+    );
   });
 
   test('NfePendenciasFiltro somente CNPJ e valor minimo', () {

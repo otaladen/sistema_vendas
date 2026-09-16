@@ -1,6 +1,9 @@
 import '../../data/nfe_saida_fiscal_store.dart';
 import '../../data/venda_repository.dart';
+import '../../model/cliente.dart';
 import '../../model/venda.dart';
+import 'cliente_fiscal_helper.dart';
+import 'venda_documento_fiscal_mutex.dart';
 
 /// Venda finalizada aguardando NF-e modelo 55.
 class NfePendenciaVenda {
@@ -36,7 +39,29 @@ abstract final class NfePendenciasService {
     return ids;
   }
 
-  /// Vendas finalizadas com cliente, sem NF-e 55 autorizada no periodo.
+  /// NFC-e autorizada ou em processamento ja ocupa o documento de saida.
+  static bool ocultaPorNfce(Venda venda) =>
+      VendaDocumentoFiscalMutex.bloqueiaNovaNfe55(venda);
+
+  /// Fila NF-e 55: cliente CNPJ/PJ, sem NFC-e e sem NF-e 55.
+  /// Dinheiro (cupom) e consumidor com NFC-e nao entram nesta tela.
+  static bool entraNaFilaVendasSemNfe55(
+    Venda venda, {
+    Cliente? cliente,
+  }) {
+    if (venda.nfe55Autorizada) return false;
+    if (ocultaPorNfce(venda)) return false;
+    if (_pagamentoEmDinheiro(venda)) return false;
+    return ClienteFiscalHelper.clienteExigeNfe55(
+      cliente ?? venda.cliente.target,
+    );
+  }
+
+  static bool _pagamentoEmDinheiro(Venda venda) =>
+      venda.formaPagamento.trim().toLowerCase() == 'dinheiro';
+
+  /// Vendas finalizadas de cliente CNPJ/PJ, sem NF-e 55 autorizada no periodo.
+  /// Nao inclui NFC-e, pagamento em dinheiro nem cupom de consumidor (PF).
   static List<NfePendenciaVenda> listarVendasSemNfeAutorizada({
     required VendaRepository vendaRepository,
     required NfeSaidaFiscalStore nfeStore,
@@ -59,12 +84,13 @@ abstract final class NfePendenciasService {
     final out = <NfePendenciaVenda>[];
     final vendas = vendaRepository.listarVendasFinalizadasDesde(
       desde,
-      limit: limit * 3,
+      limit: limit * 10,
     );
     for (final v in vendas) {
       if (comAuth.contains(v.id)) continue;
       final cliente = v.cliente.target;
       if (somenteComCliente && cliente == null) continue;
+      if (!entraNaFilaVendasSemNfe55(v, cliente: cliente)) continue;
       final ultima = ultimaPorVenda[v.id];
       out.add(
         NfePendenciaVenda(

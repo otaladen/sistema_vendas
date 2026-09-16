@@ -22,19 +22,17 @@ DateTime? _ultimoSnackRedeEm;
 /// Captura erros de framework, zona e isolate; mostra SnackBar amigavel.
 void configurarTratamentoErrosGlobais() {
   FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-    if (kDebugMode) {
+    if (!_ehErroRuidoOperacional(details.exception)) {
+      FlutterError.presentError(details);
+    } else if (kDebugMode) {
       debugPrint(
-        'FlutterError: ${details.exceptionAsString()}\n${details.stack}',
+        'FlutterError (ruido): ${details.exceptionAsString()}',
       );
     }
     reportarErroGlobal(details.exception, details.stack);
   };
 
   PlatformDispatcher.instance.onError = (error, stack) {
-    if (kDebugMode) {
-      debugPrint('PlatformDispatcher.onError: $error\n$stack');
-    }
     reportarErroGlobal(error, stack);
     return true;
   };
@@ -63,6 +61,10 @@ void configurarTratamentoErrosGlobais() {
 
 /// Entrada unica para erros de zona / background (SnackBar, sem crash).
 void reportarErroGlobal(Object erro, [StackTrace? stack]) {
+  if (_ehErroRuidoOperacional(erro)) {
+    _registrarRuidoOperacional(erro, stack);
+    return;
+  }
   if (!_ehErroLayoutIgnoravel(erro) && !_ehErroRedeOuApiBackground(erro)) {
     AppBootLog.registrar('erro_global', erro, stack: stack);
   }
@@ -84,6 +86,20 @@ void reportarErroGlobal(Object erro, [StackTrace? stack]) {
     debugPrint('Erro global: $erro\n$stack');
   }
   _agendarSnackErroAmigavel(erro);
+}
+
+/// ObjectBox fechado para backup e upgrade WS do Shelf — so diagnostico leve.
+bool _ehErroRuidoOperacional(Object erro) {
+  final raw = erro.toString().toLowerCase();
+  return raw.contains('store is closed') || raw.contains('hijacked request');
+}
+
+void _registrarRuidoOperacional(Object erro, [StackTrace? stack]) {
+  if (kDebugMode) {
+    debugPrint('Ruído operacional (sem SnackBar): $erro');
+    if (stack != null) debugPrint('$stack');
+  }
+  AppBootLog.info('ruido_operacional', erro.toString());
 }
 
 /// Falhas esperadas de LAN/sync — telas ja tratam ou sao polling em background.

@@ -301,6 +301,8 @@ class LanApiServer {
       return (request) async {
         try {
           return await inner(request);
+        } on HijackException {
+          rethrow;
         } catch (e, st) {
           debugPrint('LanApiServer erro nao tratado [${request.method} '
               '${request.requestedUri.path}]: $e\n$st');
@@ -324,6 +326,9 @@ class LanApiServer {
           return Response.ok('', headers: _corsHeaders);
         }
         final res = await inner(request);
+        if (res.statusCode == 101) {
+          return res;
+        }
         return res.change(headers: {...res.headers, ..._corsHeaders});
       };
     };

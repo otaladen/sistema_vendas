@@ -16,9 +16,9 @@ import '../../data/api/lan_api_event_hub.dart';
 import '../../data/api/caixa_sessao_api.dart';
 import '../../data/api/cliente_api_repository.dart';
 import '../../data/api/venda_api_repository.dart';
-import '../../data/app_config_repository.dart';
 import '../../services/configuracoes_service.dart';
 import '../../data/objectbox.dart';
+import '../../data/objectbox_lifecycle_hub.dart';
 import '../../data/caixa_auditoria_repository.dart';
 import '../../data/caixa_sessao_repository.dart';
 import '../../data/sync/lan_sync_scheduler.dart';
@@ -144,7 +144,8 @@ class CaixaPage extends StatefulWidget {
   State<CaixaPage> createState() => _CaixaPageState();
 }
 
-class _CaixaPageState extends State<CaixaPage> {
+class _CaixaPageState extends State<CaixaPage>
+    implements ObjectBoxStoreLifecycleListener {
   static const String _kCaixaAuditoriaKey = 'caixa_auditoria_eventos_v1';
 
   dynamic _kitOrcamentoRepo;
@@ -224,6 +225,7 @@ class _CaixaPageState extends State<CaixaPage> {
   NfceReconciliacaoService? _nfceReconciliacao;
   Timer? _timerReconciliacaoNfce;
   Timer? _debounceSyncOrcamentos;
+  bool _registradoObjectBoxLifecycle = false;
   bool _abaCaixaVisivel = true;
   bool? _apiOnlineCaixa;
   UltimasVendasFinalizadasOrdenacao _ordenacaoUltimasVendas =
@@ -334,19 +336,23 @@ class _CaixaPageState extends State<CaixaPage> {
     _focusNfeService = FocusNfeService(config: criarFocusNfeConfigPadrao());
     unawaited(_recarregarFocusFiscal());
     if (widget.vendaRepository is VendaRepository) {
+      ObjectBoxLifecycleHub.registrar(this);
+      _registradoObjectBoxLifecycle = true;
       _nfceReconciliacao = NfceReconciliacaoService(
         vendaRepository: widget.vendaRepository as VendaRepository,
         focusNfe: _focusNfeService,
       );
     }
     _carregarLimiteDivergenciaCaixa();
-    _carregarSessaoCaixa();
+    if (!ObjectBoxLifecycleHub.acessoLocalSuspenso) {
+      unawaited(_carregarSessaoCaixa());
+    }
     _carregarOrcamentos();
     _syncHubListener = () {
       if (!mounted) return;
       _debounceSyncOrcamentos?.cancel();
       _debounceSyncOrcamentos = Timer(const Duration(milliseconds: 160), () {
-        if (!mounted) return;
+        if (!mounted || ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
         _atualizarOrcamentosAposSync();
       });
     };
@@ -355,9 +361,11 @@ class _CaixaPageState extends State<CaixaPage> {
     CaixaLocalRefreshHub.instance.addListener(_onCaixaLocalRefresh);
     unawaited(_carregarOrdenacaoUltimasVendas());
     if (widget.vendaRepository is VendaRepository) {
-      unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
-      _atualizarResumoNfcePendenteEmissao();
-      _iniciarPollReconciliacaoNfce();
+      if (!ObjectBoxLifecycleHub.acessoLocalSuspenso) {
+        unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
+        _atualizarResumoNfcePendenteEmissao();
+        _iniciarPollReconciliacaoNfce();
+      }
     } else if (widget.vendaRepository is VendaApiRepository) {
       unawaited(_hidratarPendenciasFiscaisTerminal());
       unawaited(_hidratarUltimasVendasTerminal());
@@ -413,6 +421,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   void _iniciarPollReconciliacaoNfce() {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
     if (!_abaCaixaVisivel) return;
     _timerReconciliacaoNfce?.cancel();
     _timerReconciliacaoNfce = Timer.periodic(
@@ -429,6 +438,24 @@ class _CaixaPageState extends State<CaixaPage> {
   void _pararPollReconciliacaoNfce() {
     _timerReconciliacaoNfce?.cancel();
     _timerReconciliacaoNfce = null;
+  }
+
+  @override
+  Future<void> onObjectBoxClosingForCopy() async {
+    _pararPollReconciliacaoNfce();
+    _debounceSyncOrcamentos?.cancel();
+    _debounceSyncOrcamentos = null;
+  }
+
+  @override
+  void onObjectBoxReopenedAfterCopy() {
+    if (!mounted || widget.vendaRepository is! VendaRepository) return;
+    if (_abaCaixaVisivel) {
+      _iniciarPollReconciliacaoNfce();
+      _carregarOrcamentos();
+      unawaited(_reconciliarNfcePendentes(mostrarFeedback: false));
+      _atualizarResumoNfcePendenteEmissao();
+    }
   }
 
   @override
@@ -454,9 +481,14 @@ class _CaixaPageState extends State<CaixaPage> {
     if (visivel == _abaCaixaVisivel) return;
     _abaCaixaVisivel = visivel;
     if (visivel) {
-      unawaited(_carregarSessaoCaixa());
+      if (!ObjectBoxLifecycleHub.acessoLocalSuspenso) {
+        unawaited(_carregarSessaoCaixa());
+        if (widget.vendaRepository is VendaRepository) {
+          _carregarOrcamentos();
+          _iniciarPollReconciliacaoNfce();
+        }
+      }
       unawaited(_hidratarUltimasVendasTerminal());
-      _iniciarPollReconciliacaoNfce();
     } else {
       _pararPollReconciliacaoNfce();
     }
@@ -476,6 +508,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _reconciliarNfcePendentes({required bool mostrarFeedback}) async {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
     try {
       _focusNfeService.validarConfiguracao();
     } catch (_) {
@@ -498,6 +531,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   void _atualizarResumoNfcePendenteEmissao() {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
     final lista = widget.vendaRepository.listarComNfcePendenteEmissao();
     if (!mounted) return;
     setState(() {
@@ -1316,6 +1350,7 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   void _carregarOrcamentos() {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
     unawaited(_recarregarSessaoRede());
     setState(() {
       _orcamentos = widget.vendaRepository.listarOrcamentosPendentes(
@@ -1328,6 +1363,7 @@ class _CaixaPageState extends State<CaixaPage> {
   /// Sync de rede: atualiza a lista em memoria; so rebuilda a tela se houver
   /// orcamento aberto na conferencia (itens/totais podem ter mudado).
   void _atualizarOrcamentosAposSync() {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
     unawaited(_recarregarSessaoRede());
     final novos = widget.vendaRepository.listarOrcamentosPendentes(
       limit: _caixaLimiteOrcamentosPendentes,
@@ -1545,6 +1581,10 @@ class _CaixaPageState extends State<CaixaPage> {
   }
 
   Future<void> _carregarSessaoCaixa() async {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso &&
+        widget.vendaRepository is VendaRepository) {
+      return;
+    }
     if (_recarregandoSessaoCaixa) return;
     _recarregandoSessaoCaixa = true;
     try {
@@ -5954,6 +5994,8 @@ class _CaixaPageState extends State<CaixaPage> {
     if (widget.vendaRepository.obterNfe55AutorizadaPorVenda(venda.id) != null) {
       return;
     }
+    if (VendaDocumentoFiscalMutex.bloqueiaNovaNfe55(venda)) return;
+    if (venda.formaPagamento.trim().toLowerCase() == 'dinheiro') return;
     if (!mounted) return;
     final r = await showDialog<String>(
       context: context,
@@ -7795,6 +7837,10 @@ class _CaixaPageState extends State<CaixaPage> {
 
   @override
   void dispose() {
+    if (_registradoObjectBoxLifecycle) {
+      ObjectBoxLifecycleHub.remover(this);
+      _registradoObjectBoxLifecycle = false;
+    }
     if (_syncHubListener != null) {
       SyncRefreshHub.instance.removeListener(_syncHubListener!);
       _syncHubListener = null;
@@ -7803,7 +7849,7 @@ class _CaixaPageState extends State<CaixaPage> {
     CaixaLocalRefreshHub.instance.removeListener(_onCaixaLocalRefresh);
     _debounceSyncOrcamentos?.cancel();
     HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwareCaixa);
-    _timerReconciliacaoNfce?.cancel();
+    _pararPollReconciliacaoNfce();
     _valorRecebidoController.dispose();
     _valorRecebidoFocusNode.dispose();
     _focusAtalhosCaixa.dispose();
