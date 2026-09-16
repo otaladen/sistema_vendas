@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'app_config_repository.dart';
+import 'backup_destino_resolver.dart';
 import 'backup_retencao_service.dart';
 import 'backup_segundo_destino_service.dart';
 
@@ -22,10 +23,14 @@ class BackupPosExecucaoService {
 
     if (config.backupSegundoDestinoAtivo) {
       final secundaria = config.backupSegundoDestinoPasta.trim();
-      if (secundaria.isNotEmpty) {
+      if (BackupDestinoResolver.caminhoConfiguradoValido(secundaria)) {
+        final dirSec = Directory(secundaria);
+        if (!dirSec.existsSync()) {
+          dirSec.createSync(recursive: true);
+        }
         await BackupSegundoDestinoService.espelhar(
           pastaBackup: pastaBackup,
-          pastaRaizSecundaria: Directory(secundaria),
+          pastaRaizSecundaria: dirSec,
           maxCopias: config.backupRetencaoMaxCopias,
         );
       }

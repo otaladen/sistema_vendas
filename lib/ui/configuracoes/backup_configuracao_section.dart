@@ -25,6 +25,7 @@ import '../../services/windows_backup_ao_fechar_window_service.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/backup_historico_item.dart';
 import '../../domain/backup_pasta_risco.dart';
+import '../../services/windows_shell_paths.dart';
 import '../../domain/backup_retencao.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../services/auditoria_registrar.dart';
@@ -1063,7 +1064,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         throw Exception('Pasta de dados local nao encontrada.');
       }
       if (Platform.isWindows) {
-        await Process.start('explorer', [baseDir.path]);
+        await WindowsShellPaths.abrirPastaNoExplorador(baseDir.path);
       } else if (Platform.isLinux) {
         await Process.start('xdg-open', [baseDir.path]);
       } else if (Platform.isMacOS) {
@@ -1084,7 +1085,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
         throw Exception('Pasta nao encontrada.');
       }
       if (Platform.isWindows) {
-        await Process.start('explorer', [dir.path]);
+        await WindowsShellPaths.abrirPastaNoExplorador(dir.path);
       } else if (Platform.isLinux) {
         await Process.start('xdg-open', [dir.path]);
       } else if (Platform.isMacOS) {

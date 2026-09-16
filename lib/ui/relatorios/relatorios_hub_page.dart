@@ -41,6 +41,7 @@ import '../../data/promocao_repository.dart';
 import 'relatorio_top_clientes_page.dart';
 import 'relatorio_vendas_periodo_page.dart';
 import 'relatorio_vendas_por_vendedor_page.dart';
+import 'vendas_evolucao_mensal_dialog.dart';
 import 'relatorio_margem_markup_page.dart';
 import 'relatorio_performance_entregas_page.dart';
 import '../fiscal/relatorio_fiscal_mensal_page.dart';
@@ -326,6 +327,29 @@ class _RelatoriosPageState extends State<RelatoriosPage> {
               vendedorRepository: vd,
             ),
           ),
+        ),
+      ),
+      _RelatorioHubItem(
+        categoriaId: 'vendas',
+        categoriaTitulo: 'Vendas e faturamento',
+        categoriaIcone: Icons.point_of_sale_outlined,
+        icon: Icons.show_chart,
+        relatorioCor: AppRelatorioId.vendasEvolucaoMensal,
+        titulo: 'Grafico de vendas dos ultimos 12 meses',
+        subtitulo:
+            'Evolucao mensal de faturamento (barras, linhas ou area) com PDF A4.',
+        palavrasChave: const [
+          'vendas',
+          'grafico',
+          'evolucao',
+          'mensal',
+          'faturamento',
+          '12 meses',
+          'dashboard',
+        ],
+        onTap: () => VendasEvolucaoMensalDialog.abrir(
+          context,
+          vendaRepository: v,
         ),
       ),
       _RelatorioHubItem(

@@ -2,8 +2,10 @@ import 'dart:io';
 
 import '../domain/auditoria_catalogo.dart';
 import '../services/auditoria_registrar.dart';
+import '../services/app_boot_log.dart';
 import 'app_config_repository.dart';
 import 'auto_backup_service.dart';
+import 'backup_destino_resolver.dart';
 import 'backup_pos_execucao_service.dart';
 import 'local_backup_service.dart';
 import 'objectbox.dart';
@@ -32,8 +34,22 @@ class BackupAoFecharService {
 
     final config = await repository.carregarEmpresaConfig();
     final manual = await repository.carregarRegistroBackupManual();
-    final destino = _resolverPastaDestino(config, manual);
-    if (destino == null) return;
+    Directory destino;
+    try {
+      destino = await BackupDestinoResolver.resolverPastaRaiz(
+        config: config,
+        manual: manual,
+      );
+    } catch (e, st) {
+      AppBootLog.registrar(
+        'backup_ao_fechar',
+        e,
+        stack: st,
+        contexto: 'resolver pasta destino',
+      );
+      await repository.registrarFalhaBackupAutomatico(e.toString());
+      return;
+    }
 
     _emExecucao = true;
     try {
@@ -67,24 +83,16 @@ class BackupAoFecharService {
       );
 
       _executouNestaSessao = true;
-    } catch (e) {
+    } catch (e, st) {
+      AppBootLog.registrar(
+        'backup_ao_fechar',
+        e,
+        stack: st,
+        contexto: 'execucao backup',
+      );
       await repository.registrarFalhaBackupAutomatico(e.toString());
     } finally {
       _emExecucao = false;
     }
-  }
-
-  static Directory? _resolverPastaDestino(
-    EmpresaConfig config,
-    BackupRegistroManual manual,
-  ) {
-    var pasta = config.backupAutomaticoPasta.trim();
-    if (pasta.isEmpty) {
-      pasta = manual.pastaPadrao.trim();
-    }
-    if (pasta.isEmpty) return null;
-    final dir = Directory(pasta);
-    if (!dir.existsSync()) return null;
-    return dir;
   }
 }

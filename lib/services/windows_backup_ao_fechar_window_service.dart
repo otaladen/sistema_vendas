@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'app_boot_log.dart';
 import 'configuracoes_service.dart';
 import '../ui/app_global_error_handler.dart';
 
@@ -95,12 +96,25 @@ class _WindowsBackupCloseListener with WindowListener {
       await _executarBackupComModalBloqueante();
       await windowManager.setPreventClose(false);
       await windowManager.destroy();
-    } catch (_) {
+    } catch (e, st) {
+      AppBootLog.registrar(
+        'fechamento_janela',
+        e,
+        stack: st,
+        contexto: 'backup ao fechar / destroy',
+      );
       await _fecharModalSeAberto();
       try {
         await windowManager.setPreventClose(false);
         await windowManager.destroy();
-      } catch (_) {}
+      } catch (destroyErr, destroySt) {
+        AppBootLog.registrar(
+          'fechamento_janela',
+          destroyErr,
+          stack: destroySt,
+          contexto: 'windowManager.destroy apos falha',
+        );
+      }
     }
   }
 

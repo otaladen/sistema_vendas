@@ -411,9 +411,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   Future<void> _executarBackupAoFechar({bool agendarHeadless = true}) async {
     // Headless so ao fechar a UI. Logout/troca de usuario deixa o app aberto.
-    if (agendarHeadless) {
-      await WindowsAppStartupHelper.agendarHeadlessAposSaida();
-    }
     if (widget.objectBox != null) {
       final nomeLoja = await _nomeLojaAtual();
       await BackupAoFecharService.tentarSeAtivo(
@@ -422,6 +419,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         lanSyncScheduler: widget.lanSyncScheduler,
         nomeLoja: nomeLoja,
       );
+    }
+    if (agendarHeadless) {
+      await WindowsAppStartupHelper.agendarHeadlessAposSaida();
     }
   }
 

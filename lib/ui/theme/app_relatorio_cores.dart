@@ -10,6 +10,7 @@ enum AppRelatorioId {
   fiados,
   contasPagar,
   vendasPeriodo,
+  vendasEvolucaoMensal,
   horariosPico,
   metasVendedor,
   orcamentos,
@@ -51,6 +52,8 @@ abstract final class AppRelatorioCores {
         return AppModuloCores.modulo(context, AppModuloId.relatorioContasPagar);
       case AppRelatorioId.vendasPeriodo:
         return AppModuloCores.harmonizar(scheme, 210);
+      case AppRelatorioId.vendasEvolucaoMensal:
+        return AppModuloCores.harmonizar(scheme, 200);
       case AppRelatorioId.horariosPico:
         return AppModuloCores.harmonizar(scheme, 285);
       case AppRelatorioId.metasVendedor:

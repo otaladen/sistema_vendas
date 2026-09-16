@@ -87,20 +87,21 @@ abstract final class WindowsAppStartupHelper {
   static Future<void> agendarHeadlessAposSaida() async {
     if (!Platform.isWindows) return;
     if (!await estaAtivo()) return;
-    final exe = Platform.resolvedExecutable;
-    if (exe.trim().isEmpty || !File(exe).existsSync()) return;
+    final exe = Platform.resolvedExecutable.trim();
+    if (exe.isEmpty || !File(exe).existsSync()) return;
     final arg = LanServidorHeadlessService.argHeadless;
+    final workDir = File(exe).parent.path;
+    if (workDir.trim().isEmpty || !Directory(workDir).existsSync()) return;
     try {
       // Espera o processo atual liberar o ObjectBox, depois sobe o headless.
-      // ping ~3s + margem para fechar o store.
+      // Evita `start ""` no cmd (Windows pode interpretar como caminho `\\`).
       await Process.start(
         'cmd',
         [
           '/c',
-          'ping 127.0.0.1 -n 5 >nul & start "" /B "$exe" $arg',
+          'ping 127.0.0.1 -n 5 >nul & cd /d "$workDir" & "$exe" $arg',
         ],
         mode: ProcessStartMode.detached,
-        workingDirectory: File(exe).parent.path,
       );
     } catch (e) {
       if (kDebugMode) {
@@ -120,7 +121,7 @@ abstract final class WindowsAppStartupHelper {
       'rem Sistema de Vendas — servidor de terminais ao ligar o PC\r\n'
       'cd /d "$workDir"\r\n'
       'timeout /t 20 /nobreak >nul\r\n'
-      'start "" /B "$exe" $arg\r\n',
+      '"$exe" $arg\r\n',
       flush: true,
     );
   }

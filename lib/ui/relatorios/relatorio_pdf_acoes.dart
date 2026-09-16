@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -52,6 +53,60 @@ class RelatorioPdfAcoes {
     try {
       final bytes = await gerarPdfRelatorioTextoPaginas(paginas);
       await arquivo.writeAsBytes(bytes);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('PDF salvo: ${arquivo.path}')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao salvar: $e')),
+      );
+    }
+  }
+
+  static Future<void> imprimirBytes(
+    BuildContext context, {
+    required Future<Uint8List> Function() bytes,
+    String? mensagemSeVazio,
+  }) async {
+    final data = await bytes();
+    if (data.isEmpty) {
+      if (context.mounted && mensagemSeVazio != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(mensagemSeVazio)),
+        );
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    await Printing.layoutPdf(onLayout: (_) async => data);
+  }
+
+  static Future<void> salvarBytes(
+    BuildContext context, {
+    required Future<Uint8List> Function() bytes,
+    required String nomeArquivoSemExtensao,
+    String? mensagemSeVazio,
+  }) async {
+    final data = await bytes();
+    if (data.isEmpty) {
+      if (context.mounted && mensagemSeVazio != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(mensagemSeVazio)),
+        );
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    final pasta = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Pasta para salvar o PDF',
+    );
+    if (pasta == null || pasta.trim().isEmpty) return;
+    final seguro = nomeArquivoSemExtensao.replaceAll(RegExp(r'[^\w\-]+'), '_');
+    final arquivo = File(p.join(pasta, '$seguro.pdf'));
+    try {
+      await arquivo.writeAsBytes(data);
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('PDF salvo: ${arquivo.path}')),

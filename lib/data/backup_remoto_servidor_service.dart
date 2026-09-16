@@ -9,6 +9,7 @@ import '../domain/sessao_operacional_guard.dart';
 import '../services/auditoria_registrar.dart';
 import 'app_config_repository.dart';
 import 'auto_backup_service.dart';
+import 'backup_destino_resolver.dart';
 import 'backup_historico_service.dart';
 import 'backup_pos_execucao_service.dart';
 import 'backup_zip_service.dart';
@@ -51,17 +52,11 @@ class BackupRemotoServidorService {
   ) async {
     final config = await repository.carregarEmpresaConfig();
     final manual = await repository.carregarRegistroBackupManual();
-    var pasta = config.backupAutomaticoPasta.trim();
-    if (pasta.isEmpty) pasta = manual.pastaPadrao.trim();
-    if (pasta.isEmpty) {
-      final base = await obterDiretorioBaseDadosApp();
-      pasta = p.join(base.path, subpastaFallback);
-    }
-    final dir = Directory(pasta);
-    if (!dir.existsSync()) {
-      dir.createSync(recursive: true);
-    }
-    return dir;
+    return BackupDestinoResolver.resolverPastaRaiz(
+      config: config,
+      manual: manual,
+      subpastaFallback: subpastaFallback,
+    );
   }
 
   static bool ehArquivoZipDeBackup(String caminho) {

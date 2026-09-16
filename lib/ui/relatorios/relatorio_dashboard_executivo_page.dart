@@ -13,6 +13,7 @@ import 'relatorio_export_util.dart';
 import 'relatorio_periodo.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
 import '../theme/app_relatorio_cores.dart';
+import 'vendas_evolucao_mensal_dialog.dart';
 
 class _PainelExecutivoSnap {
   const _PainelExecutivoSnap({
@@ -242,6 +243,30 @@ class _RelatorioDashboardExecutivoPageState
             anterior: s.totAnt,
             formatarMoeda: _fmt,
             mostrarComparativo: true,
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: Icon(
+                Icons.show_chart,
+                color: AppRelatorioCores.cor(
+                  context,
+                  AppRelatorioId.vendasEvolucaoMensal,
+                ),
+              ),
+              title: const Text(
+                'Grafico de vendas dos ultimos 12 meses',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Evolucao mensal de faturamento — barras, linhas ou area.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => VendasEvolucaoMensalDialog.abrir(
+                context,
+                vendaRepository: widget.vendaRepository,
+              ),
+            ),
           ),
           const SizedBox(height: 6),
           Text(
