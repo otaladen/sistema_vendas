@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
+import '../domain/cliente_busca_util.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/pdv_balcao_rapido_helper.dart';
 import '../domain/quantidade_venda_util.dart';
@@ -44,6 +45,7 @@ import '../data/api/produto_api_repository.dart';
 import '../data/api/venda_api_repository.dart';
 import '../domain/venda_relacao_safe.dart';
 import '../data/objectbox.dart';
+import '../data/objectbox_lifecycle_hub.dart';
 import '../data/lote_produto_repository.dart';
 import '../services/lote_fefo_service.dart';
 import '../domain/lista_compra_item_constantes.dart';
@@ -2720,7 +2722,17 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   void _carregarDadosIniciais() {
-    final novos = widget.vendedorRepository.listarAtivos();
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return;
+    List<Vendedor> novos;
+    try {
+      final raw = widget.vendedorRepository.listarAtivos();
+      novos = raw is List<Vendedor>
+          ? raw
+          : List<Vendedor>.from(raw as Iterable);
+    } catch (e) {
+      if ('$e'.toLowerCase().contains('store is closed')) return;
+      rethrow;
+    }
     if (_mesmaListaVendedoresAtivos(_vendedoresAtivos, novos)) {
       return;
     }
@@ -3165,14 +3177,71 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   static const int _pdvMaxSugestoesCliente = 8;
   Timer? _debouncePesquisaClientePdvApi;
 
+  List<Cliente> _filtrarClientesAtivosParaSeletor(
+    String termo, {
+    int limit = 60,
+  }) {
+    final t = termo.trim();
+    try {
+      if (t.isEmpty) {
+        return listaClientesDeRepositorio(
+          widget.clienteRepository.listarPaginado(
+            limit: limit,
+            somenteAtivos: true,
+          ),
+        );
+      }
+      final encontrados =
+          listaClientesDeRepositorio(widget.clienteRepository.pesquisar(t));
+      return filtrarClientesPorTermo(
+        encontrados,
+        t,
+        somenteAtivos: true,
+        limit: limit,
+      );
+    } catch (_) {
+      return const [];
+    }
+  }
+
   List<Cliente> _pesquisarClientesPdv(String termo) {
     final t = termo.trim();
     if (t.isEmpty) return const [];
-    final encontrados = widget.clienteRepository.pesquisar(t);
-    return encontrados
-        .where((c) => c.ativo)
-        .take(_pdvMaxSugestoesCliente)
-        .toList();
+    return _filtrarClientesAtivosParaSeletor(
+      t,
+      limit: _pdvMaxSugestoesCliente,
+    );
+  }
+
+  void _agendarPesquisaClienteRemotaPdv(
+    ClienteApiRepository repo,
+    String termo, {
+    required int limit,
+    required bool Function() aindaMontado,
+    required void Function(List<Cliente> remotos) aplicar,
+    void Function(Timer timer)? registrarTimer,
+  }) {
+    final t = termo.trim();
+    if (t.isEmpty) return;
+    final timer = Timer(
+      const Duration(milliseconds: 320),
+      () {
+        unawaited(
+          () async {
+            try {
+              final remotos = await repo.pesquisarRemoto(
+                t,
+                limit: limit,
+                notificarUi: false,
+              );
+              if (!aindaMontado()) return;
+              aplicar(remotos);
+            } catch (_) {}
+          }().catchError((Object _) {}),
+        );
+      },
+    );
+    registrarTimer?.call(timer);
   }
 
   void _atualizarSugestoesClientePdv(String texto) {
@@ -3185,26 +3254,21 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     final repo = widget.clienteRepository;
     _debouncePesquisaClientePdvApi?.cancel();
     if (repo is! ClienteApiRepository) return;
-    final termo = texto.trim();
-    if (termo.isEmpty) return;
-    _debouncePesquisaClientePdvApi = Timer(
-      const Duration(milliseconds: 320),
-      () async {
-        try {
-          final remotos = await repo.pesquisarRemoto(
-            termo,
-            limit: _pdvMaxSugestoesCliente,
-          );
-          if (!mounted) return;
-          _pdvClientesSugeridos = remotos
-              .where((c) => c.ativo)
-              .take(_pdvMaxSugestoesCliente)
-              .toList();
-          _pdvIndiceSugestaoCliente =
-              _pdvClientesSugeridos.isEmpty ? -1 : 0;
-          _atualizarOverlaySugestoesClientePdv();
-        } catch (_) {}
+    _agendarPesquisaClienteRemotaPdv(
+      repo,
+      texto,
+      limit: _pdvMaxSugestoesCliente,
+      aindaMontado: () => mounted,
+      aplicar: (_) {
+        _pdvClientesSugeridos = _filtrarClientesAtivosParaSeletor(
+          texto,
+          limit: _pdvMaxSugestoesCliente,
+        );
+        _pdvIndiceSugestaoCliente =
+            _pdvClientesSugeridos.isEmpty ? -1 : 0;
+        _atualizarOverlaySugestoesClientePdv();
       },
+      registrarTimer: (t) => _debouncePesquisaClientePdvApi = t,
     );
   }
 
@@ -3946,37 +4010,28 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                       onChanged: (value) {
                         final termo = value.trim();
                         setDialogStateInner(() {
-                          filtrados = termo.isEmpty
-                              ? widget.clienteRepository.listarPaginado(
-                                  limit: 60,
-                                  somenteAtivos: true,
-                                )
-                              : widget.clienteRepository
-                                    .pesquisar(termo)
-                                    .where((c) => c.ativo)
-                                    .take(60)
-                                    .toList();
+                          filtrados = _filtrarClientesAtivosParaSeletor(
+                            termo,
+                            limit: 60,
+                          );
                         });
                         final repo = widget.clienteRepository;
                         if (repo is ClienteApiRepository && termo.isNotEmpty) {
                           debounceApi?.cancel();
-                          debounceApi = Timer(
-                            const Duration(milliseconds: 320),
-                            () async {
-                              try {
-                                final remotos = await repo.pesquisarRemoto(
+                          _agendarPesquisaClienteRemotaPdv(
+                            repo,
+                            termo,
+                            limit: 60,
+                            aindaMontado: () => dialogContext.mounted,
+                            aplicar: (_) {
+                              setDialogStateInner(() {
+                                filtrados = _filtrarClientesAtivosParaSeletor(
                                   termo,
                                   limit: 60,
                                 );
-                                if (!dialogContext.mounted) return;
-                                setDialogStateInner(() {
-                                  filtrados = remotos
-                                      .where((c) => c.ativo)
-                                      .take(60)
-                                      .toList();
-                                });
-                              } catch (_) {}
+                              });
                             },
+                            registrarTimer: (t) => debounceApi = t,
                           );
                         }
                       },

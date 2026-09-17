@@ -1,3 +1,6 @@
+import 'package:flutter/foundation.dart';
+
+import '../domain/cliente_busca_util.dart';
 import '../model/cliente.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
@@ -22,6 +25,7 @@ class ClienteRepository {
     int limit = 80,
     bool somenteAtivos = false,
   }) {
+    if (_db.leituraIndisponivel) return const [];
     if (limit <= 0) return const [];
     final qb = somenteAtivos
         ? _db.clienteBox.query(Cliente_.ativo.equals(true))
@@ -37,6 +41,7 @@ class ClienteRepository {
   }
 
   List<Cliente> pesquisar(String termo) {
+    if (_db.leituraIndisponivel) return const [];
     final t = termo.trim();
     if (t.isEmpty) {
       return const [];
@@ -47,26 +52,48 @@ class ClienteRepository {
     final query =
         _db.clienteBox.query(cond).order(Cliente_.nomeRazao).build();
     try {
-      final lista = query.find();
+      var lista = List<Cliente>.from(query.find());
       // CPF/CNPJ digitado sem mascara: ObjectBox contains nao acha "123.456...".
-      if (digitos.length < 3) return lista;
-      final ids = lista.map((c) => c.id).toSet();
-      for (final c in _db.clienteBox.getAll()) {
-        if (ids.contains(c.id)) continue;
-        final docs = [
-          c.documento,
-          c.telefone,
-          c.whatsapp,
-          c.cep,
-        ].map((s) => s.replaceAll(RegExp(r'\D'), ''));
-        if (docs.any((d) => d.contains(digitos))) {
-          lista.add(c);
-          ids.add(c.id);
+      if (digitos.length >= 3) {
+        final ids = lista.map((c) => c.id).toSet();
+        for (final c in _db.clienteBox.getAll()) {
+          if (ids.contains(c.id)) continue;
+          final docs = [
+            c.documento,
+            c.telefone,
+            c.whatsapp,
+            c.cep,
+          ].map((s) => s.replaceAll(RegExp(r'\D'), ''));
+          if (docs.any((d) => d.contains(digitos))) {
+            lista.add(c);
+            ids.add(c.id);
+          }
         }
       }
+      if (lista.isEmpty) {
+        lista = _pesquisarEmMemoria(t);
+      }
       return lista;
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('ClienteRepository.pesquisar("$t"): $e\n$st');
+      }
+      return _pesquisarEmMemoria(t);
     } finally {
       query.close();
+    }
+  }
+
+  /// Fallback quando a query indexada nao retorna match (ex.: substring / acentos).
+  List<Cliente> _pesquisarEmMemoria(String termo) {
+    if (_db.leituraIndisponivel) return const [];
+    try {
+      return filtrarClientesPorTermo(_db.clienteBox.getAll(), termo);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('ClienteRepository._pesquisarEmMemoria("$termo"): $e\n$st');
+      }
+      return const [];
     }
   }
 

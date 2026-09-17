@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../domain/local_backup_escopo.dart';
+import '../services/app_boot_log.dart';
 import 'local_app_data_paths.dart';
 import 'local_backup_atomic.dart';
 import 'local_backup_cadastro_produtos_service.dart';
@@ -147,6 +148,10 @@ class LocalBackupService {
       await lanSyncScheduler.parar();
       syncParada = true;
     }
+    AppBootLog.info(
+      'local_backup',
+      'Fechando ObjectBox para copia (${tipo.name}, ${escopo.manifestValue})',
+    );
     await objectBox.fecharParaCopiaDeArquivos();
     try {
       final origemObjectBox = Directory(p.join(baseDadosDir.path, 'objectbox'));

@@ -16,6 +16,9 @@ abstract final class ObjectBoxLifecycleHub {
   /// Verdadeiro entre o aviso de fechamento e [notificarStoreReaberta].
   static bool storeFechadaParaCopia = false;
 
+  /// Incrementado a cada reabertura; use como [Key] para remontar telas.
+  static int geracaoStore = 0;
+
   /// Checagem sincrona (main isolate) antes de queries ou timers locais.
   static bool get acessoLocalSuspenso => storeFechadaParaCopia;
 
@@ -52,6 +55,7 @@ abstract final class ObjectBoxLifecycleHub {
 
   static void notificarStoreReaberta() {
     storeFechadaParaCopia = false;
+    geracaoStore++;
     AppBootLog.info(
       'objectbox_lifecycle',
       'Store reaberta; retomando ${_listeners.length} listener(s)',

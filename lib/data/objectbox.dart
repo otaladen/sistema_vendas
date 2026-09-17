@@ -141,6 +141,16 @@ class ObjectBox {
     itemInventarioBox = Box<ItemInventario>(store);
   }
 
+  /// True enquanto o backup fecha o banco, ou se o store ja morreu.
+  bool get leituraIndisponivel {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return true;
+    try {
+      return store.isClosed();
+    } catch (_) {
+      return true;
+    }
+  }
+
   /// Grava filas assincronas e fecha o banco para copia consistente de `data.mdb`.
   Future<void> fecharParaCopiaDeArquivos() async {
     if (store.isClosed()) return;

@@ -33,6 +33,7 @@ import '../theme/app_fundo_camada.dart';
 import '../widgets/app_rodape_status_bar.dart';
 import '../widgets/chat/chat_interno_drawer.dart';
 import '../widgets/chat/chat_interno_hub.dart';
+import '../widgets/store_aware_page_guard.dart';
 import '../../data/api/chat_api_repository.dart';
 import '../../data/mensagem_interna_repository.dart';
 import '../../data/usuario_repository.dart';
@@ -250,6 +251,7 @@ class _MainAppShellPageState extends State<MainAppShellPage>
   @override
   void onObjectBoxReopenedAfterCopy() {
     if (!mounted || widget.terminalLeve || widget.objectBox == null) return;
+    setState(() {});
     _iniciarTimerBadgesFiscais();
   }
 
@@ -646,9 +648,10 @@ class _MainAppShellPageState extends State<MainAppShellPage>
     MainMenuSubDestino? sub,
     String? configSecaoInicialId,
   }) {
+    final Widget pagina;
     if (sub != null) {
       final deps = _valoresDeps();
-      return _valoresDeps(
+      pagina = _valoresDeps(
         child: Builder(
           builder: (ctx) => MainMenuSubRouter.pagina(
             sub,
@@ -657,11 +660,14 @@ class _MainAppShellPageState extends State<MainAppShellPage>
           ),
         ),
       );
+    } else {
+      pagina = _conteudoDestino(
+        destino,
+        configSecaoInicialId: configSecaoInicialId,
+      );
     }
-    return _conteudoDestino(
-      destino,
-      configSecaoInicialId: configSecaoInicialId,
-    );
+    if (widget.terminalLeve || widget.objectBox == null) return pagina;
+    return StoreAwarePageGuard(child: pagina);
   }
 
   void _alternarGrupoMenu(MainMenuDestino grupo) {

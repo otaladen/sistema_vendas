@@ -1022,9 +1022,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     try {
       await widget.lanSyncScheduler?.parar();
     } catch (_) {}
-    try {
-      await _executarBackupAoFechar(agendarHeadless: false);
-    } catch (_) {}
+    // Nao dispara backup-ao-fechar na troca de usuario: o app e a LanApi
+    // continuam ligados. Fechar o ObjectBox nesse intervalo derruba os
+    // terminais (Bad state: Store is closed). Backup ao fechar fica no
+    // encerramento da janela.
   }
 
   Widget _buildTerminalRoot() {

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../data/api/lan_api_client.dart';
 import '../services/app_boot_log.dart';
+import 'widgets/store_aware_page_guard.dart';
 
 /// Chaves globais para SnackBar/navegacao fora de um [BuildContext] local
 /// (ex.: erros em [runZonedGuarded] / [FlutterError.onError]).
@@ -40,6 +41,9 @@ void configurarTratamentoErrosGlobais() {
   ErrorWidget.builder = (details) {
     if (kDebugMode) {
       return ErrorWidget(details.exception);
+    }
+    if (_ehErroRuidoOperacional(details.exception)) {
+      return const StoreLocalIndisponivelPlaceholder(pedirReabrirAba: true);
     }
     return const Material(
       color: Color(0xFFFAFAFA),

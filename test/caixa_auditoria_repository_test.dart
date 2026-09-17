@@ -59,6 +59,32 @@ void main() {
     expect(det['hora'], '15:07:09');
   });
 
+  test('deduplica fechamentos repetidos do mesmo turno', () {
+    final em = DateTime(2026, 9, 5, 13, 5, 1);
+    final dup = CaixaAuditoriaRegistro(
+      em: em,
+      evento: 'fechamento_caixa',
+      usuario: 'a',
+      operadorCaixa: 'otaladen',
+      detalhes: {
+        'aberturaEm': '2026-09-05T13:05:00.000Z',
+        'operador': 'otaladen',
+      },
+    );
+    final dup2 = CaixaAuditoriaRegistro(
+      em: DateTime(2026, 9, 5, 13, 5, 8),
+      evento: 'fechamento_caixa',
+      usuario: 'b',
+      operadorCaixa: 'otaladen',
+      detalhes: {
+        'aberturaEm': '2026-09-05T13:05:00.000Z',
+        'operador': 'otaladen',
+      },
+    );
+    final out = CaixaAuditoriaRepository.deduplicarRegistros([dup, dup2]);
+    expect(out.length, 1);
+  });
+
   test('valor do fechamento usa declaradoDinheiro quando valor ausente', () {
     expect(
       CaixaAuditoriaRepository.valorDoEvento('fechamento_caixa', {

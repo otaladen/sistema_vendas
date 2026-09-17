@@ -2,6 +2,7 @@ import '../domain/usuario_senha_codec.dart';
 import '../model/vendedor.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'objectbox_lifecycle_hub.dart';
 import 'sync/sync_write_trigger.dart';
 
 class VendedorRepository {
@@ -10,6 +11,7 @@ class VendedorRepository {
   final ObjectBox _db;
 
   List<Vendedor> listarTodos() {
+    if (_db.leituraIndisponivel) return const [];
     final query = _db.vendedorBox.query().order(Vendedor_.nomeCompleto).build();
     final lista = query.find();
     query.close();

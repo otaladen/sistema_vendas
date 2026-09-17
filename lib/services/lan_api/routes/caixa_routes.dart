@@ -438,16 +438,34 @@ void registerCaixaRoutes(Router router, LanApiDeps d) {
   });
 
   router.get('/api/relatorios/historico-fechamento-caixa', (Request r) async {
-    final limit = lanApiQueryInt(r, 'limit', fallback: 300).clamp(1, 500);
+    final limit = lanApiQueryInt(r, 'limit', fallback: 40).clamp(1, 200);
+    final offset = lanApiQueryInt(r, 'offset', fallback: 0).clamp(0, 100000);
+    final desdeRaw = (r.url.queryParameters['desde'] ?? '').trim();
+    final desde = desdeRaw.isEmpty ? null : DateTime.tryParse(desdeRaw)?.toUtc();
     final repo = CaixaAuditoriaRepository(db: d.objectBox);
-    var items = await repo.listarFechamentos();
-    if (items.length > limit) {
-      items = items.take(limit).toList();
-    }
+    final items = await repo.listarFechamentosPaginado(
+      offset: offset,
+      limit: limit,
+      desde: desde,
+    );
     return lanApiJson({
       'items': items.map((e) => e.toMap()).toList(),
+      'offset': offset,
+      'limit': limit,
     });
   });
+
+  router.get(
+    '/api/relatorios/historico-fechamento-caixa/contagem',
+    (Request r) async {
+      final desdeRaw = (r.url.queryParameters['desde'] ?? '').trim();
+      final desde =
+          desdeRaw.isEmpty ? null : DateTime.tryParse(desdeRaw)?.toUtc();
+      final repo = CaixaAuditoriaRepository(db: d.objectBox);
+      final total = await repo.contarFechamentos(desde: desde);
+      return lanApiJson({'total': total});
+    },
+  );
 
   router.post('/api/caixa/auditoria', (Request r) async {
     final body = await lanApiReadJsonMap(r);

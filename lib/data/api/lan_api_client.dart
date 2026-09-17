@@ -91,8 +91,15 @@ class LanApiClient {
   static const Duration timeoutHealth = Duration(seconds: 8);
   static const Duration timeoutFiscal = Duration(seconds: 120);
   static const Duration timeoutFechamento = Duration(minutes: 5);
+  /// Codigo da API quando o ObjectBox do servidor esta fechado para backup.
+  static const codigoStoreIndisponivel = 'store_unavailable';
+  static const msgStoreIndisponivel =
+      'Servidor em backup momentaneo. Tente novamente em instantes.';
+
   /// Backup completo do banco no PC servidor + download do ZIP.
   static const Duration timeoutBackup = Duration(minutes: 10);
+  static const Duration _delayRetryStore = Duration(seconds: 2);
+  static const int _maxRetryStore = 45;
 
   /// Mensagem amigavel para falha de rede no celular (Tailscale / 4G).
   static const msgRedeInstavelMotorista =
@@ -116,7 +123,9 @@ class LanApiClient {
       debugPrint(
         '[LanApiClient] $verbo ${_uri(path)}: ${e.message}',
       );
-      if (sinalizarRede) _sinalizarOfflineSeRede(e.cause);
+      if (sinalizarRede && e.code != codigoStoreIndisponivel) {
+        _sinalizarOfflineSeRede(e.cause);
+      }
       throw e;
     }
     if (e is TimeoutException) {
@@ -163,42 +172,97 @@ class LanApiClient {
   void Function()? onFalhaRede;
   void Function()? onSucessoRede;
 
+  Future<T> _retrySeStoreIndisponivel<T>(
+    Future<T> Function() acao, {
+    bool retry = true,
+  }) async {
+    final max = retry ? _maxRetryStore : 1;
+    for (var i = 0; i < max; i++) {
+      try {
+        return await acao();
+      } on LanApiException catch (e) {
+        if (e.code != codigoStoreIndisponivel || i == max - 1) {
+          rethrow;
+        }
+        await Future<void>.delayed(_delayRetryStore);
+      }
+    }
+    throw StateError('retry store indisponivel');
+  }
+
+  LanApiException _excecaoHttp(http.Response r, String verbo, String path) {
+    String detalhe = r.body;
+    String? code;
+    Map<String, dynamic>? details;
+    try {
+      final d = jsonDecode(r.body);
+      if (d is Map) {
+        details = Map<String, dynamic>.from(d);
+        if (d['error'] != null) detalhe = d['error'].toString();
+        final c = d['code']?.toString().trim();
+        if (c != null && c.isNotEmpty) code = c;
+      }
+    } catch (_) {}
+    if (code == codigoStoreIndisponivel) {
+      return LanApiException(
+        detalhe.trim().isEmpty ? msgStoreIndisponivel : detalhe,
+        code: code,
+        details: details,
+      );
+    }
+    return LanApiException(
+      'API $verbo $path HTTP ${r.statusCode}: $detalhe',
+      code: code,
+      details: details,
+    );
+  }
+
   Future<Map<String, dynamic>> _getJson(
     String path, {
     Map<String, String>? query,
     Duration? timeout,
     bool aceitarErroJson = false,
+    bool retryStoreIndisponivel = true,
   }) async {
-    try {
-      final r = await http
-          .get(_uri(path, query), headers: _headers())
-          .timeout(timeout ?? timeoutLeitura);
-      if (r.statusCode == 401 || r.statusCode == 403) {
-        throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
-      }
-      if (r.statusCode != 200) {
-        if (aceitarErroJson && r.body.trim().isNotEmpty) {
-          try {
-            final d = jsonDecode(r.body);
-            if (d is Map) {
-              onSucessoRede?.call();
-              return Map<String, dynamic>.from(d);
+    return _retrySeStoreIndisponivel(
+      () async {
+        try {
+          final r = await http
+              .get(_uri(path, query), headers: _headers())
+              .timeout(timeout ?? timeoutLeitura);
+          if (r.statusCode == 401 || r.statusCode == 403) {
+            throw LanApiException(
+              'API recusou o token (HTTP ${r.statusCode}).',
+            );
+          }
+          if (r.statusCode != 200) {
+            final storeEx = _excecaoHttp(r, 'GET', path);
+            if (storeEx.code == codigoStoreIndisponivel) {
+              throw storeEx;
             }
-          } catch (_) {}
+            if (aceitarErroJson && r.body.trim().isNotEmpty) {
+              try {
+                final d = jsonDecode(r.body);
+                if (d is Map) {
+                  onSucessoRede?.call();
+                  return Map<String, dynamic>.from(d);
+                }
+              } catch (_) {}
+            }
+            throw storeEx;
+          }
+          final d = jsonDecode(r.body);
+          if (d is! Map) {
+            throw LanApiException('Resposta invalida em $path');
+          }
+          onSucessoRede?.call();
+          return Map<String, dynamic>.from(d);
+        } catch (e) {
+          _rethrowRede(e, path, 'GET');
         }
-        throw LanApiException(
-          'API GET $path HTTP ${r.statusCode}: ${r.body}',
-        );
-      }
-      final d = jsonDecode(r.body);
-      if (d is! Map) {
-        throw LanApiException('Resposta invalida em $path');
-      }
-      onSucessoRede?.call();
-      return Map<String, dynamic>.from(d);
-    } catch (e) {
-      _rethrowRede(e, path, 'GET');
-    }
+      },
+      retry: retryStoreIndisponivel,
+    );
   }
 
   Future<Map<String, dynamic>> _postJson(
@@ -209,60 +273,69 @@ class LanApiClient {
     Map<String, String>? extraHeaders,
     bool sinalizarStatusRede = true,
   }) async {
-    try {
-      final r = await http
-          .post(
-            _uri(path),
-            headers: {
-              ..._headers(),
-              if (extraHeaders != null) ...extraHeaders,
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(timeout ?? timeoutEscrita);
-      if (r.statusCode == 401 || r.statusCode == 403) {
-        throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
-      }
-      if (r.statusCode < 200 || r.statusCode >= 300) {
-        if (aceitarErroJson && r.body.trim().isNotEmpty) {
+    return _retrySeStoreIndisponivel(() async {
+      try {
+        final r = await http
+            .post(
+              _uri(path),
+              headers: {
+                ..._headers(),
+                if (extraHeaders != null) ...extraHeaders,
+              },
+              body: jsonEncode(body),
+            )
+            .timeout(timeout ?? timeoutEscrita);
+        if (r.statusCode == 401 || r.statusCode == 403) {
+          throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
+        }
+        if (r.statusCode < 200 || r.statusCode >= 300) {
+          var detalhe = r.body;
+          String? code;
+          Map<String, dynamic>? details;
           try {
             final d = jsonDecode(r.body);
             if (d is Map) {
-              onSucessoRede?.call();
-              return Map<String, dynamic>.from(d);
+              details = Map<String, dynamic>.from(d);
+              if (d['error'] != null) {
+                detalhe = d['error'].toString();
+              }
+              final c = d['code']?.toString().trim();
+              if (c != null && c.isNotEmpty) code = c;
             }
           } catch (_) {}
-        }
-        var detalhe = r.body;
-        String? code;
-        Map<String, dynamic>? details;
-        try {
-          final d = jsonDecode(r.body);
-          if (d is Map) {
-            details = Map<String, dynamic>.from(d);
-            if (d['error'] != null) {
-              detalhe = d['error'].toString();
-            }
-            final c = d['code']?.toString().trim();
-            if (c != null && c.isNotEmpty) code = c;
+          if (code == codigoStoreIndisponivel) {
+            throw LanApiException(
+              detalhe.trim().isEmpty ? msgStoreIndisponivel : detalhe,
+              code: code,
+              details: details,
+            );
           }
-        } catch (_) {}
-        throw LanApiException(detalhe, code: code, details: details);
-      }
-      if (r.body.trim().isEmpty) {
+          if (aceitarErroJson && r.body.trim().isNotEmpty) {
+            try {
+              final d = jsonDecode(r.body);
+              if (d is Map) {
+                onSucessoRede?.call();
+                return Map<String, dynamic>.from(d);
+              }
+            } catch (_) {}
+          }
+          throw LanApiException(detalhe, code: code, details: details);
+        }
+        if (r.body.trim().isEmpty) {
+          onSucessoRede?.call();
+          return {'ok': true};
+        }
+        final d = jsonDecode(r.body);
+        if (d is! Map) {
+          onSucessoRede?.call();
+          return {'ok': true};
+        }
         onSucessoRede?.call();
-        return {'ok': true};
+        return Map<String, dynamic>.from(d);
+      } catch (e) {
+        _rethrowRede(e, path, 'POST', sinalizarRede: sinalizarStatusRede);
       }
-      final d = jsonDecode(r.body);
-      if (d is! Map) {
-        onSucessoRede?.call();
-        return {'ok': true};
-      }
-      onSucessoRede?.call();
-      return Map<String, dynamic>.from(d);
-    } catch (e) {
-      _rethrowRede(e, path, 'POST', sinalizarRede: sinalizarStatusRede);
-    }
+    });
   }
 
   Future<({List<int> bytes, String? filename})> _getBytes(
@@ -270,75 +343,73 @@ class LanApiClient {
     Map<String, String>? query,
     Duration? timeout,
   }) async {
-    try {
-      final r = await http
-          .get(_uri(path, query), headers: _headers(json: false))
-          .timeout(timeout ?? timeoutFechamento);
-      if (r.statusCode == 401 || r.statusCode == 403) {
-        throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
+    return _retrySeStoreIndisponivel(() async {
+      try {
+        final r = await http
+            .get(_uri(path, query), headers: _headers(json: false))
+            .timeout(timeout ?? timeoutFechamento);
+        if (r.statusCode == 401 || r.statusCode == 403) {
+          throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
+        }
+        if (r.statusCode != 200) {
+          throw _excecaoHttp(r, 'GET', path);
+        }
+        onSucessoRede?.call();
+        final cd = r.headers['content-disposition'] ?? '';
+        String? filename;
+        final m = RegExp(r'filename="?([^";]+)"?').firstMatch(cd);
+        if (m != null) filename = m.group(1);
+        return (bytes: r.bodyBytes, filename: filename);
+      } catch (e) {
+        _rethrowRede(e, path, 'GET');
       }
-      if (r.statusCode != 200) {
-        var detalhe = r.body;
-        try {
-          final d = jsonDecode(r.body);
-          if (d is Map && d['error'] != null) {
-            detalhe = d['error'].toString();
-          }
-        } catch (_) {}
-        throw LanApiException('API GET $path HTTP ${r.statusCode}: $detalhe');
-      }
-      onSucessoRede?.call();
-      final cd = r.headers['content-disposition'] ?? '';
-      String? filename;
-      final m = RegExp(r'filename="?([^";]+)"?').firstMatch(cd);
-      if (m != null) filename = m.group(1);
-      return (bytes: r.bodyBytes, filename: filename);
-    } catch (e) {
-      _rethrowRede(e, path, 'GET');
-    }
+    });
   }
 
   Future<Map<String, dynamic>> _putJson(
     String path,
     Map<String, dynamic> body,
   ) async {
-    try {
-      final r = await http
-          .put(
-            _uri(path),
-            headers: _headers(),
-            body: jsonEncode(body),
-          )
-          .timeout(timeoutEscrita);
-      if (r.statusCode == 401 || r.statusCode == 403) {
-        throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
-      }
-      if (r.statusCode < 200 || r.statusCode >= 300) {
-        throw LanApiException(
-          'API PUT $path HTTP ${r.statusCode}: ${r.body}',
-        );
-      }
-      if (r.body.trim().isEmpty) {
+    return _retrySeStoreIndisponivel(() async {
+      try {
+        final r = await http
+            .put(
+              _uri(path),
+              headers: _headers(),
+              body: jsonEncode(body),
+            )
+            .timeout(timeoutEscrita);
+        if (r.statusCode == 401 || r.statusCode == 403) {
+          throw LanApiException('API recusou o token (HTTP ${r.statusCode}).');
+        }
+        if (r.statusCode < 200 || r.statusCode >= 300) {
+          throw _excecaoHttp(r, 'PUT', path);
+        }
+        if (r.body.trim().isEmpty) {
+          onSucessoRede?.call();
+          return {'ok': true};
+        }
+        final d = jsonDecode(r.body);
+        if (d is! Map) {
+          onSucessoRede?.call();
+          return {'ok': true};
+        }
         onSucessoRede?.call();
-        return {'ok': true};
+        return Map<String, dynamic>.from(d);
+      } catch (e) {
+        _rethrowRede(e, path, 'PUT');
       }
-      final d = jsonDecode(r.body);
-      if (d is! Map) {
-        onSucessoRede?.call();
-        return {'ok': true};
-      }
-      onSucessoRede?.call();
-      return Map<String, dynamic>.from(d);
-    } catch (e) {
-      _rethrowRede(e, path, 'PUT');
-    }
+    });
   }
 
   /// Presenca dos terminais/celular na API (mesmo snapshot do rodape do servidor).
   Future<Map<String, dynamic>?> obterPresenca() async {
     if (!configurado) return null;
     try {
-      final m = await _getJson('/api/presence');
+      final m = await _getJson(
+        '/api/presence',
+        retryStoreIndisponivel: false,
+      );
       if (m['activeCount'] is! num && m['ok'] != true) return null;
       return m;
     } catch (_) {
@@ -1135,6 +1206,8 @@ class LanApiClient {
     String? filtroFiscal,
     String? busca,
     String? canceladaPor,
+    DateTime? sessaoCaixaInicioUtc,
+    DateTime? sessaoCaixaFimUtc,
   }) async {
     try {
       final r = await http
@@ -1145,6 +1218,10 @@ class LanApiClient {
               if (offset > 0) 'offset': '$offset',
               if (desde != null) 'desde': desde.toUtc().toIso8601String(),
               if (ate != null) 'ate': ate.toUtc().toIso8601String(),
+              if (sessaoCaixaInicioUtc != null)
+                'sessaoInicio': sessaoCaixaInicioUtc.toUtc().toIso8601String(),
+              if (sessaoCaixaFimUtc != null)
+                'sessaoFim': sessaoCaixaFimUtc.toUtc().toIso8601String(),
               if (clienteId != null && clienteId > 0) 'clienteId': '$clienteId',
               if (filtroCancelamento != null &&
                   filtroCancelamento.trim().isNotEmpty)
@@ -2874,11 +2951,17 @@ class LanApiClient {
   }
 
   Future<List<Map<String, dynamic>>> listarHistoricoFechamentoCaixa({
-    int limit = 300,
+    int limit = 40,
+    int offset = 0,
+    DateTime? desde,
   }) async {
     final m = await _getJson(
       '/api/relatorios/historico-fechamento-caixa',
-      query: {'limit': '$limit'},
+      query: {
+        'limit': '${limit.clamp(1, 200)}',
+        if (offset > 0) 'offset': '$offset',
+        if (desde != null) 'desde': desde.toUtc().toIso8601String(),
+      },
     );
     final list = m['items'];
     if (list is! List) return [];
@@ -2886,6 +2969,16 @@ class LanApiClient {
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
+  }
+
+  Future<int> contarHistoricoFechamentoCaixa({DateTime? desde}) async {
+    final m = await _getJson(
+      '/api/relatorios/historico-fechamento-caixa/contagem',
+      query: {
+        if (desde != null) 'desde': desde.toUtc().toIso8601String(),
+      },
+    );
+    return (m['total'] as num?)?.toInt() ?? 0;
   }
 
   Future<void> registrarAuditoriaCaixa({

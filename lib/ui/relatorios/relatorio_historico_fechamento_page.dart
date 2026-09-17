@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/api/lan_api_client.dart';
 import '../../data/caixa_auditoria_repository.dart';
 import '../../data/objectbox.dart';
+import '../../domain/sessao_caixa_referencia.dart';
+import '../shell/main_menu_deps.dart';
 import '../widgets/lan_api_feedback.dart';
+import 'extrato_sessao_caixa_page.dart';
 import 'relatorio_export_util.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
 
@@ -49,7 +54,9 @@ class _RelatorioHistoricoFechamentoPageState
     try {
       final List<CaixaAuditoriaRegistro> lista;
       if (_viaApi) {
-        final raw = await widget.lanApiClient!.listarHistoricoFechamentoCaixa();
+        final raw = await widget.lanApiClient!.listarHistoricoFechamentoCaixa(
+          limit: 500,
+        );
         lista = raw.map(CaixaAuditoriaRegistro.fromMap).toList(growable: false);
       } else {
         lista = await CaixaAuditoriaRepository(db: widget.objectBox)
@@ -122,6 +129,32 @@ class _RelatorioHistoricoFechamentoPageState
     );
   }
 
+  Future<void> _abrirExtrato(CaixaAuditoriaRegistro r, int indiceLista) async {
+    final deps = MainMenuDeps.maybeOf(context);
+    if (deps == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Dependencias do menu nao disponiveis.')),
+      );
+      return;
+    }
+    final sessao = SessaoCaixaReferencia.montarSessaoFechamento(
+      fechamento: r,
+      numero: _fechamentos.length - indiceLista,
+      fechamentosContexto: _fechamentos,
+    );
+    await abrirExtratoSessaoCaixa(
+      context,
+      sessao: sessao,
+      vendaRepository: deps.vendaRepository,
+      clienteRepository: deps.clienteRepository,
+      configuracoesService: deps.configuracoesService,
+      printService: deps.printService,
+      objectBox: widget.objectBox ?? deps.objectBox,
+      lanApiClient: widget.lanApiClient ?? deps.lanApiClient,
+    );
+  }
+
   Future<void> _detalhe(CaixaAuditoriaRegistro r) async {
     final d = r.detalhes;
     if (!mounted) return;
@@ -189,6 +222,15 @@ class _RelatorioHistoricoFechamentoPageState
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Fechar'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              final idx = _fechamentos.indexOf(r);
+              unawaited(_abrirExtrato(r, idx >= 0 ? idx : 0));
+            },
+            icon: const Icon(Icons.receipt_long_outlined, size: 18),
+            label: const Text('Ver extrato'),
           ),
         ],
       ),
@@ -277,6 +319,7 @@ class _RelatorioHistoricoFechamentoPageState
                             ),
                           ),
                           onTap: () => _detalhe(r),
+                          onLongPress: () => unawaited(_abrirExtrato(r, i)),
                         );
                       },
                     ),

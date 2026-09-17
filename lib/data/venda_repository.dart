@@ -458,6 +458,8 @@ class FiltroListagemVendas {
     this.filtroFiscal = 'todos',
     this.clienteId,
     this.vendedorId,
+    this.sessaoCaixaInicioUtc,
+    this.sessaoCaixaFimUtc,
   });
 
   final String textoBusca;
@@ -480,6 +482,12 @@ class FiltroListagemVendas {
   final String filtroFiscal;
   final int? clienteId;
   final int? vendedorId;
+
+  /// Quando informado, restringe as vendas ao turno de caixa (momento de finalizacao).
+  final DateTime? sessaoCaixaInicioUtc;
+  final DateTime? sessaoCaixaFimUtc;
+
+  bool get temFiltroSessaoCaixa => sessaoCaixaInicioUtc != null;
 }
 
 /// Pagina da listagem de vendas + total de linhas que obedecem ao [FiltroListagemVendas].
@@ -954,6 +962,57 @@ class VendaRepository {
     return out;
   }
 
+  /// Janela larga (data/finalizada/cupom) sem impor status — para listagem + sessao.
+  Condition<Venda> _condicaoJanelaFinalizacaoCaixa({
+    DateTime? inicio,
+    DateTime? fim,
+  }) {
+    if (inicio == null && fim == null) {
+      return Venda_.id.greaterThan(0);
+    }
+    final iniPad = inicio?.toUtc().subtract(const Duration(hours: 14));
+    final fimPad = fim?.toUtc().add(const Duration(hours: 14));
+    Condition<Venda> porFinalizada;
+    Condition<Venda> porData;
+    Condition<Venda> porCupom;
+    if (iniPad != null && fimPad != null) {
+      porFinalizada = Venda_.finalizadaEm
+          .greaterOrEqualDate(iniPad)
+          .and(Venda_.finalizadaEm.lessOrEqualDate(fimPad));
+      porData = Venda_.data
+          .greaterOrEqualDate(iniPad)
+          .and(Venda_.data.lessOrEqualDate(fimPad));
+      porCupom = Venda_.cupomNaoFiscalEmitidoEm
+          .greaterOrEqualDate(iniPad)
+          .and(Venda_.cupomNaoFiscalEmitidoEm.lessOrEqualDate(fimPad));
+    } else if (iniPad != null) {
+      porFinalizada = Venda_.finalizadaEm.greaterOrEqualDate(iniPad);
+      porData = Venda_.data.greaterOrEqualDate(iniPad);
+      porCupom = Venda_.cupomNaoFiscalEmitidoEm.greaterOrEqualDate(iniPad);
+    } else {
+      porFinalizada = Venda_.finalizadaEm.lessOrEqualDate(fimPad!);
+      porData = Venda_.data.lessOrEqualDate(fimPad);
+      porCupom = Venda_.cupomNaoFiscalEmitidoEm.lessOrEqualDate(fimPad);
+    }
+    return porFinalizada.or(porData).or(porCupom);
+  }
+
+  List<Venda> _aplicarFiltroMomentoSessaoCaixa(
+    List<Venda> vendas,
+    FiltroListagemVendas f,
+  ) {
+    if (!f.temFiltroSessaoCaixa) return vendas;
+    return vendas
+        .where(
+          (v) => _vendaFinalizadaNoPeriodoCaixa(
+            v,
+            inicio: f.sessaoCaixaInicioUtc,
+            fim: f.sessaoCaixaFimUtc,
+          ),
+        )
+        .toList();
+  }
+
   /// Janela larga no ObjectBox; o corte fino e [_vendaFinalizadaNoPeriodoCaixa].
   Condition<Venda> _condicaoCandidatasCaixaPeriodo({
     DateTime? inicio,
@@ -1146,9 +1205,17 @@ class VendaRepository {
         c = c & Venda_.canceladaPor.equals(u, caseSensitive: false);
       }
     }
-    final periodo = _condicaoPeriodoListagem(f);
-    if (periodo != null) {
-      c = c & periodo;
+    if (f.temFiltroSessaoCaixa) {
+      c = c &
+          _condicaoJanelaFinalizacaoCaixa(
+            inicio: f.sessaoCaixaInicioUtc,
+            fim: f.sessaoCaixaFimUtc,
+          );
+    } else {
+      final periodo = _condicaoPeriodoListagem(f);
+      if (periodo != null) {
+        c = c & periodo;
+      }
     }
     if (f.formaPagamento != 'todos') {
       c = c & Venda_.formaPagamento.equals(f.formaPagamento);
@@ -1362,6 +1429,9 @@ class VendaRepository {
         f,
       ).length;
     }
+    if (f.temFiltroSessaoCaixa) {
+      return _listarListagemVendasFiltradasSessao(f).length;
+    }
     final cond = _condicaoListagemVendas(f);
     final query = _db.vendaBox.query(cond).build();
     try {
@@ -1384,6 +1454,17 @@ class VendaRepository {
         _listarCandidatasListagemFiscal(f),
         f,
       );
+      final total = filtradas.length;
+      final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
+      final vendas = filtradas.skip(offset).take(limite).toList();
+      return ListagemVendasPagina(
+        vendas: vendas,
+        total: total,
+        totalValor: totalValor,
+      );
+    }
+    if (f.temFiltroSessaoCaixa) {
+      final filtradas = _listarListagemVendasFiltradasSessao(f);
       final total = filtradas.length;
       final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
       final vendas = filtradas.skip(offset).take(limite).toList();
@@ -1424,10 +1505,24 @@ class VendaRepository {
         f,
       );
     }
+    if (f.temFiltroSessaoCaixa) {
+      return _listarListagemVendasFiltradasSessao(f);
+    }
     final cond = _condicaoListagemVendas(f);
     final query = _queryListagemVendasOrdenada(cond, f);
     try {
       return _sanitizarListagemVendas(query.find());
+    } finally {
+      query.close();
+    }
+  }
+
+  List<Venda> _listarListagemVendasFiltradasSessao(FiltroListagemVendas f) {
+    final cond = _condicaoListagemVendas(f);
+    final query = _queryListagemVendasOrdenada(cond, f);
+    try {
+      final brutas = _sanitizarListagemVendas(query.find());
+      return _aplicarFiltroMomentoSessaoCaixa(brutas, f);
     } finally {
       query.close();
     }

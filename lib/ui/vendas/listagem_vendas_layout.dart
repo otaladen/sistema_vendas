@@ -8,12 +8,12 @@ abstract final class ListagemVendasLayout {
 
   static const double colControle = 52;
   static const double colDocumento = 168;
-  static const double colStatus = 176;
-  static const double colData = 132;
-  static const int flexCliente = 4;
-  static const int flexVendedor = 2;
-  static const double colPagamento = 148;
-  static const double colEntrega = 152;
+  static const double colStatus = 158;
+  static const double colData = 120;
+  static const int flexCliente = 3;
+  static const double colVendedor = 136;
+  static const double colPagamento = 138;
+  static const double colEntrega = 142;
   static const double colTotal = 116;
   static const double colAcoes = 40;
 }

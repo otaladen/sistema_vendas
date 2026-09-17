@@ -7,6 +7,7 @@ import '../domain/sessao_operacional_guard.dart';
 import 'app_config_repository.dart';
 import 'backup_pos_execucao_service.dart';
 import 'objectbox.dart';
+import '../services/app_boot_log.dart';
 import '../services/auditoria_registrar.dart';
 import 'local_backup_service.dart';
 import 'sync/lan_sync_scheduler.dart';
@@ -32,8 +33,8 @@ class AutoBackupService {
     if (_emExecucao) return;
     // Celular: backup automatico fecha o ObjectBox e congela o app.
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) return;
-    // Fecha o ObjectBox: nao interromper PDV aberto (use backup agendado headless).
-    if (SessaoOperacionalGuard.pdvEmUso) return;
+    // Fecha o ObjectBox: nao interromper PDV local nem terminais na API.
+    if (SessaoOperacionalGuard.operacaoCriticaAtiva) return;
     final config = await repository.carregarEmpresaConfig();
     if (!config.backupAutomaticoAtivo) return;
     final pasta = config.backupAutomaticoPasta.trim();
@@ -70,11 +71,20 @@ class AutoBackupService {
 
     if (objectBox == null) return;
 
-    // Revalida: pode ter aberto PDV durante a checagem de config.
-    if (SessaoOperacionalGuard.pdvEmUso) return;
+    // Revalida: pode ter aberto PDV / terminal durante a checagem de config.
+    if (SessaoOperacionalGuard.operacaoCriticaAtiva) {
+      AppBootLog.info(
+        'auto_backup',
+        'Adiado apos revalidar sessao critica '
+        '(pdvEmUso=${SessaoOperacionalGuard.pdvEmUso}, '
+        'terminaisWs=${SessaoOperacionalGuard.terminaisConectados})',
+      );
+      return;
+    }
 
     _emExecucao = true;
     try {
+      AppBootLog.info('auto_backup', 'Iniciando copia (fecha ObjectBox)');
       // Reserva o horario antes da copia longa: se ultimoMs estava 0 (ou a
       // gravacao atrasar), o timer de 5 min nao dispara outra copia em paralelo.
       final reservadoMs = DateTime.now().millisecondsSinceEpoch;

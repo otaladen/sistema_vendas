@@ -192,15 +192,13 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                         onTap: _alternarOrdenacao,
                       ),
                     ),
-                    Expanded(
-                      flex: ListagemVendasLayout.flexVendedor,
-                      child: _CabOrdenavel(
-                        texto: 'Vendedor',
-                        coluna: ListagemVendasColuna.vendedor,
-                        ativa: _coluna,
-                        ascendente: _ascendente,
-                        onTap: _alternarOrdenacao,
-                      ),
+                    _CabOrdenavel(
+                      largura: ListagemVendasLayout.colVendedor,
+                      texto: 'Vendedor',
+                      coluna: ListagemVendasColuna.vendedor,
+                      ativa: _coluna,
+                      ascendente: _ascendente,
+                      onTap: _alternarOrdenacao,
                     ),
                     _CabOrdenavel(
                       largura: ListagemVendasLayout.colPagamento,
@@ -333,12 +331,10 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                                 ),
                               ),
                             ),
-                            Expanded(
-                              flex: ListagemVendasLayout.flexVendedor,
-                              child: Text(
-                                item.vendedor,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                            SizedBox(
+                              width: ListagemVendasLayout.colVendedor,
+                              child: _TextoColunaComTooltip(
+                                texto: item.vendedor,
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                 ),

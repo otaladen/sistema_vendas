@@ -18,6 +18,8 @@ import 'shell/main_menu_deps.dart';
 import '../domain/cancelada_por_rotulo.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/listagem_vendas_dedupe.dart';
+import '../domain/sessao_caixa_referencia.dart';
+import 'vendas/sessao_caixa_picker_dialog.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/venda_finalizacao_caixa_helper.dart';
 import '../domain/pagamento_orcamento.dart';
@@ -125,6 +127,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   String _filtroFiscal = 'todos';
   String _filtroCancelamento = 'ativas';
   String _canceladaPorFiltro = 'todos';
+  SessaoCaixaReferencia? _sessaoCaixaSelecionada;
 
   List<Venda> _resultados = [];
 
@@ -165,6 +168,26 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_pesquisar());
     });
+  }
+
+  Future<void> _escolherSessaoCaixa() async {
+    final deps = MainMenuDeps.maybeOf(context);
+    final escolhida = await showSessaoCaixaPickerDialog(
+      context,
+      objectBox: deps?.objectBox,
+      lanApiClient: deps?.lanApiClient,
+      selecionadaAtual: _sessaoCaixaSelecionada,
+    );
+    if (!mounted) return;
+    setState(() => _sessaoCaixaSelecionada = escolhida);
+    unawaited(_pesquisar());
+  }
+
+  String _rotuloSessaoCaixa(SessaoCaixaReferencia s) {
+    final ab = _dataHora.format(s.aberturaEm.toLocal());
+    final op = s.operador.isEmpty ? 'Sem operador' : s.operador;
+    final status = s.aberta ? 'aberta' : 'fechada';
+    return 'Sessao #${s.numero} · $ab · $op ($status)';
   }
 
   @override
@@ -1209,16 +1232,20 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   FiltroListagemVendas _montarFiltroListagemAtual() {
     final range = _limitesPeriodo();
+    final sessao = _sessaoCaixaSelecionada;
+    final intervaloSessao = sessao?.intervaloFiltroVendasUtc();
     return FiltroListagemVendas(
       textoBusca: _buscaController.text,
-      dataInicioUtc: range.$1?.toUtc(),
-      dataFimUtc: range.$2?.toUtc(),
+      dataInicioUtc: sessao == null ? range.$1?.toUtc() : null,
+      dataFimUtc: sessao == null ? range.$2?.toUtc() : null,
       filtroCancelamento: _filtroCancelamento,
       canceladaPorFiltro: _canceladaPorFiltro,
       formaPagamento: _formaPagamento,
       tipoEntrega: _tipoEntrega,
       entregaPendente: _entregaPendente,
       filtroFiscal: _filtroFiscal,
+      sessaoCaixaInicioUtc: intervaloSessao?.$1,
+      sessaoCaixaFimUtc: intervaloSessao?.$2,
     );
   }
 
@@ -1233,6 +1260,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       _filtroFiscal = 'todos';
       _filtroCancelamento = 'ativas';
       _canceladaPorFiltro = 'todos';
+      _sessaoCaixaSelecionada = null;
       _buscaController.clear();
     });
     _pesquisar();
@@ -1240,6 +1268,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
 
   int _contarFiltrosAtivos() {
     var n = 0;
+    if (_sessaoCaixaSelecionada != null) n++;
     if (_periodoPreset != 'ultimos_30') n++;
     if (_canceladaPorFiltro != 'todos') n++;
     if (_formaPagamento != 'todos') n++;
@@ -1817,6 +1846,47 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                     filtrosAvancados: (ctx, constraints) =>
                         ListagemVendasFiltrosGrade(
                           children: [
+                            InputDecorator(
+                              decoration: InputDecoration(
+                                labelText: 'Sessao do Caixa',
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _sessaoCaixaSelecionada == null
+                                          ? 'Todas as sessoes'
+                                          : _rotuloSessaoCaixa(
+                                              _sessaoCaixaSelecionada!,
+                                            ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Escolher sessao',
+                                    icon: const Icon(Icons.list_alt),
+                                    onPressed: _escolherSessaoCaixa,
+                                  ),
+                                  if (_sessaoCaixaSelecionada != null)
+                                    IconButton(
+                                      tooltip: 'Remover filtro de sessao',
+                                      icon: const Icon(Icons.close, size: 20),
+                                      onPressed: () {
+                                        setState(
+                                          () => _sessaoCaixaSelecionada = null,
+                                        );
+                                        _agendarPesquisa();
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ),
                             DropdownButtonFormField<String>(
                               initialValue: _periodoPreset,
                               isExpanded: true,

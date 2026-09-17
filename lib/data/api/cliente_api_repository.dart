@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../domain/cliente_busca_util.dart';
 import '../../model/cliente.dart';
 import 'lan_api_client.dart';
 import 'lan_api_event_hub.dart';
@@ -18,8 +19,6 @@ class ClienteApiRepository extends ChangeNotifier {
       throw LanApiException(LanApiEventHub.msgServidorOffline);
     }
   }
-
-  static String _somenteDigitos(String s) => s.replaceAll(RegExp(r'\D'), '');
 
   void _mesclarNaCache(Iterable<Cliente> items) {
     for (final c in items) {
@@ -111,34 +110,17 @@ class ClienteApiRepository extends ChangeNotifier {
   /// Filtro no cache hidratado (nome, documento com/sem mascara, telefone).
   List<Cliente> pesquisar(String termo) {
     if (_offline) return const [];
-    final t = termo.trim().toLowerCase();
+    final t = termo.trim();
     if (t.isEmpty) return listarPaginado(limit: 80);
-    final digitos = _somenteDigitos(termo);
-    return _lista.where((c) {
-      final campos = [
-        c.nomeRazao,
-        c.nomeFantasia,
-        c.documento,
-        c.telefone,
-        c.whatsapp,
-        c.email,
-        c.cidade,
-        c.codigoInterno,
-      ].map((e) => e.toLowerCase());
-      if (campos.any((campo) => campo.contains(t))) return true;
-      if (digitos.isEmpty) return false;
-      final nums = [
-        c.documento,
-        c.telefone,
-        c.whatsapp,
-        c.cep,
-      ].map(_somenteDigitos);
-      return nums.any((n) => n.contains(digitos));
-    }).toList();
+    return filtrarClientesPorTermo(_lista, t);
   }
 
   /// Busca no PC1 (`GET /api/clientes?q=`) e mescla no cache.
-  Future<List<Cliente>> pesquisarRemoto(String termo, {int limit = 80}) async {
+  Future<List<Cliente>> pesquisarRemoto(
+    String termo, {
+    int limit = 80,
+    bool notificarUi = true,
+  }) async {
     _exigirServidorOnline();
     final t = termo.trim();
     if (t.isEmpty) {
@@ -148,7 +130,7 @@ class ClienteApiRepository extends ChangeNotifier {
     _mesclarNaCache(items);
     // Reforça match por digitos (CPF/CNPJ) no cache mesclado.
     final locais = pesquisar(t);
-    notifyListeners();
+    if (notificarUi) notifyListeners();
     if (locais.length >= items.length) return locais.take(limit).toList();
     // Une remotos + locais digit-match sem duplicar.
     final ids = <int>{};

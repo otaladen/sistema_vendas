@@ -11,6 +11,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../data/cliente_repository.dart';
 import '../data/objectbox.dart';
+import '../data/objectbox_lifecycle_hub.dart';
 import '../data/produto_repository.dart';
 import '../data/sync/caixa_local_refresh_hub.dart';
 import '../data/sync/entrega_local_refresh_hub.dart';
@@ -21,14 +22,16 @@ import '../data/sync/sync_refresh_hub.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import '../domain/catalogo_produto_revision.dart';
+import '../domain/sessao_operacional_guard.dart';
 import 'lan_api/lan_api_deps.dart';
 import 'lan_api/lan_api_json.dart';
+import 'lan_api/lan_api_store_guard.dart';
 import 'lan_api/routes/register_all_routes.dart';
 
 /// API HTTP embutida no Flutter do PC Servidor (ObjectBox local).
 ///
 /// Porta padrao 8788.
-class LanApiServer {
+class LanApiServer implements ObjectBoxStoreLifecycleListener {
   LanApiServer({
     required this.objectBox,
     required this.produtoRepository,
@@ -95,6 +98,7 @@ class LanApiServer {
   }
 
   void _publicarPresenca() {
+    SessaoOperacionalGuard.atualizarTerminaisWs(_ws.length);
     final snap = presencaSnapshot();
     try {
       SyncPresenceHub.instance.aplicarMap(snap);
@@ -116,10 +120,18 @@ class LanApiServer {
         );
 
     router.get('/api/health', (Request req) {
+      var storeAberta = true;
+      try {
+        storeAberta = !objectBox.store.isClosed() &&
+            !ObjectBoxLifecycleHub.acessoLocalSuspenso;
+      } catch (_) {
+        storeAberta = false;
+      }
       return lanApiJson({
         'ok': true,
         'service': 'sistema_vendas_api',
         'authLogin': true,
+        'storeAberta': storeAberta,
       });
     });
 
@@ -187,6 +199,7 @@ class LanApiServer {
     final handler = Pipeline()
         .addMiddleware(_catchErrors())
         .addMiddleware(_cors())
+        .addMiddleware(_storeDisponivel())
         .addMiddleware(_auth())
         .addHandler(router.call);
 
@@ -199,6 +212,7 @@ class LanApiServer {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       _server = await shelf_io.serve(handler, InternetAddress.anyIPv4, porta);
     }
+    ObjectBoxLifecycleHub.registrar(this);
   }
 
   static Future<void> _tentarLiberarPortaWindows(int porta) async {
@@ -223,15 +237,30 @@ class LanApiServer {
   }
 
   Future<void> parar() async {
+    ObjectBoxLifecycleHub.remover(this);
     for (final c in List<_WsClienteApi>.from(_ws)) {
       try {
         await c.channel.sink.close();
       } catch (_) {}
     }
     _ws.clear();
+    SessaoOperacionalGuard.atualizarTerminaisWs(0);
     _publicarPresenca();
     await _server?.close(force: true);
     _server = null;
+  }
+
+  @override
+  Future<void> onObjectBoxClosingForCopy() async {
+    notificarEvento('store_suspended', {
+      'code': LanApiStoreGuard.code,
+      'error': LanApiStoreGuard.mensagem,
+    });
+  }
+
+  @override
+  void onObjectBoxReopenedAfterCopy() {
+    notificarEvento('store_resumed', {'ok': true});
   }
 
   void _tratarMensagemWs(_WsClienteApi cliente, Object? raw) {
@@ -294,6 +323,34 @@ class LanApiServer {
     }
   }
 
+  /// Recusa rotas que leem ObjectBox enquanto o banco esta fechado para backup.
+  /// Health, presence e WebSocket continuam para os terminais nao marcarem offline.
+  Middleware _storeDisponivel() {
+    return (inner) {
+      return (request) async {
+        if (request.method == 'OPTIONS') {
+          return inner(request);
+        }
+        if (LanApiStoreGuard.caminhoLivreDuranteBackup(request.url.path)) {
+          return inner(request);
+        }
+        if (_storeIndisponivel) {
+          return lanApiJson(LanApiStoreGuard.bodyJson(), status: 503);
+        }
+        return inner(request);
+      };
+    };
+  }
+
+  bool get _storeIndisponivel {
+    if (ObjectBoxLifecycleHub.acessoLocalSuspenso) return true;
+    try {
+      return objectBox.store.isClosed();
+    } catch (_) {
+      return true;
+    }
+  }
+
   /// Captura excecoes nao tratadas nas rotas e devolve JSON 500 limpo
   /// (sem pilha interna no corpo da resposta).
   Middleware _catchErrors() {
@@ -306,6 +363,9 @@ class LanApiServer {
         } catch (e, st) {
           debugPrint('LanApiServer erro nao tratado [${request.method} '
               '${request.requestedUri.path}]: $e\n$st');
+          if (LanApiStoreGuard.erroStoreFechada(e)) {
+            return lanApiJson(LanApiStoreGuard.bodyJson(), status: 503);
+          }
           return lanApiJson(
             {
               'ok': false,

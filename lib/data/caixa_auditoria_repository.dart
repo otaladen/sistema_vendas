@@ -177,7 +177,96 @@ class CaixaAuditoriaRepository {
   }
 
   Future<List<CaixaAuditoriaRegistro>> listarFechamentos() async {
-    return (await listarTodos()).where((r) => r.ehFechamento).toList();
+    final fechamentos =
+        (await listarTodos()).where((r) => r.ehFechamento).toList();
+    return deduplicarRegistros(fechamentos);
+  }
+
+  /// Aberturas de caixa desde [desde] (para parear com fechamentos).
+  Future<List<CaixaAuditoriaRegistro>> listarAberturasCaixa({
+    DateTime? desde,
+  }) async {
+    final db = _db;
+    if (db != null) {
+      try {
+        var cond = CaixaAuditoriaEvento_.tipo.equals('abertura_caixa');
+        if (desde != null) {
+          cond = cond.and(
+            CaixaAuditoriaEvento_.dataHora.greaterOrEqualDate(desde.toUtc()),
+          );
+        }
+        final q = db.caixaAuditoriaEventoBox
+            .query(cond)
+            .order(CaixaAuditoriaEvento_.dataHora, flags: Order.descending)
+            .build();
+        try {
+          return q.find().map(_deEntidade).toList();
+        } finally {
+          q.close();
+        }
+      } catch (_) {}
+    }
+    var todos = (await listarTodos()).where((r) => r.evento == 'abertura_caixa');
+    if (desde != null) {
+      final d = desde.toUtc();
+      todos = todos.where((r) => !r.em.toUtc().isBefore(d));
+    }
+    return todos.toList();
+  }
+
+  /// Fechamentos mais recentes primeiro, com paginacao (ObjectBox quando disponivel).
+  Future<List<CaixaAuditoriaRegistro>> listarFechamentosPaginado({
+    int offset = 0,
+    int limit = 40,
+    DateTime? desde,
+  }) async {
+    final lim = limit.clamp(1, 200);
+    final off = offset < 0 ? 0 : offset;
+    var todos = await listarFechamentos();
+    if (desde != null) {
+      final d = desde.toUtc();
+      todos = todos.where((r) => !r.em.toUtc().isBefore(d)).toList();
+    }
+    if (off >= todos.length) return const [];
+    final fim = (off + lim) > todos.length ? todos.length : off + lim;
+    return todos.sublist(off, fim);
+  }
+
+  Future<int> contarFechamentos({DateTime? desde}) async {
+    var todos = await listarFechamentos();
+    if (desde != null) {
+      final d = desde.toUtc();
+      todos = todos.where((r) => !r.em.toUtc().isBefore(d)).toList();
+    }
+    return todos.length;
+  }
+
+  /// Chave de deduplicacao (fechamentos repetidos por sync/retry).
+  static String chaveLogico(CaixaAuditoriaRegistro r) {
+    if (r.evento == 'fechamento_caixa') {
+      final d = r.detalhes;
+      final ab = (d['aberturaEm'] ?? '').toString().trim();
+      final op =
+          (d['operador']?.toString() ?? r.operadorCaixa).trim().toLowerCase();
+      final local = r.em.toUtc();
+      final fechMin =
+          '${local.year}-${local.month}-${local.day}-${local.hour}-${local.minute}';
+      final term = (d['sessaoFechada'] ?? '').toString().trim();
+      final abRef = ab.isNotEmpty ? ab : fechMin;
+      return 'fech|$abRef|$fechMin|$op|$term';
+    }
+    return _chave(r);
+  }
+
+  static List<CaixaAuditoriaRegistro> deduplicarRegistros(
+    Iterable<CaixaAuditoriaRegistro> items,
+  ) {
+    final seen = <String>{};
+    final out = <CaixaAuditoriaRegistro>[];
+    for (final r in items) {
+      if (seen.add(chaveLogico(r))) out.add(r);
+    }
+    return out;
   }
 
   Future<List<Map<String, dynamic>>> listarTodosComoMapas() async {
@@ -263,11 +352,11 @@ class CaixaAuditoriaRepository {
     final saida = <CaixaAuditoriaRegistro>[];
     final vistos = <String>{};
     for (final r in objectBox) {
-      final k = _chave(r);
+      final k = chaveLogico(r);
       if (vistos.add(k)) saida.add(r);
     }
     for (final r in prefs) {
-      final k = _chave(r);
+      final k = chaveLogico(r);
       if (vistos.add(k)) saida.add(r);
     }
     return saida;

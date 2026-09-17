@@ -299,11 +299,19 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
     final cancelamento =
         filtroCancelamento.isEmpty ? 'ativas' : filtroCancelamento;
     final busca = (q['busca'] ?? q['q'] ?? '').trim();
+    final sessaoInicioRaw = (q['sessaoInicio'] ?? '').trim();
+    final sessaoFimRaw = (q['sessaoFim'] ?? '').trim();
+    final sessaoInicio = sessaoInicioRaw.isEmpty
+        ? null
+        : DateTime.tryParse(sessaoInicioRaw)?.toUtc();
+    final sessaoFim = sessaoFimRaw.isEmpty
+        ? null
+        : DateTime.tryParse(sessaoFimRaw)?.toUtc();
     final pagina = d.vendaRepository.listarListagemVendasPaginaComTotal(
       FiltroListagemVendas(
         textoBusca: busca,
-        dataInicioUtc: desde,
-        dataFimUtc: ate,
+        dataInicioUtc: sessaoInicio == null ? desde : null,
+        dataFimUtc: sessaoInicio == null ? ate : null,
         filtroCancelamento: cancelamento,
         canceladaPorFiltro: (q['canceladaPor'] ?? 'todos').trim().isEmpty
             ? 'todos'
@@ -320,6 +328,8 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         filtroFiscal: (q['filtroFiscal'] ?? 'todos').trim().isEmpty
             ? 'todos'
             : (q['filtroFiscal'] ?? 'todos').trim(),
+        sessaoCaixaInicioUtc: sessaoInicio,
+        sessaoCaixaFimUtc: sessaoFim,
       ),
       offset: offset,
       limite: limit,

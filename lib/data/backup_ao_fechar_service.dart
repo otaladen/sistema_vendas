@@ -53,6 +53,7 @@ class BackupAoFecharService {
 
     _emExecucao = true;
     try {
+      AppBootLog.info('backup_ao_fechar', 'Iniciando copia (fecha ObjectBox)');
       final escopo = await repository.carregarBackupAutomaticoEscopo();
       final resultado = await LocalBackupService.executar(
         destinoRaiz: destino,

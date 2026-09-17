@@ -31,6 +31,7 @@ import '../../model/recebimento_fiado.dart';
 import '../shell/main_menu_deps.dart';
 import '../shell/app_shell_aba_visibilidade.dart';
 import '../../domain/auditoria_catalogo.dart';
+import '../../domain/cliente_busca_util.dart';
 import '../../domain/caixa_troco_dinheiro_helper.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
@@ -55,6 +56,7 @@ import '../../domain/usuario_permissao_helper.dart';
 import '../../domain/pagamento_orcamento.dart';
 import '../../domain/vale_credito.dart';
 import '../../domain/leitura_parcial_caixa.dart';
+import '../../domain/sessao_caixa_referencia.dart';
 import '../../domain/plano_fiado.dart';
 import '../../domain/ultimas_vendas_finalizadas_ordenacao.dart';
 import '../../model/caixa_sessao.dart';
@@ -106,6 +108,7 @@ import 'widgets/caixa_cobranca_painel.dart';
 import 'widgets/caixa_pos_venda_fiscal_painel.dart';
 import '../theme/app_semantic_colors.dart';
 import '../vendas/cancelar_venda_ui.dart';
+import '../relatorios/extrato_sessao_caixa_page.dart';
 import 'widgets/caixa_importar_orcamento_field.dart';
 import 'caixa_calculadora_somador_panel.dart';
 
@@ -3187,6 +3190,43 @@ class _CaixaPageState extends State<CaixaPage>
     return DateFormat('dd/MM/yyyy HH:mm').format(abertura.toLocal());
   }
 
+  Future<void> _abrirExtratoSessaoCaixaAtual() async {
+    if (!_caixaAberto || _aberturaCaixaEm == null) {
+      if (!mounted) return;
+      CaixaFeedback.aviso(
+        context,
+        'Abra o caixa para ver o extrato da sessao.',
+      );
+      return;
+    }
+    final deps = MainMenuDeps.maybeOf(context);
+    final sessao = SessaoCaixaReferencia(
+      numero: 0,
+      chave: SessaoCaixaReferencia.gerarChave(
+        abertura: _aberturaCaixaEm!,
+        operador: _operadorCaixa,
+        terminalId: _terminalIdParaSessaoCaixa(),
+      ),
+      aberturaEm: _aberturaCaixaEm!,
+      operador: _operadorCaixa,
+      terminalId: _terminalIdParaSessaoCaixa(),
+      fundoTroco: _fundoTrocoAbertura,
+      suprimentos: _totalSuprimentos,
+      sangrias: _totalSangrias,
+      aberta: true,
+    );
+    await abrirExtratoSessaoCaixa(
+      context,
+      sessao: sessao,
+      vendaRepository: widget.vendaRepository,
+      clienteRepository: widget.clienteRepository,
+      configuracoesService: widget.configuracoesService,
+      printService: widget.printService,
+      objectBox: deps?.objectBox ?? _objectBoxLocal(),
+      lanApiClient: deps?.lanApiClient,
+    );
+  }
+
   Future<void> _mostrarLeituraParcial() async {
     if (!widget.podeLeituraParcialCaixa) return;
     if (!_caixaAberto) {
@@ -3658,6 +3698,8 @@ class _CaixaPageState extends State<CaixaPage>
       'fechamento_caixa',
       detalhes: {
         'operador': operadorFechamento,
+        if (aberturaFechamento != null)
+          'aberturaEm': aberturaFechamento.toUtc().toIso8601String(),
         'fundoTroco': fundoAbertura,
         'suprimentos': suprimentos,
         'sangrias': sangrias,
@@ -6970,32 +7012,54 @@ class _CaixaPageState extends State<CaixaPage>
         Timer? debounceApi;
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            List<Cliente> filtrarClientes(String termo) {
+              final t = termo.trim();
+              try {
+                if (t.isEmpty) {
+                  return listaClientesDeRepositorio(
+                    widget.clienteRepository.listarPaginado(
+                      limit: 60,
+                      somenteAtivos: true,
+                    ),
+                  );
+                }
+                return filtrarClientesPorTermo(
+                  listaClientesDeRepositorio(
+                    widget.clienteRepository.pesquisar(t),
+                  ),
+                  t,
+                  somenteAtivos: true,
+                  limit: 60,
+                );
+              } catch (_) {
+                return const [];
+              }
+            }
+
             void atualizarBusca(String termo) {
               final t = termo.trim();
               setDialogState(() {
-                clientesExibidos = t.isEmpty
-                    ? widget.clienteRepository.listarPaginado(
-                        limit: 60,
-                        somenteAtivos: true,
-                      )
-                    : widget.clienteRepository
-                        .pesquisar(t)
-                        .where((c) => c.ativo)
-                        .take(60)
-                        .toList();
+                clientesExibidos = filtrarClientes(t);
               });
               final repo = widget.clienteRepository;
               if (repo is! ClienteApiRepository || t.isEmpty) return;
               debounceApi?.cancel();
-              debounceApi = Timer(const Duration(milliseconds: 320), () async {
-                try {
-                  final remotos = await repo.pesquisarRemoto(t, limit: 60);
-                  if (!context.mounted) return;
-                  setDialogState(() {
-                    clientesExibidos =
-                        remotos.where((c) => c.ativo).take(60).toList();
-                  });
-                } catch (_) {}
+              debounceApi = Timer(const Duration(milliseconds: 320), () {
+                unawaited(
+                  () async {
+                    try {
+                      await repo.pesquisarRemoto(
+                        t,
+                        limit: 60,
+                        notificarUi: false,
+                      );
+                      if (!context.mounted) return;
+                      setDialogState(() {
+                        clientesExibidos = filtrarClientes(t);
+                      });
+                    } catch (_) {}
+                  }().catchError((Object _) {}),
+                );
               });
             }
 
@@ -8392,6 +8456,17 @@ class _CaixaPageState extends State<CaixaPage>
           icon: const Icon(Icons.task_alt_outlined),
           label: const Text('Fechamento'),
           style: ElevatedButton.styleFrom(
+            minimumSize: const Size(0, 34),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: _caixaAberto ? _abrirExtratoSessaoCaixaAtual : null,
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: const Text('Extrato da sessao'),
+          style: OutlinedButton.styleFrom(
             minimumSize: const Size(0, 34),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,

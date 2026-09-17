@@ -280,6 +280,8 @@ class VendaApiRepository extends ChangeNotifier {
         filtro.filtroFiscal,
         filtro.clienteId,
         filtro.vendedorId,
+        filtro.sessaoCaixaInicioUtc,
+        filtro.sessaoCaixaFimUtc,
       );
     } catch (_) {
       return filtro;
@@ -303,9 +305,13 @@ class VendaApiRepository extends ChangeNotifier {
     String filtroFiscal = 'todos';
     String busca = '';
     int? clienteId;
+    DateTime? sessaoInicio;
+    DateTime? sessaoFim;
     try {
       desde = filtro.dataInicioUtc as DateTime?;
       ate = filtro.dataFimUtc as DateTime?;
+      sessaoInicio = filtro.sessaoCaixaInicioUtc as DateTime?;
+      sessaoFim = filtro.sessaoCaixaFimUtc as DateTime?;
       filtroCancelamento = (filtro.filtroCancelamento ?? 'ativas').toString();
       canceladaPor = (filtro.canceladaPorFiltro ?? 'todos').toString();
       formaPagamento = (filtro.formaPagamento ?? 'todos').toString();
@@ -315,6 +321,11 @@ class VendaApiRepository extends ChangeNotifier {
       busca = (filtro.textoBusca ?? '').toString();
       clienteId = filtro.clienteId as int?;
     } catch (_) {}
+
+    if (sessaoInicio != null) {
+      desde = sessaoInicio;
+      ate = sessaoFim ?? DateTime.now().toUtc();
+    }
 
     if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
       filtroFiscal,
@@ -350,6 +361,8 @@ class VendaApiRepository extends ChangeNotifier {
       filtroFiscal: filtroFiscal,
       busca: busca,
       canceladaPor: canceladaPor,
+      sessaoCaixaInicioUtc: sessaoInicio,
+      sessaoCaixaFimUtc: sessaoFim,
     );
     return _finalizarPaginaListagemHidratada(filtro, pagina);
   }
@@ -947,9 +960,13 @@ class VendaApiRepository extends ChangeNotifier {
     String textoBusca = '';
     int? clienteId;
     int? vendedorId;
+    DateTime? sessaoInicioUtc;
+    DateTime? sessaoFimUtc;
     try {
       dataInicioUtc = filtro.dataInicioUtc as DateTime?;
       dataFimUtc = filtro.dataFimUtc as DateTime?;
+      sessaoInicioUtc = filtro.sessaoCaixaInicioUtc as DateTime?;
+      sessaoFimUtc = filtro.sessaoCaixaFimUtc as DateTime?;
       filtroCancelamento = (filtro.filtroCancelamento ?? 'ativas').toString();
       canceladaPorFiltro = (filtro.canceladaPorFiltro ?? 'todos').toString();
       formaPagamento = (filtro.formaPagamento ?? 'todos').toString();
@@ -964,7 +981,13 @@ class VendaApiRepository extends ChangeNotifier {
     }
 
     out = out.where((v) {
-      if (!ListagemVendasPeriodo.noIntervaloUtc(
+      if (sessaoInicioUtc != null) {
+        final m = VendaFinalizacaoCaixaHelper.momentoFinalizacao(v);
+        if (m.isBefore(sessaoInicioUtc.toUtc())) return false;
+        if (sessaoFimUtc != null && m.isAfter(sessaoFimUtc.toUtc())) {
+          return false;
+        }
+      } else if (!ListagemVendasPeriodo.noIntervaloUtc(
         v,
         inicioUtc: dataInicioUtc,
         fimUtc: dataFimUtc,

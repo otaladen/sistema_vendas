@@ -25,6 +25,7 @@ import 'produto_busca_sinonimos.dart';
 import 'produto_busca_util.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
+import 'objectbox_lifecycle_hub.dart';
 import 'sync/sync_delete_outbox.dart';
 import 'sync/sync_dirty_outbox.dart';
 import 'sync/sync_write_trigger.dart';
@@ -103,8 +104,11 @@ class ProdutoSkuDuplicadoException implements Exception {
       'SKU "$sku" ja cadastrado no produto "$produtoExistenteNome".';
 }
 
-class ProdutoRepository extends ChangeNotifier {
-  ProdutoRepository(this._db) : _estoque = GerenciadorEstoqueService(_db);
+class ProdutoRepository extends ChangeNotifier
+    implements ObjectBoxStoreLifecycleListener {
+  ProdutoRepository(this._db) : _estoque = GerenciadorEstoqueService(_db) {
+    ObjectBoxLifecycleHub.registrar(this);
+  }
 
   final ObjectBox _db;
   final GerenciadorEstoqueService _estoque;
@@ -141,6 +145,7 @@ class ProdutoRepository extends ChangeNotifier {
   /// Quando [somenteAtivos] e true, retorna apenas produtos vendiveis (PDV).
   /// Padrao false: cadastro, estoque, relatorios e resolucao de itens antigos em orcamentos.
   List<Produto> listarTodos({bool somenteAtivos = false}) {
+    if (_db.leituraIndisponivel) return const [];
     _migrarCampoAtivoLegadoUmaVez();
     late final List<Produto> produtos;
     if (somenteAtivos) {
@@ -175,6 +180,7 @@ class ProdutoRepository extends ChangeNotifier {
     bool somenteInativos = false,
     String? prefixoNome,
   }) {
+    if (_db.leituraIndisponivel) return const [];
     _migrarCampoAtivoLegadoUmaVez();
     if (limit <= 0) return const [];
     final pfx = (prefixoNome ?? '').trim();
@@ -778,6 +784,7 @@ class ProdutoRepository extends ChangeNotifier {
   }
 
   void _garantirCachesAtualizados() {
+    if (_db.leituraIndisponivel) return;
     final agora = DateTime.now();
     final produtoCount = _db.produtoBox.count();
     final itemCount = _db.itemVendaBox.count();
@@ -2038,6 +2045,23 @@ class ProdutoRepository extends ChangeNotifier {
     _cacheScoreHistorico = const {};
     _cacheScoreCliente.clear();
     notifyListeners();
+  }
+
+  @override
+  Future<void> onObjectBoxClosingForCopy() async {
+    _invalidarCacheBusca();
+  }
+
+  @override
+  void onObjectBoxReopenedAfterCopy() {
+    _invalidarCacheBusca();
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    ObjectBoxLifecycleHub.remover(this);
+    super.dispose();
   }
 
   /// Chamado apos operacoes que alteram cadastro/estrutura do catalogo

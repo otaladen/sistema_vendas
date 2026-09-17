@@ -34,6 +34,10 @@ abstract final class LanApiFeedback {
   /// Mensagem legivel para o usuario.
   static String mensagem(Object erro, {String? fallback}) {
     if (erro is LanApiException) {
+      if (erro.code == LanApiClient.codigoStoreIndisponivel) {
+        final m = erro.message.trim();
+        return m.isEmpty ? LanApiClient.msgStoreIndisponivel : m;
+      }
       final m = erro.message.trim();
       if (m.isNotEmpty) return m;
     }

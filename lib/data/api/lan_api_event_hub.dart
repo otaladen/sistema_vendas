@@ -149,12 +149,17 @@ class LanApiEventHub extends ChangeNotifier {
               type == 'entityChanged' ||
               type == 'novo_recado_chat' ||
               type == 'autorizacao_pdv_resposta' ||
-              type == 'presence') {
+              type == 'presence' ||
+              type == 'store_suspended' ||
+              type == 'store_resumed') {
             _wsAtivo = true;
             _reconnectWsTentativa = 0;
             _healthIntervaloSegundos = 45;
             _reiniciarHealthTimer();
             _setOnline(true);
+          }
+          if (type == 'store_suspended' || type == 'store_resumed') {
+            return;
           }
           if (type == 'hello') {
             unawaited(_enviarRegistro());
