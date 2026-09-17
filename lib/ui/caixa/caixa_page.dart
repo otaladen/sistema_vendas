@@ -107,6 +107,7 @@ import 'widgets/caixa_pos_venda_fiscal_painel.dart';
 import '../theme/app_semantic_colors.dart';
 import '../vendas/cancelar_venda_ui.dart';
 import 'widgets/caixa_importar_orcamento_field.dart';
+import 'caixa_calculadora_somador_panel.dart';
 
 class CaixaPage extends StatefulWidget {
   const CaixaPage({
@@ -186,6 +187,8 @@ class _CaixaPageState extends State<CaixaPage>
   bool _finalizandoVenda = false;
   /// Trava anti-duplicacao em sangria/suprimento (clique duplo).
   bool _movimentoCaixaEmAndamento = false;
+  bool _calculadoraSomadorAberta = false;
+  TextEditingController? _calculadoraDestinoValor;
   CaixaPosVendaSessao? _posVenda;
   int _nfcePendenteEmissaoQtd = 0;
   double _nfcePendenteEmissaoTotal = 0;
@@ -1454,6 +1457,15 @@ class _CaixaPageState extends State<CaixaPage>
       }
       return true;
     }
+    if (key == LogicalKeyboardKey.f9) {
+      _alternarCalculadoraSomador();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.keyK &&
+        HardwareKeyboard.instance.isControlPressed) {
+      _alternarCalculadoraSomador();
+      return true;
+    }
     return false;
   }
 
@@ -1573,11 +1585,88 @@ class _CaixaPageState extends State<CaixaPage>
   String _formatarMoeda(double valor) => 'R\$ ${_currency.format(valor)}';
 
   double? _parseValor(String texto) {
-    final normalizado = texto.trim().replaceAll('.', '').replaceAll(',', '.');
-    if (normalizado.isEmpty) {
-      return null;
+    return CaixaValorPtBr.parse(texto);
+  }
+
+  void _registrarDestinoCalculadora(TextEditingController destino) {
+    _calculadoraDestinoValor = destino;
+  }
+
+  void _liberarDestinoCalculadora(TextEditingController destino) {
+    if (_calculadoraDestinoValor == destino) {
+      _calculadoraDestinoValor = null;
     }
-    return double.tryParse(normalizado);
+  }
+
+  void _alternarCalculadoraSomador() {
+    if (!mounted) return;
+    if (_calculadoraSomadorAberta) {
+      _fecharCalculadoraSomador();
+      return;
+    }
+    _abrirCalculadoraSomador();
+  }
+
+  Future<void> _abrirCalculadoraSomador({TextEditingController? destino}) async {
+    if (destino != null) {
+      _calculadoraDestinoValor = destino;
+    }
+    if (!mounted) return;
+    if (_calculadoraSomadorAberta) {
+      Navigator.of(context, rootNavigator: true).pop();
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
+    }
+    _calculadoraSomadorAberta = true;
+    setState(() {});
+    await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: 'Calculadora de caixa',
+        barrierColor: Colors.transparent,
+        useRootNavigator: true,
+        transitionDuration: const Duration(milliseconds: 120),
+        pageBuilder: (dialogContext, animation, secondaryAnimation) {
+          return SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8, right: 8),
+                child: CaixaCalculadoraSomadorPanel(
+                  compacto: true,
+                  destinoDisponivel: _calculadoraDestinoValor != null,
+                  onFechar: () => Navigator.pop(dialogContext),
+                  onTransferir: (valor) {
+                    _transferirValorCalculadoraParaCaixa(valor);
+                    Navigator.pop(dialogContext);
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    _calculadoraSomadorAberta = false;
+    if (mounted) setState(() {});
+  }
+
+  void _fecharCalculadoraSomador() {
+    if (!mounted || !_calculadoraSomadorAberta) return;
+    Navigator.of(context, rootNavigator: true).pop();
+  }
+
+  void _transferirValorCalculadoraParaCaixa(double valor) {
+    final destino = _calculadoraDestinoValor;
+    if (destino == null) return;
+    destino.text = CaixaValorPtBr.textoCampo(valor);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Valor ${CaixaValorPtBr.textoMoeda(valor)} transferido para o campo.',
+        ),
+      ),
+    );
   }
 
   Future<void> _carregarSessaoCaixa() async {
@@ -2761,6 +2850,11 @@ class _CaixaPageState extends State<CaixaPage>
               suprimento: suprimento,
               valor: valor,
             ),
+            registrarDestinoCalculadora: _registrarDestinoCalculadora,
+            liberarDestinoCalculadora: _liberarDestinoCalculadora,
+            abrirCalculadoraComDestino: (destino) {
+              unawaited(_abrirCalculadoraSomador(destino: destino));
+            },
           );
         },
       );
@@ -3296,6 +3390,7 @@ class _CaixaPageState extends State<CaixaPage>
     final debitoController = TextEditingController(text: '0,00');
     final creditoController = TextEditingController(text: '0,00');
     final obsController = TextEditingController();
+    _registrarDestinoCalculadora(dinheiroController);
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -3310,6 +3405,17 @@ class _CaixaPageState extends State<CaixaPage>
                   _buildLinhaConferenciaFechamento(
                     label: 'Dinheiro',
                     controller: dinheiroController,
+                    trailing: IconButton(
+                      tooltip: 'Calculadora / contagem (F9)',
+                      icon: const Icon(Icons.calculate_outlined),
+                      onPressed: () {
+                        unawaited(
+                          _abrirCalculadoraSomador(
+                            destino: dinheiroController,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                   const SizedBox(height: 8),
                   _buildLinhaConferenciaFechamento(
@@ -3356,6 +3462,7 @@ class _CaixaPageState extends State<CaixaPage>
     final declaradoDebito = _parseValor(debitoController.text) ?? 0;
     final declaradoCredito = _parseValor(creditoController.text) ?? 0;
     final obs = obsController.text.trim();
+    _liberarDestinoCalculadora(dinheiroController);
     dinheiroController.dispose();
     pixController.dispose();
     debitoController.dispose();
@@ -7872,6 +7979,9 @@ class _CaixaPageState extends State<CaixaPage>
         LogicalKeySet(LogicalKeyboardKey.f3): const _ReceberFiadoIntent(),
         LogicalKeySet(LogicalKeyboardKey.f4): const _VincularClienteIntent(),
         LogicalKeySet(LogicalKeyboardKey.f5): const _BuscarProdutoConferenciaIntent(),
+        LogicalKeySet(LogicalKeyboardKey.f9): const _CalculadoraCaixaIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyK):
+            const _CalculadoraCaixaIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -7922,6 +8032,13 @@ class _CaixaPageState extends State<CaixaPage>
               return null;
             },
           ),
+          _CalculadoraCaixaIntent: CallbackAction<_CalculadoraCaixaIntent>(
+            onInvoke: (intent) {
+              if (!_atalhoCaixaAtivo()) return null;
+              _alternarCalculadoraSomador();
+              return null;
+            },
+          ),
         },
         child: Focus(
           focusNode: _focusAtalhosCaixa,
@@ -7934,6 +8051,11 @@ class _CaixaPageState extends State<CaixaPage>
                 Padding(
                   padding: const EdgeInsets.only(right: 4),
                   child: Center(child: _buildChipNfcePendenteEmissao(context)),
+                ),
+                IconButton(
+                  tooltip: 'Calculadora / somador de caixa (F9)',
+                  icon: const Icon(Icons.calculate_outlined),
+                  onPressed: _alternarCalculadoraSomador,
                 ),
                 ContaSessaoAppBarActions(
                   login: widget.usuarioAtual,
@@ -8540,6 +8662,7 @@ class _CaixaPageState extends State<CaixaPage>
   Widget _buildLinhaConferenciaFechamento({
     required String label,
     required TextEditingController controller,
+    Widget? trailing,
   }) {
     return Row(
       children: [
@@ -8555,6 +8678,7 @@ class _CaixaPageState extends State<CaixaPage>
             ),
           ),
         ),
+        if (trailing != null) trailing,
       ],
     );
   }
@@ -9442,6 +9566,10 @@ class _BuscarProdutoConferenciaIntent extends Intent {
   const _BuscarProdutoConferenciaIntent();
 }
 
+class _CalculadoraCaixaIntent extends Intent {
+  const _CalculadoraCaixaIntent();
+}
+
 class _ResultadoMovimentoCaixa {
   const _ResultadoMovimentoCaixa({
     required this.valor,
@@ -9459,11 +9587,17 @@ class _DialogoSangriaSuprimento extends StatefulWidget {
     required this.suprimento,
     required this.parseValor,
     required this.registrar,
+    required this.registrarDestinoCalculadora,
+    required this.liberarDestinoCalculadora,
+    required this.abrirCalculadoraComDestino,
   });
 
   final bool suprimento;
   final double? Function(String texto) parseValor;
   final Future<CaixaSessao> Function(double valor) registrar;
+  final void Function(TextEditingController destino) registrarDestinoCalculadora;
+  final void Function(TextEditingController destino) liberarDestinoCalculadora;
+  final void Function(TextEditingController destino) abrirCalculadoraComDestino;
 
   @override
   State<_DialogoSangriaSuprimento> createState() =>
@@ -9477,7 +9611,14 @@ class _DialogoSangriaSuprimentoState extends State<_DialogoSangriaSuprimento> {
   String _erro = '';
 
   @override
+  void initState() {
+    super.initState();
+    widget.registrarDestinoCalculadora(_valorController);
+  }
+
+  @override
   void dispose() {
+    widget.liberarDestinoCalculadora(_valorController);
     _valorController.dispose();
     _obsController.dispose();
     super.dispose();
@@ -9530,16 +9671,32 @@ class _DialogoSangriaSuprimentoState extends State<_DialogoSangriaSuprimento> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextField(
-                  controller: _valorController,
-                  enabled: !_salvando,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: 'Valor',
-                    hintText: 'Ex.: 100,00',
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _valorController,
+                        enabled: !_salvando,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Valor',
+                          hintText: 'Ex.: 100,00',
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Calculadora / contagem (F9)',
+                      icon: const Icon(Icons.calculate_outlined),
+                      onPressed: _salvando
+                          ? null
+                          : () => widget.abrirCalculadoraComDestino(
+                                _valorController,
+                              ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 TextField(

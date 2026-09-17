@@ -96,13 +96,12 @@ void main() {
     expect(bytes[0], 0x1B); // ESC
     expect(bytes[1], 0x40); // @ init
     final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
-    expect(texto, contains('ORCAMENTO'));
+    expect(texto, contains('AMENTO N'));
     expect(texto, contains('Cimento'));
     expect(texto, contains('VALOR TOTAL'));
     expect(texto, contains('COTACAO'));
-    expect(texto, contains('CONDICOES DE PAGAMENTO'));
-    expect(texto, contains('FORMA SUGERIDA'));
-    expect(texto, contains('Pagamento:'));
+    expect(texto, contains('DE PAGAMENTO'));
+    expect(texto, isNot(contains('Pagamento:')));
     expect(texto, contains('Dinheiro'));
     expect(texto, isNot(contains('Dinheiro/PIX/Debito')));
     expect(texto, isNot(contains('2x de')));
@@ -249,7 +248,9 @@ void main() {
     expect(texto, contains('500,00'));
     expect(texto, isNot(contains('499.500,00')));
     expect(texto, isNot(contains('Desconto:')));
-    expect(texto, contains('Dinheiro a vista - Total: R\$ 500,00'));
+    expect(texto, contains('Dinheiro'));
+    expect(texto, contains('vista'));
+    expect(texto, contains('R\$ 500,00'));
   });
 
   test('montar orcamento ESC/POS imprime so o credito escolhido', () {
@@ -268,10 +269,8 @@ void main() {
       ),
     );
     final texto = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127));
-    expect(texto, contains('CONDICOES DE PAGAMENTO'));
-    expect(texto, contains('FORMA SUGERIDA'));
-    expect(texto, contains('Pagamento:'));
-    expect(texto, contains('Cartao de credito'));
+    expect(texto, contains('DE PAGAMENTO'));
+    expect(texto, isNot(contains('Pagamento:')));
     expect(texto, contains('3x de'));
     expect(texto, isNot(contains('2x de')));
     expect(texto, isNot(contains('12x')));

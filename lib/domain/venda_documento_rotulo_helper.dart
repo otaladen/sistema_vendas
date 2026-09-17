@@ -84,13 +84,54 @@ abstract final class VendaDocumentoRotuloHelper {
     if (venda.status == 'orcamento') {
       return rotuloOrcamento(venda);
     }
+    final doc = rotuloDocumentoFiscalLista(venda, nfe55: nfe55);
+    if (doc.isEmpty) return rotuloControleInterno(venda);
+    return '$doc · ${rotuloControleInterno(venda)}';
+  }
+
+  /// Coluna Documento na listagem: apenas NFC-e / NF-e (sem controle interno).
+  static String rotuloDocumentoFiscalLista(
+    Venda venda, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) {
+    if (venda.status == 'orcamento') {
+      return rotuloOrcamento(venda);
+    }
     final partes = <String>[];
     final nfce = rotuloNfce(venda);
     if (nfce != null) partes.add(nfce);
     final nfe = rotuloNfe55(nfe55);
     if (nfe != null) partes.add(nfe);
-    partes.add(rotuloControleInterno(venda));
     return partes.join(' · ');
+  }
+
+  static bool temDocumentoFiscalLista(
+    Venda venda, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) =>
+      rotuloDocumentoFiscalLista(venda, nfe55: nfe55).trim().isNotEmpty;
+
+  /// Filtro rapido **Pendentes fiscais** — alinhado a coluna Status / Documento.
+  static bool correspondeFiltroListagemFiscalPendente(
+    Venda venda, {
+    VendaDocumentoNfe55Resumo? nfe55,
+    bool nfe55AutorizadaRegistroExterno = false,
+  }) {
+    if (venda.status != 'finalizada' || venda.cancelada) return false;
+    if (nfe55AutorizadaRegistroExterno) return false;
+    return !temDocumentoFiscalLista(venda, nfe55: nfe55);
+  }
+
+  /// Filtro rapido **Concluidas** — documento fiscal emitido e estoque baixado.
+  static bool correspondeFiltroListagemConcluidaFiscal(
+    Venda venda, {
+    VendaDocumentoNfe55Resumo? nfe55,
+    bool nfe55AutorizadaRegistroExterno = false,
+  }) {
+    if (venda.status != 'finalizada' || venda.cancelada) return false;
+    if (!venda.estoqueBaixadoCupom) return false;
+    return temDocumentoFiscalLista(venda, nfe55: nfe55) ||
+        nfe55AutorizadaRegistroExterno;
   }
 
   /// Status operacional na listagem de vendas.
@@ -163,15 +204,29 @@ abstract final class VendaDocumentoRotuloHelper {
     return 'Concluída';
   }
 
-  static Color corStatusLista(Venda venda, ColorScheme scheme) {
+  static Color corStatusLista(
+    Venda venda,
+    ColorScheme scheme, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) {
     if (venda.status == 'orcamento') {
       return scheme.outline;
     }
     if (venda.nfceProcessandoPendenteFocus || venda.nfceEmissaoEmAndamento) {
       return scheme.tertiary;
     }
-    if (venda.estoqueBaixadoCupom) return scheme.primary;
-    return scheme.error;
+    final temNfce = venda.nfceEmitida;
+    final temNfe55 = nfe55?.autorizada == true || venda.nfe55Autorizada;
+    if (!temNfce && !temNfe55) {
+      if (venda.estoqueBaixadoCupom) {
+        return Colors.amber.shade800;
+      }
+      return Colors.orange.shade800;
+    }
+    if (!venda.estoqueBaixadoCupom) {
+      return scheme.error;
+    }
+    return Colors.green.shade700;
   }
 
   /// Texto curto para chip/snackbar no caixa apos autorizacao fiscal.

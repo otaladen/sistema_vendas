@@ -279,23 +279,13 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                           children: [
                             SizedBox(
                               width: ListagemVendasLayout.colControle,
-                              child: _BadgeNumero(texto: item.badgeNumero),
+                              child: _NumeroControle(texto: item.badgeNumero),
                             ),
                             SizedBox(
                               width: ListagemVendasLayout.colDocumento,
-                              child: Text(
-                                item.titulo,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: item.cancelada
-                                      ? scheme.error
-                                      : scheme.onSurface,
-                                  decoration: item.cancelada
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                ),
+                              child: _CelulaDocumento(
+                                titulo: item.titulo,
+                                cancelada: item.cancelada,
                               ),
                             ),
                             SizedBox(
@@ -336,8 +326,10 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                                 item.cliente,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontWeight: FontWeight.w500,
+                                style: _estiloClienteLista(
+                                  theme,
+                                  scheme,
+                                  item.cliente,
                                 ),
                               ),
                             ),
@@ -358,15 +350,17 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
                                   item.pagamento,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.labelSmall,
+                                  softWrap: false,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    height: 1.15,
+                                    letterSpacing: -0.15,
+                                  ),
                                 ),
                               ),
                               SizedBox(
                                 width: ListagemVendasLayout.colEntrega,
-                                child: Text(
-                                  item.entrega,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                child: _TextoColunaComTooltip(
+                                  texto: item.entrega,
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: scheme.onSurfaceVariant,
                                   ),
@@ -489,30 +483,104 @@ class _CabOrdenavel extends StatelessWidget {
   }
 }
 
-class _BadgeNumero extends StatelessWidget {
-  const _BadgeNumero({required this.texto});
+TextStyle? _estiloClienteLista(
+  ThemeData theme,
+  ColorScheme scheme,
+  String cliente,
+) {
+  final semCliente = cliente.trim().toLowerCase() == 'sem cliente';
+  if (semCliente) {
+    return theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant.withValues(alpha: 0.72),
+      fontStyle: FontStyle.italic,
+      fontWeight: FontWeight.w400,
+    );
+  }
+  return theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600);
+}
+
+class _NumeroControle extends StatelessWidget {
+  const _NumeroControle({required this.texto});
 
   final String texto;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-      decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: scheme.primary.withValues(alpha: 0.25)),
+    return Text(
+      texto,
+      textAlign: TextAlign.left,
+      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: scheme.onSurfaceVariant,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+    );
+  }
+}
+
+class _CelulaDocumento extends StatelessWidget {
+  const _CelulaDocumento({
+    required this.titulo,
+    required this.cancelada,
+  });
+
+  final String titulo;
+  final bool cancelada;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final doc = titulo.trim();
+
+    if (doc.isEmpty) {
+      if (cancelada) return const SizedBox.shrink();
+      return Text(
+        '—',
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+          fontWeight: FontWeight.w500,
+        ),
+      );
+    }
+
+    return Text(
+      doc,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.labelMedium?.copyWith(
+        fontWeight: FontWeight.w600,
+        color: cancelada ? scheme.error : scheme.onSurface,
+        decoration: cancelada ? TextDecoration.lineThrough : null,
       ),
-      child: Text(
-        texto,
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: scheme.primary,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-      ),
+    );
+  }
+}
+
+class _TextoColunaComTooltip extends StatelessWidget {
+  const _TextoColunaComTooltip({
+    required this.texto,
+    required this.style,
+  });
+
+  final String texto;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = texto.trim();
+    final filho = Text(
+      t,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
+    if (t.isEmpty) return filho;
+    return Tooltip(
+      message: t,
+      waitDuration: const Duration(milliseconds: 350),
+      child: filho,
     );
   }
 }
@@ -531,8 +599,7 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final chip = Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: cor.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(6),

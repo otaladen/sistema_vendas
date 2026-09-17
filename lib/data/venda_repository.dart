@@ -475,7 +475,8 @@ class FiltroListagemVendas {
   /// `todos` | `sim` | `nao`
   final String entregaPendente;
 
-  /// `todos` | `sem_nfce_eletronico` | `com_nfce_eletronico`
+  /// `todos` | `sem_nfce_eletronico` | `com_nfce_eletronico` |
+  /// `fiscal_pendente` | `concluida_fiscal`
   final String filtroFiscal;
   final int? clienteId;
   final int? vendedorId;
@@ -1316,6 +1317,12 @@ class VendaRepository {
                   .correspondeFiltroListagemSomenteNfceEletronico,
             )
             .toList();
+      case 'fiscal_pendente':
+        return vendas.where(_correspondeFiltroListagemFiscalPendente).toList();
+      case 'concluida_fiscal':
+        return vendas
+            .where(_correspondeFiltroListagemConcluidaFiscal)
+            .toList();
       default:
         return vendas;
     }
@@ -1324,6 +1331,22 @@ class VendaRepository {
   bool _correspondeFiltroListagemSemNfceEletronico(Venda venda) {
     final nfe55Ext = obterNfe55AutorizadaPorVenda(venda.id) != null;
     return VendaNfceObrigatoriaHelper.correspondeFiltroListagemSemNfceEletronico(
+      venda,
+      nfe55AutorizadaRegistroExterno: nfe55Ext,
+    );
+  }
+
+  bool _correspondeFiltroListagemFiscalPendente(Venda venda) {
+    final nfe55Ext = obterNfe55AutorizadaPorVenda(venda.id) != null;
+    return VendaDocumentoRotuloHelper.correspondeFiltroListagemFiscalPendente(
+      venda,
+      nfe55AutorizadaRegistroExterno: nfe55Ext,
+    );
+  }
+
+  bool _correspondeFiltroListagemConcluidaFiscal(Venda venda) {
+    final nfe55Ext = obterNfe55AutorizadaPorVenda(venda.id) != null;
+    return VendaDocumentoRotuloHelper.correspondeFiltroListagemConcluidaFiscal(
       venda,
       nfe55AutorizadaRegistroExterno: nfe55Ext,
     );

@@ -647,6 +647,18 @@ class CupomPdfLayout {
     ];
   }
 
+  static pw.Widget tituloOrcamentoNumero({
+    required ConfigLayoutImpressao layout,
+    required int numero,
+  }) {
+    return _textoCentralizado(
+      layout,
+      texto: 'ORÇAMENTO Nº $numero',
+      fontSize: layout.tamanhoFonteCorpo.fontSizeTipoDocumento,
+      fontWeight: pw.FontWeight.bold,
+    );
+  }
+
   static pw.Widget faixaTipoDocumento({
     required ConfigLayoutImpressao layout,
     required String titulo,

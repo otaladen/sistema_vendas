@@ -1,8 +1,28 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sistema_vendas/domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import 'package:sistema_vendas/domain/venda_documento_rotulo_helper.dart';
 import 'package:sistema_vendas/model/venda.dart';
 
 void main() {
+  test('filtro fiscal pendente inclui venda sem documento mesmo em dinheiro', () {
+    final venda = Venda()
+      ..status = 'finalizada'
+      ..numeroControle = 100
+      ..formaPagamento = 'dinheiro'
+      ..estoqueBaixadoCupom = true;
+
+    expect(
+      VendaDocumentoRotuloHelper.correspondeFiltroListagemFiscalPendente(venda),
+      isTrue,
+    );
+    expect(
+      VendaNfceObrigatoriaHelper.correspondeFiltroListagemSemNfceEletronico(
+        venda,
+      ),
+      isFalse,
+    );
+  });
+
   test('status resumido sem fiscal mostra so fiscal pendente', () {
     final venda = Venda()
       ..status = 'finalizada'

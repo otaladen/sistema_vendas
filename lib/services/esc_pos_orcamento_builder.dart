@@ -120,17 +120,13 @@ abstract final class EscPosOrcamentoBuilder {
       out.add(EscPosCommands.boldOff);
       out.add(EscPosCommands.separator(cols));
     }
-    out.add(EscPosCommands.boldOn);
-    out.add(EscPosCommands.line('ORCAMENTO'));
-    out.add(EscPosCommands.boldOff);
-    out.add(EscPosCommands.alignLeft);
-
     final numOrc = venda.numeroOrcamento > 0 ? venda.numeroOrcamento : venda.id;
     final agora = DateTime.now();
     final validade = agora.add(Duration(days: dados.validadeDias));
     out.add(EscPosCommands.boldOn);
-    out.add(EscPosCommands.line('ORCAMENTO N. $numOrc'));
-    out.add(EscPosCommands.line('Emissao: ${_data.format(agora)}'));
+    out.add(EscPosCommands.line('ORÇAMENTO Nº $numOrc'));
+    out.add(EscPosCommands.alignLeft);
+    out.add(EscPosCommands.line('Emissão: ${_data.format(agora)}'));
     out.add(EscPosCommands.line(
       'Validade: ${_dataCurta.format(validade)} (${dados.validadeDias} dias)',
     ));
@@ -237,33 +233,23 @@ abstract final class EscPosOrcamentoBuilder {
       _padCols('VALOR TOTAL:', 'R\$ ${_moeda.format(total)}', cols),
     ));
     out.add(EscPosCommands.boldOff);
-    for (final l in _wrap(
-      OrcamentoCondicoesPagamento.resumoFinanceiroDaVenda(
-        venda,
-        total: total,
-        formatarMoeda: (v) => 'R\$ ${_moeda.format(v)}',
-      ),
-      cols,
-    )) {
-      out.add(EscPosCommands.line(l));
-    }
 
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line(OrcamentoCondicoesPagamento.tituloSecao));
-    for (final linha in OrcamentoCondicoesPagamento.linhasDaVenda(
+    for (final linha in OrcamentoCondicoesPagamento.linhasColunasDaVenda(
       venda,
       total: total,
       formatarMoeda: (v) => 'R\$ ${_moeda.format(v)}',
     )) {
-      for (final l in _wrap(linha, cols)) {
-        out.add(EscPosCommands.line(l));
-      }
+      out.add(EscPosCommands.line(
+        _padCols(linha.rotulo, linha.valor, cols),
+      ));
     }
     out.add(EscPosCommands.boldOff);
 
     if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) {
-      out.add(EscPosCommands.line('Condicao de quitacao (fiado):'));
+      out.add(EscPosCommands.line('Condição de quitação (fiado):'));
       for (final linha in PlanoFiadoCodec.linhasTextoPdf(venda)) {
         for (final l in _wrap(linha, cols)) {
           out.add(EscPosCommands.line(l));

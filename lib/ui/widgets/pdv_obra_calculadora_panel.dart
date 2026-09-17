@@ -1198,8 +1198,8 @@ class _LinhaPreview extends StatelessWidget {
   }
 }
 
-/// Selecao por bottom sheet — evita menu do [DropdownButton] atras do overlay flutuante do PDV.
-class _OverlayPickerField<T> extends StatelessWidget {
+/// Dropdown ancorado ao campo com [showMenu] no navigator raiz — adequado ao overlay flutuante do PDV.
+class _OverlayPickerField<T> extends StatefulWidget {
   const _OverlayPickerField({
     required this.label,
     required this.value,
@@ -1221,64 +1221,100 @@ class _OverlayPickerField<T> extends StatelessWidget {
     required String Function(T) itemLabel,
     T? selected,
   }) {
-    return showModalBottomSheet<T>(
+    return showDialog<T>(
       context: context,
       useRootNavigator: true,
-      showDragHandle: true,
       builder: (ctx) {
         final theme = Theme.of(ctx);
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                child: Text(
-                  title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              ...items.map(
-                (item) => ListTile(
-                  title: Text(itemLabel(item)),
-                  selected: selected != null && item == selected,
-                  onTap: () => Navigator.pop(ctx, item),
-                ),
-              ),
-            ],
+        return AlertDialog(
+          title: Text(title),
+          contentPadding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
+          content: SizedBox(
+            width: 360,
+            child: ListView(
+              shrinkWrap: true,
+              children: items.map(
+                (item) {
+                  final isSelected = selected != null && item == selected;
+                  return ListTile(
+                    title: Text(itemLabel(item)),
+                    selected: isSelected,
+                    trailing: isSelected
+                        ? Icon(Icons.check, color: theme.colorScheme.primary)
+                        : null,
+                    onTap: () => Navigator.pop(ctx, item),
+                  );
+                },
+              ).toList(),
+            ),
           ),
         );
       },
     );
   }
 
-  Future<void> _open(BuildContext context) async {
-    final picked = await showSheet<T>(
-      context: context,
-      title: label,
-      items: items,
-      itemLabel: itemLabel,
-      selected: value,
+  static RelativeRect _menuPosition(BuildContext context, RenderBox anchor) {
+    final overlay = Navigator.of(context, rootNavigator: true).overlay!;
+    final overlayBox = overlay.context.findRenderObject()! as RenderBox;
+    final topLeft = anchor.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final bottomRight = anchor.localToGlobal(
+      anchor.size.bottomRight(Offset.zero),
+      ancestor: overlayBox,
     );
-    if (picked != null) onChanged(picked);
+    return RelativeRect.fromRect(
+      Rect.fromPoints(topLeft, bottomRight),
+      Offset.zero & overlayBox.size,
+    );
+  }
+
+  @override
+  State<_OverlayPickerField<T>> createState() => _OverlayPickerFieldState<T>();
+}
+
+class _OverlayPickerFieldState<T> extends State<_OverlayPickerField<T>> {
+  final _anchorKey = GlobalKey();
+
+  Future<void> _openMenu() async {
+    final anchor = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (anchor == null || !anchor.hasSize) return;
+
+    final picked = await showMenu<T>(
+      context: context,
+      useRootNavigator: true,
+      position: _OverlayPickerField._menuPosition(context, anchor),
+      items: [
+        for (final item in widget.items)
+          PopupMenuItem<T>(
+            value: item,
+            child: SizedBox(
+              width: anchor.size.width - 32,
+              child: Text(
+                widget.itemLabel(item),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+      ],
+    );
+    if (picked != null) widget.onChanged(picked);
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => _open(context),
+      key: _anchorKey,
+      onTap: _openMenu,
       behavior: HitTestBehavior.opaque,
       child: InputDecorator(
-        decoration: const InputDecoration(
-          labelText: null,
+        decoration: InputDecoration(
+          labelText: widget.label,
           isDense: true,
-          suffixIcon: Icon(Icons.arrow_drop_down),
-          border: OutlineInputBorder(),
-        ).copyWith(labelText: label),
+          suffixIcon: const Icon(Icons.arrow_drop_down),
+          border: const OutlineInputBorder(),
+        ),
         child: Text(
-          itemLabel(value),
+          widget.itemLabel(widget.value),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

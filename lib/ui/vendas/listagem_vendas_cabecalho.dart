@@ -7,99 +7,127 @@ class ListagemVendasCabecalho extends StatelessWidget {
     required this.totalRegistros,
     required this.exibidos,
     required this.valorTotalExibido,
+    required this.filtroFiscal,
+    required this.onFiltroFiscalRapido,
     required this.onAtualizar,
   });
 
   final int totalRegistros;
   final int exibidos;
   final double valorTotalExibido;
+  final String filtroFiscal;
+  final ValueChanged<String> onFiltroFiscalRapido;
   final VoidCallback? onAtualizar;
+
+  static const _filtrosRapidos = <({String valor, String rotulo})>[
+    (valor: 'todos', rotulo: 'Todas'),
+    (valor: 'concluida_fiscal', rotulo: 'Concluídas'),
+    (valor: 'fiscal_pendente', rotulo: 'Pendentes fiscais'),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final moeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-    final estreito = MediaQuery.sizeOf(context).width < 720;
+    final estreito = MediaQuery.sizeOf(context).width < 900;
 
-    final titulo = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final resumoRegistros = totalRegistros == 0
+        ? '0'
+        : '$exibidos / $totalRegistros';
+    final resumoValor = moeda.format(valorTotalExibido);
+
+    final kpis = Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Text(
-          'Listagem de vendas',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+        _ResumoChip(
+          icone: Icons.receipt_long_outlined,
+          texto: 'Registros: $resumoRegistros',
         ),
-        const SizedBox(height: 4),
-        Text(
-          'Vendas finalizadas no caixa — consulta, fiscal e devolucoes.',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: scheme.onSurfaceVariant,
-          ),
+        _ResumoChip(
+          icone: Icons.payments_outlined,
+          texto: 'Total: $resumoValor',
+          destaque: true,
+        ),
+        IconButton(
+          tooltip: 'Atualizar lista',
+          visualDensity: VisualDensity.compact,
+          onPressed: onAtualizar,
+          icon: const Icon(Icons.refresh, size: 22),
         ),
       ],
     );
 
-    final kpis = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          tooltip: 'Atualizar lista',
-          onPressed: onAtualizar,
-          icon: const Icon(Icons.refresh),
-        ),
-        _KpiTile(
-          rotulo: 'Registros',
-          valor: totalRegistros == 0 ? '0' : '$exibidos / $totalRegistros',
-          icone: Icons.receipt_long_outlined,
-        ),
-        const SizedBox(width: 10),
-        _KpiTile(
-          rotulo: 'Total do filtro',
-          valor: moeda.format(valorTotalExibido),
-          icone: Icons.payments_outlined,
-          destaque: true,
-        ),
-      ],
+    final filtrosRapidos = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < _filtrosRapidos.length; i++) ...[
+            if (i > 0) const SizedBox(width: 6),
+            _FiltroRapidoChip(
+              rotulo: _filtrosRapidos[i].rotulo,
+              selecionado: filtroFiscal == _filtrosRapidos[i].valor,
+              onTap: () => onFiltroFiscalRapido(_filtrosRapidos[i].valor),
+            ),
+          ],
+        ],
+      ),
     );
 
     return Material(
       color: scheme.surfaceContainerLow,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
-        child: estreito
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  titulo,
-                  const SizedBox(height: 12),
-                  kpis,
-                ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: titulo),
-                  kpis,
-                ],
-              ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            estreito
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Listagem de vendas',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      kpis,
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Listagem de vendas',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(child: kpis),
+                    ],
+                  ),
+            const SizedBox(height: 8),
+            filtrosRapidos,
+          ],
+        ),
       ),
     );
   }
 }
 
-class _KpiTile extends StatelessWidget {
-  const _KpiTile({
-    required this.rotulo,
-    required this.valor,
+class _ResumoChip extends StatelessWidget {
+  const _ResumoChip({
     required this.icone,
+    required this.texto,
     this.destaque = false,
   });
 
-  final String rotulo;
-  final String valor;
   final IconData icone;
+  final String texto;
   final bool destaque;
 
   @override
@@ -108,46 +136,78 @@ class _KpiTile extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     return Container(
-      constraints: const BoxConstraints(minWidth: 132),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: destaque
             ? Color.alphaBlend(
-                scheme.primary.withValues(alpha: 0.12),
+                scheme.primary.withValues(alpha: 0.1),
                 scheme.surface,
               )
-            : scheme.surface,
-        borderRadius: BorderRadius.circular(10),
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: destaque
-              ? scheme.primary.withValues(alpha: 0.35)
-              : scheme.outlineVariant.withValues(alpha: 0.55),
+              ? scheme.primary.withValues(alpha: 0.28)
+              : scheme.outlineVariant.withValues(alpha: 0.45),
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icone, size: 20, color: scheme.primary),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                rotulo,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              Text(
-                valor,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
+          Icon(
+            icone,
+            size: 16,
+            color: destaque ? scheme.primary : scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            texto,
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FiltroRapidoChip extends StatelessWidget {
+  const _FiltroRapidoChip({
+    required this.rotulo,
+    required this.selecionado,
+    required this.onTap,
+  });
+
+  final String rotulo;
+  final bool selecionado;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Material(
+      color: selecionado
+          ? scheme.primaryContainer.withValues(alpha: 0.9)
+          : scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+      elevation: 0,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Text(
+            rotulo,
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: selecionado ? FontWeight.w700 : FontWeight.w500,
+              color: selecionado ? scheme.onPrimaryContainer : scheme.onSurface,
+            ),
+          ),
+        ),
       ),
     );
   }

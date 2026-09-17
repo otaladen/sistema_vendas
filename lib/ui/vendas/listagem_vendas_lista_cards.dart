@@ -169,16 +169,26 @@ class _ListagemVendasListaCardsState extends State<ListagemVendasListaCards> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              item.titulo,
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                decoration: item.cancelada
-                                    ? TextDecoration.lineThrough
-                                    : null,
-                                color: item.cancelada ? scheme.error : null,
+                            if (item.titulo.trim().isNotEmpty)
+                              Text(
+                                item.titulo,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  decoration: item.cancelada
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                  color: item.cancelada ? scheme.error : null,
+                                ),
+                              )
+                            else if (!item.cancelada)
+                              Text(
+                                '—',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  color: scheme.onSurfaceVariant
+                                      .withValues(alpha: 0.55),
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
-                            ),
                             const SizedBox(height: 4),
                             Text(
                               item.dataHora,
@@ -237,9 +247,16 @@ class _ListagemVendasListaCardsState extends State<ListagemVendasListaCards> {
                     item.cliente,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: item.cliente.trim().toLowerCase() == 'sem cliente'
+                        ? theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant
+                                .withValues(alpha: 0.72),
+                            fontStyle: FontStyle.italic,
+                            fontWeight: FontWeight.w400,
+                          )
+                        : theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                   ),
                   Text(
                     item.vendedor,

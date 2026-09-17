@@ -101,6 +101,8 @@ abstract final class EscPosCommands {
 
   /// Mapa minimo PT-BR → byte CP850. Demais chars ASCII ou '?'.
   static const Map<int, int> _cp850Extras = {
+    0x00BA: 0xBA, // º
+    0x00AA: 0xA6, // ª
     0x00C7: 0x80, // Ç
     0x00FC: 0x81, // ü
     0x00E9: 0x82, // é

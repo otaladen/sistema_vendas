@@ -7,7 +7,7 @@ import 'pagamento_orcamento.dart';
 abstract final class OrcamentoCondicoesPagamento {
   OrcamentoCondicoesPagamento._();
 
-  static const String tituloSecao = 'CONDICOES DE PAGAMENTO / FORMA SUGERIDA';
+  static const String tituloSecao = 'CONDIÇÕES DE PAGAMENTO';
 
   static bool meioAVista(String meio) {
     switch (meio) {
@@ -28,11 +28,11 @@ abstract final class OrcamentoCondicoesPagamento {
       case PagamentoMeio.pix:
         return 'PIX';
       case PagamentoMeio.cartaoDebito:
-        return 'Cartao de debito';
+        return 'Cartão de débito';
       case PagamentoMeio.cartaoCredito:
-        return 'Cartao de credito';
+        return 'Cartão de crédito';
       case PagamentoMeio.transferencia:
-        return 'Transferencia';
+        return 'Transferência';
       case PagamentoMeio.fiado:
         return 'Fiado';
       case PagamentoMeio.vale:
@@ -40,7 +40,7 @@ abstract final class OrcamentoCondicoesPagamento {
       case PagamentoMeio.misto:
         return 'Misto';
       default:
-        return meio.isEmpty ? 'A vista' : meio;
+        return meio.isEmpty ? 'À vista' : meio;
     }
   }
 
@@ -63,7 +63,20 @@ abstract final class OrcamentoCondicoesPagamento {
     required double total,
     required String Function(double) formatarMoeda,
   }) {
-    return linhas(
+    return linhasColunasDaVenda(
+      venda,
+      total: total,
+      formatarMoeda: formatarMoeda,
+    ).map((l) => l.descricao).toList();
+  }
+
+  /// Rotulo e valor em colunas (evita quebra do valor monetario na impressao).
+  static List<({String rotulo, String valor, String descricao})> linhasColunasDaVenda(
+    Venda venda, {
+    required double total,
+    required String Function(double) formatarMoeda,
+  }) {
+    return linhasColunas(
       total: total,
       formatarMoeda: formatarMoeda,
       formaPagamento: venda.formaPagamento,
@@ -94,13 +107,29 @@ abstract final class OrcamentoCondicoesPagamento {
     int quantidadeParcelas = 1,
     String pagamentosJson = '',
   }) {
+    return linhasColunas(
+      total: total,
+      formatarMoeda: formatarMoeda,
+      formaPagamento: formaPagamento,
+      quantidadeParcelas: quantidadeParcelas,
+      pagamentosJson: pagamentosJson,
+    ).map((l) => l.descricao).toList();
+  }
+
+  static List<({String rotulo, String valor, String descricao})> linhasColunas({
+    required double total,
+    required String Function(double) formatarMoeda,
+    String formaPagamento = PagamentoMeio.dinheiro,
+    int quantidadeParcelas = 1,
+    String pagamentosJson = '',
+  }) {
     final t = _valorSeguro(total);
     if (formaPagamento == PagamentoMeio.misto) {
       final mistos = PagamentoOrcamentoCodec.decode(pagamentosJson);
       if (mistos.isNotEmpty) {
         return mistos
             .map(
-              (l) => _linhaMeio(
+              (l) => _colunasMeio(
                 meio: l.meio,
                 valor: _valorSeguro(l.valor),
                 parcelas: l.parcelas,
@@ -111,7 +140,7 @@ abstract final class OrcamentoCondicoesPagamento {
       }
     }
     return [
-      _linhaMeio(
+      _colunasMeio(
         meio: formaPagamento,
         valor: t,
         parcelas: quantidadeParcelas,
@@ -120,24 +149,47 @@ abstract final class OrcamentoCondicoesPagamento {
     ];
   }
 
-  static String _linhaMeio({
+  static ({String rotulo, String valor, String descricao}) _colunasMeio({
     required String meio,
     required double valor,
     required int parcelas,
     required String Function(double) formatarMoeda,
   }) {
-    final rotulo = rotuloMeio(meio);
+    final rotuloMeioTxt = rotuloMeio(meio);
     if (meio == PagamentoMeio.cartaoCredito) {
       final n = parcelas < 1 ? 1 : parcelas;
       if (n > 1) {
-        return '$rotulo ${n}x de ${formatarMoeda(valor / n)}';
+        final valorParcela = formatarMoeda(valor / n);
+        final rotulo = '$rotuloMeioTxt ${n}x de';
+        return (
+          rotulo: rotulo,
+          valor: valorParcela,
+          descricao: '$rotulo $valorParcela',
+        );
       }
-      return '$rotulo a vista - Total: ${formatarMoeda(valor)}';
+      final valorFmt = formatarMoeda(valor);
+      final rotulo = '$rotuloMeioTxt à vista';
+      return (
+        rotulo: rotulo,
+        valor: valorFmt,
+        descricao: '$rotulo - Total: $valorFmt',
+      );
     }
     if (meioAVista(meio)) {
-      return '$rotulo a vista - Total: ${formatarMoeda(valor)}';
+      final valorFmt = formatarMoeda(valor);
+      final rotulo = '$rotuloMeioTxt à vista';
+      return (
+        rotulo: rotulo,
+        valor: valorFmt,
+        descricao: '$rotulo - Total: $valorFmt',
+      );
     }
-    return '$rotulo - Total: ${formatarMoeda(valor)}';
+    final valorFmt = formatarMoeda(valor);
+    return (
+      rotulo: rotuloMeioTxt,
+      valor: valorFmt,
+      descricao: '$rotuloMeioTxt - Total: $valorFmt',
+    );
   }
 
   static double _valorSeguro(double total) {

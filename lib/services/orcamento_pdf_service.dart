@@ -186,7 +186,7 @@ abstract final class OrcamentoPdfService {
           (telLoja.isNotEmpty || whatsappLoja.isNotEmpty ? 1 : 0) +
           (cnpjEmpresa.trim().isNotEmpty ? 1 : 0),
       // Folga: aviso fiscal + forma de pagamento escolhida (+ rodape config).
-      linhasExtras: 8 +
+      linhasExtras: 7 +
           OrcamentoCondicoesPagamento.quantidadeLinhasLayout(
             formaPagamento: venda.formaPagamento,
             quantidadeParcelas: venda.quantidadeParcelas,
@@ -230,17 +230,14 @@ abstract final class OrcamentoPdfService {
                 endereco: empresa.endereco,
                 cnpj: cnpjEmpresa,
               ),
-              CupomPdfLayout.faixaTipoDocumento(
+              CupomPdfLayout.tituloOrcamentoNumero(
                 layout: layout,
-                titulo: layout.tituloDocumentoEfetivoOrcamento,
+                numero: venda.numeroOrcamento > 0
+                    ? venda.numeroOrcamento
+                    : venda.id,
               ),
               CupomPdfLayout.textoCorpo(
-                'ORCAMENTO N. ${venda.numeroOrcamento}',
-                layout,
-                fontWeight: pw.FontWeight.bold,
-              ),
-              CupomPdfLayout.textoCorpo(
-                'Emissao: $dataHora',
+                'Emissão: $dataHora',
                 layout,
                 fontWeight: pw.FontWeight.bold,
               ),
@@ -330,36 +327,25 @@ abstract final class OrcamentoPdfService {
                 valor: formatar(total),
                 destaque: true,
               ),
-              CupomPdfLayout.textoCorpo(
-                CupomPdfLayout.textoTermicoAscii(
-                  OrcamentoCondicoesPagamento.resumoFinanceiroDaVenda(
-                    venda,
-                    total: total,
-                    formatarMoeda: formatar,
-                  ),
-                ),
-                layout,
-                fontWeight: pw.FontWeight.bold,
-              ),
               CupomPdfLayout.divisoriaSecao(layout: layout),
               CupomPdfLayout.tituloSecao(
                 OrcamentoCondicoesPagamento.tituloSecao,
                 layout,
               ),
-              ...OrcamentoCondicoesPagamento.linhasDaVenda(
+              ...OrcamentoCondicoesPagamento.linhasColunasDaVenda(
                 venda,
                 total: total,
                 formatarMoeda: formatar,
               ).map(
-                (linha) => CupomPdfLayout.textoCorpo(
-                  CupomPdfLayout.textoTermicoAscii(linha),
-                  layout,
-                  fontWeight: pw.FontWeight.bold,
+                (linha) => CupomPdfLayout.linhaTotal(
+                  layout: layout,
+                  rotulo: linha.rotulo,
+                  valor: linha.valor,
                 ),
               ),
               if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) ...[
                 CupomPdfLayout.textoCorpo(
-                  'Condicao de quitacao (fiado):',
+                  'Condição de quitação (fiado):',
                   layout,
                   fontWeight: pw.FontWeight.bold,
                 ),

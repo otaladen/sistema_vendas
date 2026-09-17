@@ -62,7 +62,9 @@ abstract final class VendaNfceObrigatoriaHelper {
 
   static bool filtroFiscalListagemRequerMemoria(String filtroFiscal) =>
       filtroFiscal == 'sem_nfce_eletronico' ||
-      filtroFiscal == 'com_nfce_eletronico';
+      filtroFiscal == 'com_nfce_eletronico' ||
+      filtroFiscal == 'fiscal_pendente' ||
+      filtroFiscal == 'concluida_fiscal';
 
   /// Venda finalizada que deveria ter NFC-e mas ainda nao tem documento valido.
   static bool ehPendenteEmissao(Venda venda) {

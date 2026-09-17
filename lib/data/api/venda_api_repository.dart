@@ -7,6 +7,7 @@ import '../../domain/entregas/loja_origem_mercadoria.dart';
 import '../../domain/filtro_listagem_entregas.dart';
 import '../../domain/fiscal/nfe_venda_sync.dart';
 import '../../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/limite_credito_helper.dart';
 import '../../domain/listagem_vendas_dedupe.dart';
 import '../../domain/listagem_vendas_periodo.dart';
@@ -906,9 +907,9 @@ class VendaApiRepository extends ChangeNotifier {
   }
 
   bool _correspondeFiltroFiscalListagem(Venda v, String filtroFiscal) {
+    final nfe55Ext = obterNfe55AutorizadaPorVenda(v.id) != null;
     switch (filtroFiscal) {
       case 'sem_nfce_eletronico':
-        final nfe55Ext = obterNfe55AutorizadaPorVenda(v.id) != null;
         return VendaNfceObrigatoriaHelper.correspondeFiltroListagemSemNfceEletronico(
           v,
           nfe55AutorizadaRegistroExterno: nfe55Ext,
@@ -916,6 +917,16 @@ class VendaApiRepository extends ChangeNotifier {
       case 'com_nfce_eletronico':
         return VendaNfceObrigatoriaHelper
             .correspondeFiltroListagemSomenteNfceEletronico(v);
+      case 'fiscal_pendente':
+        return VendaDocumentoRotuloHelper.correspondeFiltroListagemFiscalPendente(
+          v,
+          nfe55AutorizadaRegistroExterno: nfe55Ext,
+        );
+      case 'concluida_fiscal':
+        return VendaDocumentoRotuloHelper.correspondeFiltroListagemConcluidaFiscal(
+          v,
+          nfe55AutorizadaRegistroExterno: nfe55Ext,
+        );
       default:
         return true;
     }

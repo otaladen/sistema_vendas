@@ -13,7 +13,7 @@ void main() {
         formatarMoeda: moeda,
         formaPagamento: PagamentoMeio.dinheiro,
       ).single,
-      'Dinheiro a vista - Total: R\$ 100.00',
+      'Dinheiro à vista - Total: R\$ 100.00',
     );
     expect(
       OrcamentoCondicoesPagamento.linhas(
@@ -21,7 +21,7 @@ void main() {
         formatarMoeda: moeda,
         formaPagamento: PagamentoMeio.pix,
       ).single,
-      'PIX a vista - Total: R\$ 100.00',
+      'PIX à vista - Total: R\$ 100.00',
     );
     expect(
       OrcamentoCondicoesPagamento.linhas(
@@ -29,7 +29,7 @@ void main() {
         formatarMoeda: moeda,
         formaPagamento: PagamentoMeio.cartaoDebito,
       ).single,
-      'Cartao de debito a vista - Total: R\$ 100.00',
+      'Cartão de débito à vista - Total: R\$ 100.00',
     );
   });
 
@@ -41,7 +41,7 @@ void main() {
       quantidadeParcelas: 3,
     );
     expect(linhas, hasLength(1));
-    expect(linhas.single, 'Cartao de credito 3x de R\$ 30.00');
+    expect(linhas.single, 'Cartão de crédito 3x de R\$ 30.00');
     expect(linhas.any((l) => l.contains('2x') || l.contains('12x')), isFalse);
   });
 
@@ -60,8 +60,8 @@ void main() {
       formatarMoeda: moeda,
     );
     expect(linhas, hasLength(2));
-    expect(linhas[0], 'PIX a vista - Total: R\$ 40.00');
-    expect(linhas[1], 'Cartao de credito 2x de R\$ 30.00');
+    expect(linhas[0], 'PIX à vista - Total: R\$ 40.00');
+    expect(linhas[1], 'Cartão de crédito 2x de R\$ 30.00');
     expect(linhas.any((l) => l.contains('12x')), isFalse);
   });
 
@@ -75,7 +75,7 @@ void main() {
       total: 150,
       formatarMoeda: moeda,
     );
-    expect(texto, 'Pagamento: Cartao de credito 3x de R\$ 50.00');
+    expect(texto, 'Pagamento: Cartão de crédito 3x de R\$ 50.00');
   });
 
   test('total invalido vira zero na condicao a vista', () {

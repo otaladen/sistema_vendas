@@ -209,7 +209,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
   }
 
   String _rotuloCupomFiscalLista(Venda v, {VendaDocumentoNfe55Resumo? nfe55}) {
-    return VendaDocumentoRotuloHelper.rotuloIdentificacaoLista(
+    return VendaDocumentoRotuloHelper.rotuloDocumentoFiscalLista(
       v,
       nfe55: nfe55 ?? _nfe55ResumoDeVenda(v),
     );
@@ -232,8 +232,16 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     );
   }
 
-  Color _corStatusOperacionalLista(Venda v, ColorScheme scheme) {
-    return VendaDocumentoRotuloHelper.corStatusLista(v, scheme);
+  Color _corStatusOperacionalLista(
+    Venda v,
+    ColorScheme scheme, {
+    VendaDocumentoNfe55Resumo? nfe55,
+  }) {
+    return VendaDocumentoRotuloHelper.corStatusLista(
+      v,
+      scheme,
+      nfe55: nfe55 ?? _nfe55ResumoDeVenda(v),
+    );
   }
 
   Future<void> _verDanfeNfce(Venda v) async {
@@ -1377,7 +1385,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       statusDetalhe: statusCompleto != statusResumido ? statusCompleto : null,
       statusCor: v.cancelada
           ? scheme.error
-          : _corStatusOperacionalLista(v, scheme),
+          : _corStatusOperacionalLista(v, scheme, nfe55: nfe55),
       dataHora: _dataHora.format(
         VendaFinalizacaoCaixaHelper.momentoFinalizacao(v).toLocal(),
       ),
@@ -1745,6 +1753,12 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
             totalRegistros: _totalListagemVendas,
             exibidos: _resultados.length,
             valorTotalExibido: _valorTotalExibido,
+            filtroFiscal: _filtroFiscal,
+            onFiltroFiscalRapido: (v) {
+              if (_filtroFiscal == v) return;
+              setState(() => _filtroFiscal = v);
+              unawaited(_pesquisar());
+            },
             onAtualizar: _carregandoListagem ? null : () => unawaited(_pesquisar()),
           ),
           if (_carregandoListagem)
@@ -1981,6 +1995,14 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 DropdownMenuItem(
                                   value: 'todos',
                                   child: Text('Todos'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'concluida_fiscal',
+                                  child: Text('Concluidas (fiscal OK)'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'fiscal_pendente',
+                                  child: Text('Fiscal pendente (sem documento)'),
                                 ),
                                 DropdownMenuItem(
                                   value: 'com_nfce_eletronico',
