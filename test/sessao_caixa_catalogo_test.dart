@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/caixa_auditoria_repository.dart';
 import 'package:sistema_vendas/domain/sessao_caixa_referencia.dart';
-import 'package:sistema_vendas/domain/sessao_caixa_referencia.dart';
 
 void main() {
   test('monta sessao fechada pareando abertura e fechamento', () {

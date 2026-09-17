@@ -415,6 +415,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _carrinhoUiEpoch.value++;
   }
 
+  void _definirProcessandoLeitorBarrasPdv(bool valor) {
+    if (_processandoLeitorBarrasPdv == valor) return;
+    _processandoLeitorBarrasPdv = valor;
+    if (mounted) setState(() {});
+  }
+
   void _alternarTipoEntregaLinhaCarrinho(int index) {
     if (index < 0 || index >= _carrinho.length) return;
     final tipoAnterior = EntregaVendaHelper.normalizarTipoItem(
@@ -514,26 +520,24 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       return;
     }
 
-    setState(() {
-      orig.quantidade = armRestante.armazenado;
-      orig.gravadoEmMilesimosPdv = armRestante.gravadoEmMilesimosPdv;
-      _carrinho.insert(
-        index + 1,
-        _OrcamentoItemDraft(
-          produto: orig.produto,
-          quantidade: armNova.armazenado,
-          precoTipo: orig.precoTipo,
-          precoUnitario: orig.precoUnitario,
-          tipoEntregaItem: result.tipoEntregaItem,
-          quantidadeEmUnidadeCompra: orig.quantidadeEmUnidadeCompra,
-          gravadoEmMilesimosPdv: armNova.gravadoEmMilesimosPdv,
-          precoUnitarioManual: orig.precoUnitarioManual,
-          promocaoId: orig.promocaoId,
-          promocaoNome: orig.promocaoNome,
-        ),
-      );
-      _indiceLinhaCarrinho = index + 1;
-    });
+    orig.quantidade = armRestante.armazenado;
+    orig.gravadoEmMilesimosPdv = armRestante.gravadoEmMilesimosPdv;
+    _carrinho.insert(
+      index + 1,
+      _OrcamentoItemDraft(
+        produto: orig.produto,
+        quantidade: armNova.armazenado,
+        precoTipo: orig.precoTipo,
+        precoUnitario: orig.precoUnitario,
+        tipoEntregaItem: result.tipoEntregaItem,
+        quantidadeEmUnidadeCompra: orig.quantidadeEmUnidadeCompra,
+        gravadoEmMilesimosPdv: armNova.gravadoEmMilesimosPdv,
+        precoUnitarioManual: orig.precoUnitarioManual,
+        promocaoId: orig.promocaoId,
+        promocaoNome: orig.promocaoNome,
+      ),
+    );
+    _indiceLinhaCarrinho = index + 1;
     _notificarUiCarrinho();
     _carrinhoFocus.requestFocus();
   }
@@ -997,7 +1001,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
     // Copia preco1..3 no Produto nao basta: a linha usa precoUnitario.
     _atualizarPrecosCarrinhoPreservandoTabelas();
-    setState(() {});
     _notificarUiCarrinho();
   }
 
@@ -1550,7 +1553,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       );
     }
 
-    _processandoLeitorBarrasPdv = true;
+    _definirProcessandoLeitorBarrasPdv(true);
     try {
       var produto = widget.produtoRepository.resolverLeitorCodigoBarras(
         termo,
@@ -1594,7 +1597,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         mensagemErro: 'Produto nao encontrado: $termo',
       );
     } finally {
-      _processandoLeitorBarrasPdv = false;
+      _definirProcessandoLeitorBarrasPdv(false);
     }
   }
 
@@ -1795,11 +1798,23 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   List<FocusNode> _cadeiaFocoCheckout() {
-    final nodes = <FocusNode>[_focusClientePdV, _focusVendedorPdV];
+    if (_checkoutDialogAberto) {
+      final nodes = <FocusNode>[_focusClientePdV, _focusVendedorPdV];
+      if (_carrinho.isNotEmpty) {
+        nodes.add(_carrinhoFocus);
+        nodes.add(_focusPagamentoPdV);
+        nodes.add(_focusDescontoPdV);
+      }
+      nodes.add(_focusSalvarOrcamentoPdV);
+      return nodes;
+    }
+    final nodes = <FocusNode>[
+      _focusVendedorPdV,
+      _focusEntregaPdV,
+      _focusClientePdV,
+    ];
     if (_carrinho.isNotEmpty) {
       nodes.add(_carrinhoFocus);
-      nodes.add(_focusPagamentoPdV);
-      nodes.add(_focusDescontoPdV);
     }
     nodes.add(_focusSalvarOrcamentoPdV);
     return nodes;
@@ -2192,38 +2207,36 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       tipoNovo,
       emEmbalagem,
     );
-    setState(() {
-      if (idxExistente != null) {
-        _carrinho[idxExistente].quantidade += qArmazenada;
-        if (botaForaAplicado) {
-          _carrinho[idxExistente].botaForaAplicado = true;
-          _carrinho[idxExistente].percentualBotaForaAplicado =
-              percentualBotaFora;
-          if (!_carrinho[idxExistente].precoUnitarioManual) {
-            _carrinho[idxExistente].precoUnitario = unit;
-          }
+    if (idxExistente != null) {
+      _carrinho[idxExistente].quantidade += qArmazenada;
+      if (botaForaAplicado) {
+        _carrinho[idxExistente].botaForaAplicado = true;
+        _carrinho[idxExistente].percentualBotaForaAplicado = percentualBotaFora;
+        if (!_carrinho[idxExistente].precoUnitarioManual) {
+          _carrinho[idxExistente].precoUnitario = unit;
         }
-        _indiceLinhaCarrinho = idxExistente;
-      } else {
-        _carrinho.add(
-          _OrcamentoItemDraft(
-            produto: produto,
-            quantidade: qArmazenada,
-            precoTipo: preco,
-            precoUnitario: unit,
-            tipoEntregaItem: tipoNovo,
-            quantidadeEmUnidadeCompra: emEmbalagem,
-            gravadoEmMilesimosPdv: gravadoEmMilesimosPdv,
-            promocaoId: resPreco.promocaoId,
-            promocaoNome: resPreco.promocaoNome,
-            botaForaAplicado: botaForaAplicado,
-            percentualBotaForaAplicado: percentualBotaFora,
-          ),
-        );
-        _indiceLinhaCarrinho = _carrinho.length - 1;
       }
-      _recalcularPromocoesCarrinho();
-    });
+      _indiceLinhaCarrinho = idxExistente;
+    } else {
+      _carrinho.add(
+        _OrcamentoItemDraft(
+          produto: produto,
+          quantidade: qArmazenada,
+          precoTipo: preco,
+          precoUnitario: unit,
+          tipoEntregaItem: tipoNovo,
+          quantidadeEmUnidadeCompra: emEmbalagem,
+          gravadoEmMilesimosPdv: gravadoEmMilesimosPdv,
+          promocaoId: resPreco.promocaoId,
+          promocaoNome: resPreco.promocaoNome,
+          botaForaAplicado: botaForaAplicado,
+          percentualBotaForaAplicado: percentualBotaFora,
+        ),
+      );
+      _indiceLinhaCarrinho = _carrinho.length - 1;
+    }
+    _recalcularPromocoesCarrinho();
+    _notificarUiCarrinho();
     _registrarProdutoRecente(produto);
     if (mostrarSugestoesAgregadas) {
       _atualizarSugestoesAposAdicionar(produto);
@@ -2243,10 +2256,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
     final item = _carrinho[index];
     _qtdCarrinhoInlineController.text = item.quantidadeExibicaoTexto;
-    setState(() {
-      _indiceLinhaEdicaoQuantidade = index;
-      _indiceLinhaCarrinho = index;
-    });
+    _indiceLinhaEdicaoQuantidade = index;
+    _indiceLinhaCarrinho = index;
+    _notificarUiCarrinho();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focusQuantidadeCarrinhoInline.requestFocus();
@@ -2260,7 +2272,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   void _encerrarEdicaoQuantidadeCarrinho({required bool voltarPesquisa}) {
     if (_indiceLinhaEdicaoQuantidade == null) return;
-    setState(() => _indiceLinhaEdicaoQuantidade = null);
+    _indiceLinhaEdicaoQuantidade = null;
+    _notificarUiCarrinho();
     if (voltarPesquisa) _voltarFocoParaPesquisa();
   }
 
@@ -2600,37 +2613,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     });
   }
 
-  Future<void> _editarQuantidadeCarrinho(int index) async {
-    if (index < 0 || index >= _carrinho.length) return;
-    final item = _carrinho[index];
-    final fracionada = !item.quantidadeEmUnidadeCompra;
-    final unidade = item.quantidadeEmUnidadeCompra &&
-            item.produto.pdvPodeVenderEmUnidadeCompra
-        ? ProdutoEmbalagem.normalizarUnidade(item.produto.unidadeCompraEfetiva)
-        : ProdutoEmbalagem.normalizarUnidade(item.produto.unidade);
-    final digitada = await showDialog<double>(
-      context: context,
-      builder: (ctx) => _EditarQuantidadeCarrinhoDialog(
-        nomeProduto: item.produto.nome,
-        quantidadeInicial: item.quantidadeExibicaoTexto,
-        fracionada: fracionada,
-        unidade: unidade,
-      ),
-    );
-    if (!mounted || digitada == null) return;
-    final armazenamento = QuantidadeVendaUtil.armazenarQuantidadeVendaNoCarrinho(
-      produto: item.produto,
-      quantidadeVenda: digitada,
-      emUnidadeCompra: item.quantidadeEmUnidadeCompra,
-    );
-    if (armazenamento.armazenado <= 0) return;
-    item.gravadoEmMilesimosPdv = armazenamento.gravadoEmMilesimosPdv;
-    _alterarQuantidadeCarrinho(
-      index,
-      armazenamento.armazenado - item.quantidade,
-    );
-  }
-
   void _removerItemCarrinho(int index) {
     _aplicarMutacaoCarrinhoAposLayout(() {
       if (index < 0 || index >= _carrinho.length) return;
@@ -2650,7 +2632,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
   }
 
-  /// Setas no carrinho: ↑↓ outra linha (↑ na primeira volta a busca); +/- qtd no teclado numerico.
+  bool _teclaIncrementaQuantidadeCarrinho(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.numpadAdd ||
+        key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.add;
+  }
+
+  bool _teclaDecrementaQuantidadeCarrinho(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.numpadSubtract ||
+        key == LogicalKeyboardKey.minus;
+  }
+
+  /// Setas no carrinho: ↑↓ outra linha (↑ na primeira volta a busca); +/- qtd no teclado.
   KeyEventResult _onKeyCarrinho(FocusNode node, KeyEvent event) {
     if (_indiceLinhaEdicaoQuantidade != null) {
       return KeyEventResult.ignored;
@@ -2702,11 +2695,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       unawaited(_alterarPrecoLinhaCarrinhoSelecionada());
       return KeyEventResult.handled;
     }
-    if (!ctrl && event.logicalKey == LogicalKeyboardKey.numpadAdd) {
+    if (!ctrl && _teclaIncrementaQuantidadeCarrinho(event.logicalKey)) {
       _alterarQuantidadeCarrinho(idx, _passoQuantidadeCarrinho(_carrinho[idx]));
       return KeyEventResult.handled;
     }
-    if (!ctrl && event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
+    if (!ctrl && _teclaDecrementaQuantidadeCarrinho(event.logicalKey)) {
       _alterarQuantidadeCarrinho(
         idx,
         -_passoQuantidadeCarrinho(_carrinho[idx]),
@@ -4511,14 +4504,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         !linha.precoUnitarioManual) {
       return;
     }
-    setState(() {
-      _aplicarTabelaPrecoNaLinha(linha, tabela);
-      _promoCarrinho?.aplicarRegrasCarrinho(
-        _carrinho,
-        dataReferencia: DateTime.now(),
-        segmentoCliente: _segmentoClienteAtivo,
-      );
-    });
+    _aplicarTabelaPrecoNaLinha(linha, tabela);
+    _promoCarrinho?.aplicarRegrasCarrinho(
+      _carrinho,
+      dataReferencia: DateTime.now(),
+      segmentoCliente: _segmentoClienteAtivo,
+    );
     _notificarUiCarrinho();
   }
 
@@ -4548,8 +4539,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     final carrinhoMisto = tiposNoCarrinho.length > 1;
 
     if (carrinhoMisto) {
-      setState(() => _tipoEntregaSelecionada = tipo);
-      _notificarUiCarrinho();
+      _tipoEntregaSelecionada = tipo;
+      if (mounted) setState(() {});
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4562,7 +4553,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         );
       }
     } else {
-      setState(() => _atualizarEntregaCarrinhoComTipo(tipo));
+      _atualizarEntregaCarrinhoComTipo(tipo);
+      if (mounted) setState(() {});
       _notificarUiCarrinho();
       if (_carrinho.isNotEmpty && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -8569,6 +8561,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                               modoCelular: _pdvUiCelular,
                               pesquisaFocus: _pesquisaFocus,
                               pesquisaController: _pesquisaController,
+                              processandoLeitorBarras:
+                                  _processandoLeitorBarrasPdv,
                               mostrarAjudaAtalhos: _pdvUiCelular
                                   ? false
                                   : _mostrarAjudaAtalhos,
@@ -8671,6 +8665,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
     required this.onSubmitEntrada,
     required this.onRecarregarProdutos,
     required this.onToggleAjudaAtalhos,
+    this.processandoLeitorBarras = false,
     this.mostrarBotaoCamera = false,
     this.onAbrirCamera,
     this.modoCelular = false,
@@ -8680,6 +8675,7 @@ class _PdvHeaderPesquisa extends StatelessWidget {
   final bool modoCelular;
   final FocusNode pesquisaFocus;
   final TextEditingController pesquisaController;
+  final bool processandoLeitorBarras;
   final bool mostrarAjudaAtalhos;
   final bool mostrarBotaoCamera;
   final VoidCallback onLimparBusca;
@@ -8756,17 +8752,27 @@ class _PdvHeaderPesquisa extends StatelessWidget {
                 suffixIcon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (processandoLeitorBarras)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8, right: 4),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
                     if (mostrarBotaoCamera && onAbrirCamera != null)
                       IconButton(
                         tooltip: 'Bipar codigo de barras',
                         visualDensity: VisualDensity.compact,
-                        onPressed: onAbrirCamera,
+                        onPressed: processandoLeitorBarras ? null : onAbrirCamera,
                         icon: const Icon(Icons.qr_code_scanner, size: 22),
                       ),
                     IconButton(
                       tooltip: 'Limpar busca',
                       visualDensity: VisualDensity.compact,
-                      onPressed: onLimparBusca,
+                      onPressed:
+                          processandoLeitorBarras ? null : onLimparBusca,
                       icon: const Icon(Icons.clear, size: 20),
                     ),
                     IconButton(
@@ -9824,113 +9830,6 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _EditarQuantidadeCarrinhoDialog extends StatefulWidget {
-  const _EditarQuantidadeCarrinhoDialog({
-    required this.nomeProduto,
-    required this.quantidadeInicial,
-    required this.fracionada,
-    required this.unidade,
-  });
-
-  final String nomeProduto;
-  final String quantidadeInicial;
-  final bool fracionada;
-  final String unidade;
-
-  @override
-  State<_EditarQuantidadeCarrinhoDialog> createState() =>
-      _EditarQuantidadeCarrinhoDialogState();
-}
-
-class _EditarQuantidadeCarrinhoDialogState
-    extends State<_EditarQuantidadeCarrinhoDialog> {
-  late final TextEditingController _qtdController;
-  String? _erro;
-
-  @override
-  void initState() {
-    super.initState();
-    _qtdController = TextEditingController(text: widget.quantidadeInicial);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _qtdController.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: _qtdController.text.length,
-      );
-    });
-  }
-
-  @override
-  void dispose() {
-    _qtdController.dispose();
-    super.dispose();
-  }
-
-  void _confirmar() {
-    final q = QuantidadeVendaUtil.parseEntradaCarrinho(
-      _qtdController.text,
-      aceitaDecimal: widget.fracionada,
-    );
-    if (q == null) {
-      setState(() {
-        _erro = widget.fracionada
-            ? 'Informe uma quantidade maior que zero (ex.: 5,75).'
-            : 'Informe uma quantidade maior que zero.';
-      });
-      return;
-    }
-    Navigator.of(context).pop(q);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Quantidade'),
-      content: AdaptiveDialogPane(
-        desktopWidth: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              widget.nomeProduto,
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _qtdController,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Quantidade (${widget.unidade})',
-                helperText: widget.fracionada
-                    ? 'Aceita decimais (ex.: 5,75 ou 4.50).'
-                    : 'Quantidade da embalagem.',
-                errorText: _erro,
-              ),
-              keyboardType: widget.fracionada
-                  ? const TextInputType.numberWithOptions(decimal: true)
-                  : TextInputType.number,
-              inputFormatters: [
-                QuantidadePdvInputFormatter(fracionada: widget.fracionada),
-              ],
-              textInputAction: TextInputAction.done,
-              onChanged: (_) => setState(() => _erro = null),
-              onFieldSubmitted: (_) => _confirmar(),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(onPressed: _confirmar, child: const Text('Aplicar')),
-      ],
     );
   }
 }
