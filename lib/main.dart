@@ -410,9 +410,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _executarBackupAoFechar({bool agendarHeadless = true}) async {
+  Future<void> _executarBackupAoFechar({
+    bool agendarHeadless = true,
+    bool pularBackup = false,
+  }) async {
     // Headless so ao fechar a UI. Logout/troca de usuario deixa o app aberto.
-    if (widget.objectBox != null) {
+    if (!pularBackup && widget.objectBox != null) {
       final nomeLoja = await _nomeLojaAtual();
       await BackupAoFecharService.tentarSeAtivo(
         repository: widget.configuracoesService.repository,

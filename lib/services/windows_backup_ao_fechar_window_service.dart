@@ -8,6 +8,12 @@ import 'app_boot_log.dart';
 import 'configuracoes_service.dart';
 import '../ui/app_global_error_handler.dart';
 
+enum _ConfirmacaoBackupAoFechar {
+  cancelar,
+  fecharSemBackup,
+  fazerBackup,
+}
+
 /// Intercepta o fechamento da janela no Windows enquanto o backup ao sair roda.
 abstract final class WindowsBackupAoFecharWindowService {
   WindowsBackupAoFecharWindowService._();
@@ -22,7 +28,8 @@ abstract final class WindowsBackupAoFecharWindowService {
 
   static Future<void> instalar({
     required ConfiguracoesService configuracoesService,
-    required Future<void> Function({bool agendarHeadless}) executarBackupAoFechar,
+    required Future<void> Function({bool agendarHeadless, bool pularBackup})
+        executarBackupAoFechar,
     required bool Function() servidorComObjectBox,
   }) async {
     if (!Platform.isWindows) return;
@@ -55,7 +62,8 @@ class _WindowsBackupCloseListener with WindowListener {
   });
 
   final ConfiguracoesService configuracoesService;
-  final Future<void> Function({bool agendarHeadless}) executarBackupAoFechar;
+  final Future<void> Function({bool agendarHeadless, bool pularBackup})
+      executarBackupAoFechar;
   final bool Function() servidorComObjectBox;
 
   Future<void> atualizarPreventClose() async {
@@ -92,6 +100,22 @@ class _WindowsBackupCloseListener with WindowListener {
         return;
       }
 
+      final confirmacao = await _perguntarConfirmacaoBackup();
+      if (confirmacao == _ConfirmacaoBackupAoFechar.cancelar) {
+        WindowsBackupAoFecharWindowService._fechamentoEmAndamento = false;
+        return;
+      }
+
+      if (confirmacao == _ConfirmacaoBackupAoFechar.fecharSemBackup) {
+        await executarBackupAoFechar(
+          agendarHeadless: true,
+          pularBackup: true,
+        );
+        await windowManager.setPreventClose(false);
+        await windowManager.destroy();
+        return;
+      }
+
       await windowManager.setPreventClose(true);
       await _executarBackupComModalBloqueante();
       await windowManager.setPreventClose(false);
@@ -116,6 +140,56 @@ class _WindowsBackupCloseListener with WindowListener {
         );
       }
     }
+  }
+
+  Future<_ConfirmacaoBackupAoFechar> _perguntarConfirmacaoBackup() async {
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) {
+      return _ConfirmacaoBackupAoFechar.fecharSemBackup;
+    }
+
+    final resultado = await showDialog<_ConfirmacaoBackupAoFechar>(
+      context: ctx,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (dialogCtx) {
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('Backup ao fechar'),
+            content: const Text(
+              'O backup ao fechar esta ativo.\n\n'
+              'Deseja fazer o backup de seguranca agora, antes de sair?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(
+                  dialogCtx,
+                  _ConfirmacaoBackupAoFechar.cancelar,
+                ),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(
+                  dialogCtx,
+                  _ConfirmacaoBackupAoFechar.fecharSemBackup,
+                ),
+                child: const Text('Fechar sem backup'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  dialogCtx,
+                  _ConfirmacaoBackupAoFechar.fazerBackup,
+                ),
+                child: const Text('Fazer backup e fechar'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    return resultado ?? _ConfirmacaoBackupAoFechar.cancelar;
   }
 
   BuildContext? _dialogContext;

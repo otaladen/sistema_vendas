@@ -9,6 +9,9 @@ import '../../services/configuracoes_service.dart';
 import '../../services/servidor_config_service.dart';
 import '../../data/api/lan_api_url.dart';
 import '../../data/api/lan_conexao_perfis.dart';
+import '../../data/api/lan_conexao_qr.dart';
+import 'widgets/pdv_barcode_scanner_support.dart';
+import 'configuracoes/lan_conexao_qr_scanner_page.dart';
 
 /// Tela minima: cliente Windows/Android sem URL do servidor (sem bootstrap ObjectBox).
 class TerminalConfigPage extends StatefulWidget {
@@ -129,6 +132,29 @@ class _TerminalConfigPageState extends State<TerminalConfigPage> {
     } finally {
       if (mounted) setState(() => _salvando = false);
     }
+  }
+
+  Future<void> _lerQrConexao() async {
+    final bruto = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const LanConexaoQrScannerPage()),
+    );
+    if (!mounted || bruto == null || bruto.trim().isEmpty) return;
+    final dados = LanConexaoQr.parse(bruto);
+    if (dados == null) {
+      setState(() => _erro = 'QR invalido. Use o QR gerado no PC servidor.');
+      return;
+    }
+    final perfil = LanConexaoPerfisStore.pareceTailscale(dados.url)
+        ? LanConexaoPerfil.tailscale4g
+        : LanConexaoPerfil.wifiLoja;
+    setState(() {
+      _perfil = perfil;
+      _urlCtrl.text = dados.url;
+      if (dados.token.isNotEmpty) _tokenCtrl.text = dados.token;
+      _erro = null;
+    });
+    await LanConexaoPerfisStore.setPerfilAtivo(perfil);
+    await LanConexaoPerfisStore.salvarUrlPerfil(perfil, dados.url);
   }
 
   /// Sai do Terminal Leve e volta ao ERP com banco local (dev ou celular offline).
@@ -308,6 +334,14 @@ class _TerminalConfigPageState extends State<TerminalConfigPage> {
                     border: OutlineInputBorder(),
                   ),
                 ),
+                if (pdvLeitorCameraDisponivel) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: ocupado ? null : _lerQrConexao,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Ler QR Code do PC servidor'),
+                  ),
+                ],
                 if (_erro != null) ...[
                   const SizedBox(height: 12),
                   Material(

@@ -1550,14 +1550,14 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
   String _tooltipRotinaBackup() {
     if (_backupAutomaticoAtivo && _backupAoFecharAtivo) {
       return 'Rotina automatica: copia periodica enquanto o app estiver aberto '
-          'e uma copia extra ao sair da sessao ou fechar o sistema. '
+          'e, ao sair, pergunta se deseja uma copia extra. '
           'Ambos usam a pasta de destino configurada.';
     }
     if (_backupAutomaticoAtivo) {
       return 'Copia periodica enquanto o app estiver aberto, conforme a frequencia.';
     }
-    return 'Copia ao encerrar faz parte da rotina de protecao: executa ao sair '
-        'da sessao ou fechar o app (requer pasta de destino).';
+    return 'Ao fechar, pergunta se deseja copiar o backup agora '
+        '(requer pasta de destino).';
   }
 
   @override
@@ -1693,8 +1693,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Backup ao fechar o sistema'),
                   subtitle: Text(
-                    'Faz parte da rotina automatica: copia ao sair da sessao '
-                    'ou fechar o app (requer pasta de destino).',
+                    'Ao fechar, pergunta se deseja copiar o backup agora '
+                    '(requer pasta de destino).',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),

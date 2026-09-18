@@ -4,6 +4,74 @@ import 'package:flutter/services.dart';
 import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../theme/app_semantic_colors.dart';
 
+/// Banner de troco em destaque para leitura rapida no PDV.
+class CaixaBannerTrocoDestaque extends StatelessWidget {
+  const CaixaBannerTrocoDestaque({
+    super.key,
+    required this.valorFormatado,
+    this.compact = false,
+  });
+
+  final String valorFormatado;
+  final bool compact;
+
+  static Color _verdeEscuro(BuildContext context) {
+    final semantic = Theme.of(context).extension<AppSemanticColors>();
+    return semantic?.successFg ?? Colors.green.shade900;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = _verdeEscuro(context);
+    final valorSize = compact ? 24.0 : 30.0;
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 16,
+        vertical: compact ? 10 : 16,
+      ),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(compact ? 8 : 10),
+        boxShadow: [
+          BoxShadow(
+            color: bg.withValues(alpha: 0.35),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'TROCO',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.92),
+              fontWeight: FontWeight.w800,
+              fontSize: compact ? 13 : 15,
+              letterSpacing: 1.2,
+            ),
+          ),
+          SizedBox(height: compact ? 2 : 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              valorFormatado,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: valorSize,
+                height: 1.05,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Rodape com total em destaque (padrao PDV), compartilhado entre etapas do caixa.
 class CaixaRodapeTotalDestaque extends StatelessWidget {
   const CaixaRodapeTotalDestaque({
@@ -137,28 +205,37 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
             ],
           ),
           if (exibirRecebido) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _chipValor(
-                    context,
-                    rotulo: 'Recebido',
-                    valor: formatarMoeda(valorRecebido!),
+            const SizedBox(height: 8),
+            if (trocoValor > 0.009) ...[
+              _chipValor(
+                context,
+                rotulo: 'Recebido',
+                valor: formatarMoeda(valorRecebido!),
+              ),
+              const SizedBox(height: 8),
+              CaixaBannerTrocoDestaque(
+                valorFormatado: formatarMoeda(trocoValor),
+              ),
+            ] else
+              Row(
+                children: [
+                  Expanded(
+                    child: _chipValor(
+                      context,
+                      rotulo: 'Recebido',
+                      valor: formatarMoeda(valorRecebido!),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _chipValor(
-                    context,
-                    rotulo: 'TROCO',
-                    valor: formatarMoeda(trocoValor),
-                    destaque: trocoValor > 0.009,
-                    destaqueVerde: trocoValor > 0.009,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _chipValor(
+                      context,
+                      rotulo: 'TROCO',
+                      valor: formatarMoeda(trocoValor),
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ],
       ),
@@ -338,14 +415,7 @@ class CaixaCobrancaPainel extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Confira ou ajuste os valores antes de confirmar.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Expanded(
               child: SingleChildScrollView(
                 child: recebimento,
@@ -436,7 +506,7 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
@@ -445,86 +515,57 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Dinheiro',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: widget.controller,
-            focusNode: widget.focusNode,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[\d,.]')),
-            ],
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(
-              labelText: 'Valor recebido',
-              hintText: widget.formatarMoeda(widget.totalAPagar),
-              helperText:
-                  'Saldo pendente: ${widget.formatarMoeda(widget.totalAPagar)}',
-              border: const OutlineInputBorder(),
-              isDense: false,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 18,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                'Dinheiro',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            onTap: () {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _selecionarTodoTexto();
-              });
-            },
-            onChanged: widget.onChanged,
-            onSubmitted: widget.onSubmitted,
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: widget.controller,
+                  focusNode: widget.focusNode,
+                  autofocus: true,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[\d,.]')),
+                  ],
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                  textAlign: TextAlign.right,
+                  decoration: InputDecoration(
+                    labelText: 'Valor recebido',
+                    hintText: widget.formatarMoeda(widget.totalAPagar),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                  ),
+                  onTap: () {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _selecionarTodoTexto();
+                    });
+                  },
+                  onChanged: widget.onChanged,
+                  onSubmitted: widget.onSubmitted,
+                ),
+              ),
+            ],
           ),
           if (widget.troco > 0.009) ...[
-            const SizedBox(height: 12),
-            _bannerTroco(context),
+            const SizedBox(height: 10),
+            CaixaBannerTrocoDestaque(
+              valorFormatado: widget.formatarMoeda(widget.troco),
+            ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _bannerTroco(BuildContext context) {
-    final theme = Theme.of(context);
-    final semantic = theme.extension<AppSemanticColors>();
-    final fg = semantic?.successFg ?? Colors.green.shade800;
-    final bg = semantic?.successBg ?? Colors.green.shade50;
-    final border = semantic?.successBorder ?? Colors.green.shade200;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: border),
-      ),
-      child: Column(
-        children: [
-          Text(
-            'TROCO',
-            style: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: fg,
-              letterSpacing: 0.6,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            widget.formatarMoeda(widget.troco),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: fg,
-            ),
-          ),
         ],
       ),
     );
@@ -653,16 +694,6 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
                   processandoFinalizacao
                       ? 'Processando...'
                       : 'Finalizar venda (Enter)',
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Esc fecha o painel sem finalizar.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ),

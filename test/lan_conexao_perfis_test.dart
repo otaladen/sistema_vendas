@@ -18,6 +18,7 @@ void main() {
       LanApiUrl.fromSyncUrl('http://192.168.0.10:9000'),
       'http://192.168.0.10:8788',
     );
+    expect(LanApiUrl.fromSyncUrl('192.168.1.69'), 'http://192.168.1.69:8788');
   });
 
   test('pareceTailscale detecta CGNAT 100.64/10', () {

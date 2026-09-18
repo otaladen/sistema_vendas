@@ -33,6 +33,9 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Copiada por testes ObjectBox no Windows (tool/setup_objectbox_test_dll.dart).
+/lib/objectbox.dll
+
 # Symbolication related
 app.*.symbols
 

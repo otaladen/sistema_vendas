@@ -66,6 +66,7 @@ import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import 'vales/vale_credito_busca_dialog.dart';
+import 'pdv/dialogs/orcamento_salvo_dialog.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/kit_orcamento.dart';
@@ -7834,42 +7835,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return file.path;
   }
 
-  KeyEventResult _atalhoDialogoOrcamentoSalvo(
-    FocusNode node,
-    KeyEvent event,
-    void Function(String acao) fechar,
-  ) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.digit1 ||
-        key == LogicalKeyboardKey.numpad1) {
-      fechar('fechar');
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) {
-      fechar('pdf');
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) {
-      fechar('direto');
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) {
-      fechar('imprimir');
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.numpadEnter) {
-      fechar('imprimir');
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.f10) {
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
   Future<void> _mostrarAcoesPdfOrcamento(Venda venda) async {
     final numOrcamento = venda.numeroOrcamento > 0
         ? venda.numeroOrcamento
@@ -7883,115 +7848,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _dialogoOrcamentoSalvoAberto = true;
     String? acao;
     try {
-      acao = await showDialog<String>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          final theme = Theme.of(dialogContext);
-          void fechar(String valor) {
-            if (!dialogContext.mounted) return;
-            Navigator.pop(dialogContext, valor);
-          }
-
-          return Focus(
-            autofocus: true,
-            onKeyEvent: (node, event) =>
-                _atalhoDialogoOrcamentoSalvo(node, event, fechar),
-            child: AlertDialog(
-              title: const Text('Orcamento salvo'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Numero para o cliente informar no caixa:',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: 0.35,
-                        ),
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 14,
-                        horizontal: 16,
-                      ),
-                      child: Text(
-                        '$numOrcamento',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.5,
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Anote no papel ou envie ao cliente. No caixa, informe este numero para pagar.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    modoEscPos
-                        ? 'Impressao termica ESC/POS (Epson TM-T20 etc.) '
-                            'ou salvar PDF:'
-                        : 'Deseja imprimir o orcamento ou mandar em PDF?',
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    modoEscPos
-                        ? 'Teclado: Esc ou 1 — fechar · 2 — PDF · '
-                            '3/4/Enter — termica ESC/POS · F10 ignorado'
-                        : 'Teclado: Esc ou 1 — fechar · 2 — PDF · '
-                            '3 — impressao direta · 4 ou Enter — imprimir · '
-                            'F10 ignorado nesta tela',
-                    style: const TextStyle(fontSize: 12.5),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, 'fechar'),
-                  child: const Text('Fechar (Esc · 1)'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.pop(dialogContext, 'pdf'),
-                  icon: const Icon(Icons.picture_as_pdf_outlined),
-                  label: const Text('Mandar em PDF (2)'),
-                ),
-                if (!modoEscPos)
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(dialogContext, 'direto'),
-                    icon: const Icon(Icons.print),
-                    label: const Text('Impressao direta (3)'),
-                  ),
-                ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(
-                    dialogContext,
-                    modoEscPos ? 'escpos' : 'imprimir',
-                  ),
-                  icon: Icon(
-                    modoEscPos ? Icons.print : Icons.print_outlined,
-                  ),
-                  label: Text(
-                    modoEscPos
-                        ? 'Imprimir termica ESC/POS (3/4 · Enter)'
-                        : 'Imprimir (4 · Enter)',
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+      acao = await mostrarDialogOrcamentoSalvo(
+        context,
+        numOrcamento: numOrcamento,
+        modoEscPos: modoEscPos,
       );
     } finally {
       _dialogoOrcamentoSalvoAberto = false;

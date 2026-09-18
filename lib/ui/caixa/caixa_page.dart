@@ -7798,7 +7798,7 @@ class _CaixaPageState extends State<CaixaPage>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    flex: 3,
+                    flex: 4,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -7821,7 +7821,13 @@ class _CaixaPageState extends State<CaixaPage>
                   ),
                   if (painel != null) ...[
                     const SizedBox(width: 8),
-                    SizedBox(width: 380, child: painel),
+                    Expanded(
+                      flex: 3,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 460),
+                        child: painel,
+                      ),
+                    ),
                   ],
                 ],
               );
@@ -8818,7 +8824,7 @@ class _CaixaPageState extends State<CaixaPage>
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
@@ -8831,10 +8837,10 @@ class _CaixaPageState extends State<CaixaPage>
             children: [
               Icon(
                 Icons.account_balance_wallet_outlined,
-                size: 20,
+                size: 18,
                 color: theme.colorScheme.primary,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   'Pagamento misto',
@@ -8853,17 +8859,17 @@ class _CaixaPageState extends State<CaixaPage>
                 },
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 child: const Text('Restaurar PDV'),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               _buildChipResumoMisto(
                 context,
@@ -8879,45 +8885,37 @@ class _CaixaPageState extends State<CaixaPage>
                     : null,
               ),
               if (fiadoOrc > 0.001)
-                _buildChipResumoMisto(
-                  context,
-                  'Fiado (depois)',
-                  _formatarMoeda(fiadoOrc),
-                ),
-              if (!pagamentoInsuficiente && trocoSobreTotal > 0.009)
-                _buildChipResumoMisto(
-                  context,
-                  'TROCO',
-                  _formatarMoeda(trocoSobreTotal),
-                  corValor: theme.colorScheme.primary,
-                  destaqueVerde: true,
+                Tooltip(
+                  message: PlanoFiadoCodec.formatarResumoLinhas(planoFiado).isEmpty
+                      ? 'Fiado definido no PDV'
+                      : PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
+                  child: _buildChipResumoMisto(
+                    context,
+                    'Fiado (depois)',
+                    _formatarMoeda(fiadoOrc),
+                  ),
                 ),
             ],
           ),
-          if (fiadoOrc > 0.001) ...[
-            const SizedBox(height: 10),
-            Text(
-              PlanoFiadoCodec.formatarResumoLinhas(planoFiado).isEmpty
-                  ? 'Fiado definido no PDV — nao entra no caixa agora.'
-                  : PlanoFiadoCodec.formatarResumoLinhas(planoFiado),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+          if (!pagamentoInsuficiente && trocoSobreTotal > 0.009) ...[
+            const SizedBox(height: 8),
+            CaixaBannerTrocoDestaque(
+              valorFormatado: _formatarMoeda(trocoSobreTotal),
+              compact: true,
             ),
           ],
           if (indicesCaixa.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             for (var j = 0; j < indicesCaixa.length; j++) ...[
-              if (j > 0) const SizedBox(height: 8),
+              if (j > 0) const SizedBox(height: 4),
               _buildLinhaValorMistoCaixa(context, index: indicesCaixa[j]),
             ],
           ],
           if (pagamentoInsuficiente)
             Padding(
-              padding: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.only(top: 6),
               child: Text(
-                'Recebido agora menor que ${_formatarMoeda(aPagarAgora)} '
-                '(total menos fiado).',
+                'Faltam ${_formatarMoeda(aPagarAgora - recebidoAgora)}',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.error,
                   fontWeight: FontWeight.w600,
@@ -8984,68 +8982,47 @@ class _CaixaPageState extends State<CaixaPage>
     final saldoEsperado = _mistoLinhasModelo[index].valor;
     final rotulo = '${_rotuloFormaPagamento(meio)}'
         '${meio == 'cartao_credito' ? ' · ${parcelas}x' : ''}';
-    final recebido = _parseValor(_mistoValorControllers[index].text) ?? 0;
-    final trocoLinha = meio == 'dinheiro'
-        ? CaixaTrocoDinheiroHelper.troco(
-            valorEntregue: recebido,
-            saldoPendente: saldoEsperado,
-          )
-        : 0.0;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 140,
-              child: Text(
-                rotulo,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: _mistoValorControllers[index],
-                focusNode: index < _mistoValorFocusNodes.length
-                    ? _mistoValorFocusNodes[index]
-                    : null,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  isDense: true,
-                  labelText: meio == 'dinheiro'
-                      ? 'Valor entregue'
-                      : 'Valor no caixa',
-                  helperText: meio == 'dinheiro'
-                      ? 'Saldo pendente: ${_formatarMoeda(saldoEsperado)}'
-                      : 'Valor exato: ${_formatarMoeda(saldoEsperado)}',
-                  border: const OutlineInputBorder(),
-                ),
-                onChanged: (_) {
-                  setState(() => _sincronizarRecebidoPdVComOrcamento());
-                },
-              ),
-            ),
-          ],
-        ),
-        if (meio == 'dinheiro' && trocoLinha > 0.009) ...[
-          const SizedBox(height: 6),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              'TROCO: ${_formatarMoeda(trocoLinha)}',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: theme.extension<AppSemanticColors>()?.successFg ??
-                    Colors.green.shade800,
-              ),
+        SizedBox(
+          width: 118,
+          child: Text(
+            rotulo,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
             ),
           ),
-        ],
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            controller: _mistoValorControllers[index],
+            focusNode: index < _mistoValorFocusNodes.length
+                ? _mistoValorFocusNodes[index]
+                : null,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+            textAlign: TextAlign.right,
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: _formatarMoeda(saldoEsperado),
+              border: const OutlineInputBorder(),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 10,
+              ),
+            ),
+            onChanged: (_) {
+              setState(() => _sincronizarRecebidoPdVComOrcamento());
+            },
+          ),
+        ),
       ],
     );
   }

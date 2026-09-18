@@ -14,11 +14,11 @@ abstract final class LanApiUrl {
     if (!s.contains('://')) s = 'http://$s';
     final u = Uri.tryParse(s);
     if (u == null || u.host.isEmpty) return '';
-    return Uri(
-      scheme: u.scheme.isEmpty ? 'http' : u.scheme,
-      host: u.host,
-      port: portaApi,
-    ).toString();
+    final scheme = u.scheme.isEmpty ? 'http' : u.scheme;
+    // Sempre "esquema://host:porta" com DOIS PONTOS entre IP e porta.
+    // Nao usar Uri.toString() aqui: em alguns formatos a porta some ou
+    // o operador junta host+porta sem separador visivel na UI.
+    return '$scheme://${u.host}:$portaApi';
   }
 
   static String local(int portaApi) => 'http://127.0.0.1:$portaApi';

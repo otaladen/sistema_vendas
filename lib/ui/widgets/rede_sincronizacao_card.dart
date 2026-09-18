@@ -20,7 +20,8 @@ import '../../services/lan_rede_helper.dart';
 import '../../services/lan_servidor_bootstrap.dart';
 import '../../services/windows_app_startup_helper.dart';
 import '../../data/api/lan_api_url.dart';
-import '../../ui/shell/main_menu_deps.dart';
+import '../configuracoes/rede_conexao_servidor_panel.dart';
+import '../shell/main_menu_deps.dart';
 
 /// Assistente de rede local: servidor neste PC ou cliente apontando para outro.
 class RedeSincronizacaoCard extends StatefulWidget {
@@ -49,6 +50,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   bool _syncAtiva = false;
   bool _modoImplantacao = false;
   String? _ipLocal;
+  List<LanEnderecoLocal> _enderecos = const [];
   bool _servidorOnline = false;
   bool _carregando = true;
   bool _salvando = false;
@@ -91,7 +93,9 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     final config = await widget.configuracoesService.carregarEfetiva();
     final modoImplantacao =
         await widget.configuracoesService.repository.carregarModoImplantacaoLocal();
-    final ip = await LanRedeHelper.obterIpv4Local();
+    final enderecos = await LanRedeHelper.listarEnderecosAtivos();
+    final ip = LanRedeHelper.enderecoRecomendadoPcs(enderecos)?.ip ??
+        await LanRedeHelper.obterIpv4Local();
     var url = config.redeServidorUrl.trim();
     if (config.redeModoServidor && ip != null && url.isEmpty) {
       url = LanRedeHelper.montarUrlServidor(ip);
@@ -110,6 +114,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
       _syncAtiva = config.redeSincronizacaoAtiva;
       _modoImplantacao = modoImplantacao;
       _ipLocal = ip;
+      _enderecos = enderecos;
       _urlController.text = url;
       _tokenController.text = config.redeSyncToken;
       _servidorOnline = online;
@@ -208,12 +213,18 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
     _urlController.text = LanRedeHelper.montarUrlServidor(ip);
   }
 
-  String get _enderecoApiTerminais {
-    final ip = _ipLocal?.trim();
-    if (ip == null || ip.isEmpty) {
-      return '—:${LanApiUrl.portaPadrao}';
-    }
-    return '$ip:${LanApiUrl.portaPadrao}';
+  Future<void> _atualizarEnderecosRede() async {
+    final enderecos = await LanRedeHelper.listarEnderecosAtivos();
+    final ip = LanRedeHelper.enderecoRecomendadoPcs(enderecos)?.ip;
+    if (!mounted) return;
+    setState(() {
+      _enderecos = enderecos;
+      _ipLocal = ip ?? _ipLocal;
+      if (_modoServidor && ip != null) {
+        _urlController.text = LanRedeHelper.montarUrlServidor(ip);
+      }
+    });
+    await _atualizarStatusServidor();
   }
 
   Future<void> _atualizarStatusServidor() async {
@@ -228,23 +239,6 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
         _apiAtiva = _ehWindows && LanApiServerHub.instance.ativo;
       });
     }
-  }
-
-  void _copiarEnderecoApiTerminais() {
-    final ip = _ipLocal;
-    if (ip == null || ip.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('IP local nao detectado. Atualize o IP.')),
-      );
-      return;
-    }
-    final txt = '$ip:${LanApiUrl.portaPadrao}';
-    Clipboard.setData(ClipboardData(text: txt));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Copiado para Terminais Windows (API): $txt'),
-      ),
-    );
   }
 
   Future<void> _alternarModoImplantacao(bool ativo) async {
@@ -343,6 +337,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
 
   Future<void> _configurarRedeCompleta() async {
     if (_modoServidor) {
+      await _atualizarEnderecosRede();
       final ip = _ipLocal ?? await LanRedeHelper.obterIpv4Local();
       if (ip == null) {
         if (!mounted) return;
@@ -350,7 +345,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
           const SnackBar(
             content: Text(
               'Nao foi possivel detectar o IP deste PC na rede. '
-              'Verifique Wi-Fi/cabo.',
+              'Verifique o cabo Ethernet ou o Wi-Fi.',
             ),
           ),
         );
@@ -844,74 +839,19 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
   }
 
   Widget _buildConnectionCard(ThemeData tema) {
-    final onVar = tema.colorScheme.onSurfaceVariant;
     final ocupado = _salvando || _testandoRede || _sincronizando;
 
     if (_modoServidor) {
       final precisaAtivar = !_syncAtiva || !_servidorRedePronto;
       return _cardOperador(
         tema: tema,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Endereço do servidor',
-              style: tema.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _ipLocal == null ? 'IP não detectado' : _enderecoApiTerminais,
-                    style: tema.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Atualizar IP',
-                  onPressed: () async {
-                    final ip = await LanRedeHelper.obterIpv4Local();
-                    setState(() => _ipLocal = ip);
-                    if (ip != null) _preencherUrlServidorLocal();
-                    await _atualizarStatusServidor();
-                  },
-                  icon: const Icon(Icons.refresh_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Use este endereço nos terminais da loja.',
-              style: tema.textTheme.bodySmall?.copyWith(color: onVar),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _ipLocal == null ? null : _copiarEnderecoApiTerminais,
-              icon: const Icon(Icons.copy_rounded),
-              label: const Text('Copiar Endereço para os Terminais'),
-            ),
-            if (precisaAtivar) ...[
-              const SizedBox(height: 10),
-              FilledButton.tonalIcon(
-                onPressed: ocupado ? null : _configurarRedeCompleta,
-                icon: ocupado
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.power_settings_new_rounded),
-                label: Text(
-                  ocupado ? 'Ativando...' : 'Ativar Rede da Loja',
-                ),
-              ),
-            ],
-          ],
+        child: RedeConexaoServidorPanel(
+          enderecos: _enderecos,
+          token: _tokenAtual,
+          ocupado: ocupado,
+          precisaAtivar: precisaAtivar,
+          onAtualizar: () => unawaited(_atualizarEnderecosRede()),
+          onAtivarRede: ocupado ? null : _configurarRedeCompleta,
         ),
       );
     }
@@ -932,7 +872,7 @@ class _RedeSincronizacaoCardState extends State<RedeSincronizacaoCard> {
             controller: _urlController,
             decoration: InputDecoration(
               labelText: 'Endereço do servidor',
-              hintText: 'Ex.: 192.168.0.15:${LanApiUrl.portaPadrao}',
+              hintText: 'Ex.: http://192.168.0.15:${LanApiUrl.portaPadrao}',
               border: const OutlineInputBorder(),
               isDense: true,
               suffixIcon: IconButton(

@@ -204,6 +204,9 @@ class LanApiServer implements ObjectBoxStoreLifecycleListener {
         .addHandler(router.call);
 
     try {
+      // 0.0.0.0 / anyIPv4: a mesma API :8788 responde na Ethernet (PCs da
+      // loja), no Wi-Fi (celulares/tablets) e no Tailscale (acesso remoto).
+      // Nao alterar para um IP unico — quebraria os terminais cabeados.
       _server = await shelf_io.serve(handler, InternetAddress.anyIPv4, porta);
     } on SocketException catch (e) {
       // Porta ocupada por processo antigo: tenta liberar e sobe de novo.

@@ -5,6 +5,8 @@ import 'package:sistema_vendas/domain/sessao_operacional_guard.dart';
 import 'package:sistema_vendas/services/lan_api/lan_api_store_guard.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('health, presence e stream ficam livres durante backup', () {
     expect(LanApiStoreGuard.caminhoLivreDuranteBackup('api/health'), isTrue);
     expect(LanApiStoreGuard.caminhoLivreDuranteBackup('api/presence'), isTrue);

@@ -8,46 +8,13 @@ import 'package:sistema_vendas/data/venda_repository.dart';
 import 'package:sistema_vendas/domain/entrega_venda_helper.dart';
 import 'package:sistema_vendas/model/produto.dart';
 
-String? _prepararObjectBoxDll() {
-  final candidates = [
-    r'c:\Projetos\sistema_vendas\build\windows\x64\runner\Debug',
-    r'c:\Projetos\sistema_vendas\build\windows\x64\runner\Release',
-    r'c:\Projetos\sistema_vendas\build\windows\x64\_deps\objectbox-download-src\lib',
-  ];
-  for (final dir in candidates) {
-    final dll = File('$dir${Platform.pathSeparator}objectbox.dll');
-    if (dll.existsSync()) {
-      try {
-        final path = Platform.environment['PATH'] ?? '';
-        if (!path.toLowerCase().contains(dir.toLowerCase())) {
-          Platform.environment['PATH'] = '$dir${Platform.pathSeparator}$path';
-        }
-      } catch (_) {
-        // Ambiente de teste pode ter Platform.environment imutavel.
-      }
-      break;
-    }
-  }
-  Directory? probeDir;
-  try {
-    probeDir = Directory.systemTemp.createTempSync('sv_obx_probe_');
-    final probe = ObjectBox.createForTest(probeDir);
-    probe.close();
-    return null;
-  } catch (e) {
-    return 'objectbox.dll indisponivel neste ambiente — '
-        'teste de integracao pulado ($e)';
-  } finally {
-    try {
-      probeDir?.deleteSync(recursive: true);
-    } catch (_) {}
-  }
-}
+import 'helpers/objectbox_dll_for_tests.dart';
 
+@Tags(['objectbox'])
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   SharedPreferences.setMockInitialValues({});
-  final skipObjectBox = _prepararObjectBoxDll();
+  final skipObjectBox = prepararObjectBoxDllParaTestes();
 
   group(
     'estoque reserva ObjectBox',
