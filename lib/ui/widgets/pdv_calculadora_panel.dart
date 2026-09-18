@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../domain/pdv_calculadora_engine.dart';
+
 /// Calculadora compacta para uso no balcao (PDV).
 class PdvCalculadoraPanel extends StatefulWidget {
   const PdvCalculadoraPanel({
@@ -21,10 +23,7 @@ class PdvCalculadoraPanel extends StatefulWidget {
 
 class _PdvCalculadoraPanelState extends State<PdvCalculadoraPanel> {
   final FocusNode _focus = FocusNode();
-  String _buffer = '0';
-  double? _accumulator;
-  String? _pendingOp;
-  bool _waitingForOperand = false;
+  final PdvCalculadoraEngine _calc = PdvCalculadoraEngine();
 
   @override
   void initState() {
@@ -40,119 +39,22 @@ class _PdvCalculadoraPanelState extends State<PdvCalculadoraPanel> {
     super.dispose();
   }
 
-  double _parseBuffer() =>
-      double.tryParse(_buffer.replaceAll(',', '.')) ?? 0;
+  void _inputDigit(String d) => setState(() => _calc.inputDigit(d));
 
-  String _formatNum(double v) {
-    if (v.isNaN || v.isInfinite) return 'Erro';
-    final rounded = (v * 1e10).roundToDouble() / 1e10;
-    if ((rounded - rounded.roundToDouble()).abs() < 1e-9) {
-      return rounded.round().toString();
-    }
-    var s = rounded.toStringAsFixed(6);
-    while (s.contains('.') && (s.endsWith('0') || s.endsWith('.'))) {
-      s = s.substring(0, s.length - 1);
-    }
-    return s;
-  }
+  void _inputDecimal() => setState(() => _calc.inputDecimal());
 
-  double _compute(double a, double b, String op) {
-    switch (op) {
-      case '+':
-        return a + b;
-      case '-':
-        return a - b;
-      case '*':
-        return a * b;
-      case '/':
-        return b == 0 ? double.nan : a / b;
-      default:
-        return b;
-    }
-  }
+  void _inputOp(String op) => setState(() => _calc.inputOp(op));
 
-  void _inputDigit(String d) {
-    setState(() {
-      if (_waitingForOperand || _buffer == '0' || _buffer == 'Erro') {
-        _buffer = d;
-        _waitingForOperand = false;
-      } else {
-        _buffer += d;
-      }
-    });
-  }
+  void _equals() => setState(() => _calc.equals());
 
-  void _inputDecimal() {
-    setState(() {
-      if (_waitingForOperand || _buffer == 'Erro') {
-        _buffer = '0,';
-        _waitingForOperand = false;
-        return;
-      }
-      if (!_buffer.contains(',')) _buffer += ',';
-    });
-  }
+  void _clear() => setState(() => _calc.clear());
 
-  void _inputOp(String op) {
-    setState(() {
-      final v = _parseBuffer();
-      if (_accumulator != null &&
-          _pendingOp != null &&
-          !_waitingForOperand &&
-          _buffer != 'Erro') {
-        _accumulator = _compute(_accumulator!, v, _pendingOp!);
-        _buffer = _formatNum(_accumulator!);
-      } else {
-        _accumulator = v;
-      }
-      _pendingOp = op;
-      _waitingForOperand = true;
-    });
-  }
+  void _backspace() => setState(() => _calc.backspace());
 
-  void _equals() {
-    setState(() {
-      if (_pendingOp == null || _accumulator == null) return;
-      final v = _parseBuffer();
-      final r = _compute(_accumulator!, v, _pendingOp!);
-      _buffer = _formatNum(r);
-      _accumulator = null;
-      _pendingOp = null;
-      _waitingForOperand = true;
-    });
-  }
-
-  void _clear() {
-    setState(() {
-      _buffer = '0';
-      _accumulator = null;
-      _pendingOp = null;
-      _waitingForOperand = false;
-    });
-  }
-
-  void _backspace() {
-    setState(() {
-      if (_waitingForOperand) return;
-      if (_buffer.length <= 1 || _buffer == 'Erro') {
-        _buffer = '0';
-        return;
-      }
-      _buffer = _buffer.substring(0, _buffer.length - 1);
-      if (_buffer.isEmpty) _buffer = '0';
-    });
-  }
-
-  void _percentual() {
-    setState(() {
-      final v = _parseBuffer() / 100;
-      _buffer = _formatNum(v);
-      _waitingForOperand = false;
-    });
-  }
+  void _percentual() => setState(() => _calc.percentual());
 
   Future<void> _copiarResultado() async {
-    final texto = _buffer.replaceAll(',', '.');
+    final texto = _calc.buffer.replaceAll(',', '.');
     await Clipboard.setData(ClipboardData(text: texto));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -314,20 +216,23 @@ class _PdvCalculadoraPanelState extends State<PdvCalculadoraPanel> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_pendingOp != null)
+                    if (_calc.formula.isNotEmpty ||
+                        (_calc.pendingOp != null && _calc.waitingForOperand))
                       Align(
                         alignment: Alignment.centerRight,
                         child: Text(
-                          '${_formatNum(_accumulator ?? 0)} $_pendingOp',
+                          _calc.expressaoVisivel,
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     Align(
                       alignment: Alignment.centerRight,
                       child: Text(
-                        _buffer,
+                        _calc.buffer,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.headlineSmall?.copyWith(
