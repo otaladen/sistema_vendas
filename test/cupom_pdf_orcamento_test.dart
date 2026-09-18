@@ -112,6 +112,7 @@ void main() {
   test('formatoPaginaOrcamentoSalvar nao encolhe com preset economico', () {
     final economico = ConfigLayoutImpressao.padraoOrcamento();
     expect(economico.fatorEspacoVertical, lessThan(1.0));
+    expect(economico.espacoCompacto, isTrue);
     final fmtCurto = CupomPdfLayout.formatoPagina(
       EmpresaModeloPdf.bobina,
       layout: economico,
@@ -126,7 +127,50 @@ void main() {
       qtdItens: 9,
       linhasExtras: 6,
     );
-    // Altura util maior que o economico puro (fator 0.5), mas sem folga enorme.
-    expect(fmtOrc.height, greaterThan(fmtCurto.height * 0.9));
+    final layoutFonteCheia = economico.copyWith(
+      fatorEspacoVertical: 1.0,
+      espacoCompacto: false,
+    );
+    final fmtFonteCheia = CupomPdfLayout.formatoPagina(
+      EmpresaModeloPdf.bobina,
+      layout: layoutFonteCheia,
+      linhasTexto: 20,
+      qtdItens: 9,
+      linhasExtras: 6,
+    );
+    // Preset economico encolhe padding, nao a fonte; a pagina precisa caber
+    // subtotal, total, pagamento e aviso fiscal depois do RESUMO.
+    expect(fmtOrc.height, greaterThan(fmtCurto.height));
+    expect(fmtOrc.height, greaterThanOrEqualTo(fmtFonteCheia.height * 0.95));
+  });
+
+  test('contarLinhasQuebra conta wrap de endereco e nome da loja', () {
+    expect(
+      CupomPdfLayout.contarLinhasQuebra(
+        'Rua Luis Campo Galvao, 7 | Sao Cristovao | Salvador - BA | CEP: 41510022',
+        caracteresPorLinha: 32,
+      ),
+      greaterThan(1),
+    );
+    expect(
+      CupomPdfLayout.contarLinhasQuebra('Alan Amorim', caracteresPorLinha: 32),
+      1,
+    );
+  });
+
+  test('linhasExtrasQuebraOrcamento soma wrap de cabecalho e entrega', () {
+    final extra = CupomPdfLayout.linhasExtrasQuebraOrcamento(
+      layout: ConfigLayoutImpressao.padraoOrcamento(),
+      nomeLoja:
+          'Comprou Levou Comercial De Materiais De Construcao LDV LTDA.',
+      endereco: 'Rua Osvaldo Gordilho, n6 Santo Cristovao',
+      linhasEntrega: const [
+        'Nome: Alan Amorim',
+        'Telefone/WhatsApp: 71982250887',
+        'Endereco: Rua Luis Campo Galvao, 7 | Sao Cristovao | Salvador - BA | CEP: 41510022',
+        'Obs entrega: Prox antigo bar de toco, iolanda',
+      ],
+    );
+    expect(extra, greaterThanOrEqualTo(3));
   });
 }

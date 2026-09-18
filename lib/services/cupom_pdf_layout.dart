@@ -188,6 +188,50 @@ class CupomPdfLayout {
         .toList();
   }
 
+  /// Courier na largura util da bobina (fonte do corpo). Conservador para wrap.
+  static int caracteresPorLinhaCorpo(ConfigLayoutImpressao layout) {
+    final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    final mmPorCaractere = (fs * 0.21).clamp(1.4, 2.2);
+    return (larguraUtilConteudoMm(layout) / mmPorCaractere).floor().clamp(24, 42);
+  }
+
+  /// Quantas linhas o texto ocupa na bobina (contando quebra).
+  static int contarLinhasQuebra(
+    String texto, {
+    int caracteresPorLinha = 32,
+  }) {
+    final cols = caracteresPorLinha.clamp(16, 80);
+    var n = 0;
+    for (final linha in linhasTexto(texto)) {
+      n += (linha.length / cols).ceil().clamp(1, 8);
+    }
+    return n;
+  }
+
+  /// Linhas extras de cabecalho/entrega/rodape que o fudge de altura nao via.
+  static int linhasExtrasQuebraOrcamento({
+    required ConfigLayoutImpressao layout,
+    required String nomeLoja,
+    required String endereco,
+    required List<String> linhasEntrega,
+    String rodape = '',
+  }) {
+    final chars = caracteresPorLinhaCorpo(layout);
+    final charsNome = (chars * 8 / 11).round().clamp(20, 32);
+    var extra = 0;
+    extra += (contarLinhasQuebra(nomeLoja, caracteresPorLinha: charsNome) - 1)
+        .clamp(0, 6);
+    extra += (contarLinhasQuebra(endereco, caracteresPorLinha: chars) - 1)
+        .clamp(0, 4);
+    for (final linha in linhasEntrega) {
+      extra += (contarLinhasQuebra(linha, caracteresPorLinha: chars) - 1)
+          .clamp(0, 6);
+    }
+    extra += (contarLinhasQuebra(rodape, caracteresPorLinha: chars) - 1)
+        .clamp(0, 8);
+    return extra;
+  }
+
   static pw.Widget tituloSecao(String texto, ConfigLayoutImpressao layout) {
     return pw.Padding(
       padding: pw.EdgeInsets.only(top: _espacoBloco(layout) * PdfPageFormat.mm),
@@ -352,17 +396,49 @@ class CupomPdfLayout {
   }
 
   static pw.Widget? cabecalhoColunasItens(ConfigLayoutImpressao layout) {
-    if (!layout.cabecalhoColunasItens || !layout.colunasEsquerdaDireita) {
+    if (!layout.cabecalhoColunasItens) {
       return null;
+    }
+    final fs = layout.tamanhoFonteItens.fontSizeItemDetalhe + 0.5;
+    final estiloCab = estilo(
+      layout,
+      fontSize: fs,
+      fontWeight: pw.FontWeight.bold,
+    );
+    if (!layout.colunasEsquerdaDireita) {
+      return pw.Padding(
+        padding: pw.EdgeInsets.only(bottom: 1.5 * PdfPageFormat.mm),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            pw.Text('CODIGO / DESCRICAO', style: estiloCab),
+            pw.SizedBox(height: 0.25 * PdfPageFormat.mm),
+            linhaColunas(
+              layout: layout,
+              esquerda: 'QTD x UN    VALOR UN',
+              direita: 'TOTAL',
+              fontSize: fs,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ],
+        ),
+      );
     }
     return pw.Padding(
       padding: pw.EdgeInsets.only(bottom: 1.5 * PdfPageFormat.mm),
-      child: linhaColunas(
-        layout: layout,
-        esquerda: 'DESCRICAO',
-        direita: 'VALOR',
-        fontSize: layout.tamanhoFonteItens.fontSizeItemDetalhe + 0.5,
-        fontWeight: pw.FontWeight.bold,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Text('CODIGO / DESCRICAO', style: estiloCab),
+          pw.SizedBox(height: 0.25 * PdfPageFormat.mm),
+          linhaColunas(
+            layout: layout,
+            esquerda: 'QTD x UN    VALOR UN',
+            direita: 'TOTAL',
+            fontSize: fs,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ],
       ),
     );
   }
@@ -378,16 +454,24 @@ class CupomPdfLayout {
     String sufixoEntrega = '',
     String? codigoSku,
     String? modalidade,
+    String? unidadeVenda,
   }) {
     final qtdTxt = quantidadeExibicao ?? '$quantidade';
     final sku = (codigoSku ?? '').trim();
     final modal = (modalidade ?? '').trim();
+    final un = (unidadeVenda ?? '').trim().toUpperCase();
+    final qtdComUn = un.isEmpty
+        ? qtdTxt
+        : (qtdTxt.toUpperCase().endsWith(un) ? qtdTxt : '$qtdTxt $un');
     final nomeBase = sku.isEmpty ? nomeProduto : '$sku - $nomeProduto';
     final nomeLinha = sufixoEntrega.isEmpty
         ? nomeBase
         : '$nomeBase$sufixoEntrega';
     final fsNome = layout.tamanhoFonteItens.fontSizeItem;
     final fsDet = layout.tamanhoFonteItens.fontSizeItemDetalhe;
+    final linhaQtd = textoTermicoAscii(
+      '  QTD: $qtdComUn  x  ${formatarMoeda(precoUnitario)}',
+    );
 
     final padItem = _espacoItem(layout);
     if (!layout.colunasEsquerdaDireita) {
@@ -399,6 +483,8 @@ class CupomPdfLayout {
             pw.Text(
               textoTermicoAscii(nomeLinha),
               style: estilo(layout, fontSize: fsNome),
+              maxLines: 4,
+              softWrap: true,
             ),
             if (modal.isNotEmpty)
               pw.Text(
@@ -410,12 +496,12 @@ class CupomPdfLayout {
                 ),
               ),
             if (layout.linhaQuantidadePreco)
-              pw.Text(
-                // Padrao termico: indent + "QTD x R$ UNIT = R$ TOTAL".
-                textoTermicoAscii(
-                  '  $qtdTxt x ${formatarMoeda(precoUnitario)} = ${formatarMoeda(subtotal)}',
-                ),
-                style: estilo(layout, fontSize: fsDet),
+              linhaColunas(
+                layout: layout,
+                esquerda: linhaQtd,
+                direita: formatarMoeda(subtotal),
+                fontSize: fsDet,
+                fontWeightDireita: pw.FontWeight.bold,
               ),
           ],
         ),
@@ -427,12 +513,11 @@ class CupomPdfLayout {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
-          linhaColunas(
-            layout: layout,
-            esquerda: textoTermicoAscii(nomeLinha),
-            direita: formatarMoeda(subtotal),
-            fontSize: fsNome,
-            fontWeightDireita: pw.FontWeight.bold,
+          pw.Text(
+            textoTermicoAscii(nomeLinha),
+            style: estilo(layout, fontSize: fsNome),
+            maxLines: 4,
+            softWrap: true,
           ),
           if (modal.isNotEmpty) ...[
             pw.SizedBox(height: 0.3 * PdfPageFormat.mm),
@@ -449,11 +534,10 @@ class CupomPdfLayout {
             pw.SizedBox(height: 0.4 * PdfPageFormat.mm),
             linhaColunas(
               layout: layout,
-              esquerda: textoTermicoAscii(
-                '  $qtdTxt x ${formatarMoeda(precoUnitario)} = ${formatarMoeda(subtotal)}',
-              ),
-              direita: '',
+              esquerda: linhaQtd,
+              direita: formatarMoeda(subtotal),
               fontSize: fsDet,
+              fontWeightDireita: pw.FontWeight.bold,
             ),
           ],
         ],
@@ -884,7 +968,10 @@ class CupomPdfLayout {
   }
 
   /// PDF de orcamento salvo em arquivo: bobina com altura finita (evita erro no pdf package).
-  /// Folga minima apos o conteudo (sem desperdicar papel).
+  ///
+  /// O preset economico encolhe so o *padding* (`espacoCompacto`); a fonte
+  /// continua 8 pt. Se a altura da pagina tambem encolher, o PDF corta no
+  /// RESUMO e some total/pagamento/aviso fiscal.
   static PdfPageFormat formatoPaginaOrcamentoSalvar({
     required EmpresaModeloPdf modelo,
     required ConfigLayoutImpressao layout,
@@ -893,15 +980,15 @@ class CupomPdfLayout {
     int linhasExtras = 8,
     bool comLogo = false,
   }) {
-    // Preset economico (fator 0.5) cortava o final; ~0.9 cobre o conteudo
-    // sem sobrar meia bobina em branco.
     final layoutAltura = layout.copyWith(
-      fatorEspacoVertical: layout.fatorEspacoVertical < 0.9
-          ? 0.9
+      fatorEspacoVertical: layout.fatorEspacoVertical < 1.0
+          ? 1.0
           : layout.fatorEspacoVertical,
-      fatorAlturaPaginaPdf: layout.fatorAlturaPaginaPdf < 1.02
-          ? 1.02
+      fatorAlturaPaginaPdf: layout.fatorAlturaPaginaPdf < 1.05
+          ? 1.05
           : layout.fatorAlturaPaginaPdf,
+      // Compacto * 0.65 na estimativa deixava ~2 mm/linha para texto de 8 pt.
+      espacoCompacto: false,
     );
     return formatoPagina(
       modelo,
@@ -910,8 +997,7 @@ class CupomPdfLayout {
       qtdItens: qtdItens < 1 ? 1 : qtdItens,
       linhasExtras: linhasExtras < 1 ? 1 : linhasExtras,
       comLogo: comLogo,
-      // Corte logo abaixo do fim (sem os 14 mm padrao do cupom).
-      margemSegurancaMm: 4,
+      margemSegurancaMm: 10,
     );
   }
 
@@ -1504,18 +1590,18 @@ class CupomPdfLayout {
 
   static pw.Widget cabecalhoTabelaItensLegadoLdv(ConfigLayoutImpressao layout) {
     final fs = layout.tamanhoFonteItens.fontSizeItemDetalhe - 0.5;
+    final estiloCab = estilo(layout, fontSize: fs, fontWeight: pw.FontWeight.bold);
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        pw.Text(
-          'ITEM COD UNI DESCRICAO',
-          style: estilo(layout, fontSize: fs, fontWeight: pw.FontWeight.bold),
-        ),
+        pw.Text('CODIGO / DESCRICAO', style: estiloCab),
         pw.SizedBox(height: 0.3 * PdfPageFormat.mm),
-        pw.Text(
-          'QTD VLBRUTO DESC VLUNIT VLTOTAL',
-          style: estilo(layout, fontSize: fs, fontWeight: pw.FontWeight.bold),
-          textAlign: pw.TextAlign.right,
+        linhaColunas(
+          layout: layout,
+          esquerda: 'QTD x UN    VALOR UN',
+          direita: 'TOTAL',
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
         ),
         divisoriaSecao(layout: layout, compacta: true),
       ],
@@ -1536,9 +1622,12 @@ class CupomPdfLayout {
   }) {
     final fs = layout.tamanhoFonteItens.fontSizeItemDetalhe - 0.5;
     final estiloItem = estilo(layout, fontSize: fs);
-    final estiloVal = estilo(layout, fontSize: fs - 0.5);
-    final linhaProduto =
-        '$item $codigo $unidade ${descricao.trim()}'.trim();
+    final linhaProduto = textoTermicoAscii(
+      '${codigo.trim()} - ${descricao.trim()}',
+    );
+    final linhaQtd = textoTermicoAscii(
+      '  QTD: ${quantidade.trim()} ${unidade.trim()}  x  R\$ $vlUnit',
+    );
 
     return pw.Padding(
       padding: pw.EdgeInsets.only(bottom: 0.35 * PdfPageFormat.mm),
@@ -1548,37 +1637,16 @@ class CupomPdfLayout {
           pw.Text(
             linhaProduto,
             style: estiloItem,
-            maxLines: 3,
+            maxLines: 4,
             softWrap: true,
           ),
-          pw.SizedBox(height: 0.2 * PdfPageFormat.mm),
-          pw.Row(
-            children: [
-              pw.Expanded(
-                flex: 2,
-                child: pw.Text(quantidade, style: estiloVal, textAlign: pw.TextAlign.right),
-              ),
-              pw.Expanded(
-                flex: 2,
-                child: pw.Text(vlBruto, style: estiloVal, textAlign: pw.TextAlign.right),
-              ),
-              pw.Expanded(
-                flex: 2,
-                child: pw.Text(desconto, style: estiloVal, textAlign: pw.TextAlign.right),
-              ),
-              pw.Expanded(
-                flex: 2,
-                child: pw.Text(vlUnit, style: estiloVal, textAlign: pw.TextAlign.right),
-              ),
-              pw.Expanded(
-                flex: 2,
-                child: pw.Text(
-                  vlTotal,
-                  style: estilo(layout, fontSize: fs - 0.5, fontWeight: pw.FontWeight.bold),
-                  textAlign: pw.TextAlign.right,
-                ),
-              ),
-            ],
+          pw.SizedBox(height: 0.25 * PdfPageFormat.mm),
+          linhaColunas(
+            layout: layout,
+            esquerda: linhaQtd,
+            direita: vlTotal,
+            fontSize: fs - 0.5,
+            fontWeightDireita: pw.FontWeight.bold,
           ),
         ],
       ),

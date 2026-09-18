@@ -574,16 +574,21 @@ class CupomNaoFiscalVendaPdf {
       if (CupomPdfLayout.cabecalhoColunasItens(layout) != null)
         CupomPdfLayout.cabecalhoColunasItens(layout)!,
       ...itensCupom.map(
-        (item) => CupomPdfLayout.itemVenda(
-          layout: layout,
-          nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
-          quantidade: item.quantidade,
-          quantidadeExibicao: _quantidadeItemNfce(item),
-          precoUnitario: item.precoUnitario,
-          subtotal: item.subtotal,
-          formatarMoeda: formatarMoeda,
-          sufixoEntrega: EntregaVendaHelper.sufixoEntregaItemPdf(item),
-        ),
+        (item) {
+          final dados = _dadosProdutoItem(item);
+          return CupomPdfLayout.itemVenda(
+            layout: layout,
+            nomeProduto: ProdutoNomeExibicao.paraImpressaoItem(item),
+            codigoSku: dados.codigo,
+            unidadeVenda: dados.unidade,
+            quantidade: item.quantidade,
+            quantidadeExibicao: _quantidadeItemNfce(item),
+            precoUnitario: item.precoUnitario,
+            subtotal: item.subtotal,
+            formatarMoeda: formatarMoeda,
+            sufixoEntrega: EntregaVendaHelper.sufixoEntregaItemPdf(item),
+          );
+        },
       ),
       if (layout.divisoriaDestaqueAntesTotais)
         CupomPdfLayout.divisoriaSecao(layout: layout, destaque: true),

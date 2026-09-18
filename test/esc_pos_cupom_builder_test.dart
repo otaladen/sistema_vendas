@@ -78,7 +78,8 @@ void main() {
         abrirGaveta: false,
       ),
     );
-    expect(ascii, contains('8,04 M2'));
+    expect(ascii, contains('QTD: 8,04 M2'));
+    expect(ascii, contains('PISO -'));
     expect(ascii, isNot(contains('8 M2 x')));
   });
 
@@ -99,6 +100,8 @@ void main() {
     );
 
     expect(ascii, contains('DANFE NFC-e'));
+    expect(ascii, contains('939 - Cimento'));
+    expect(ascii, contains('QTD:'));
     expect(ascii, contains('VIA CONSUMIDOR'));
     expect(ascii, contains('CONTIGENCIA'));
     expect(ascii, contains('CHAVE DE ACESSO'));

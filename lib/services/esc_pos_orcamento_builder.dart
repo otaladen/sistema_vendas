@@ -169,8 +169,16 @@ abstract final class EscPosOrcamentoBuilder {
 
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.boldOn);
-    out.add(EscPosCommands.line('ITENS'));
+    if (cols >= 42) {
+      out.add(EscPosCommands.line('CODIGO / DESCRICAO'));
+      out.add(EscPosCommands.line(
+        _padCols('QTD x UN    VALOR UN', 'TOTAL', cols),
+      ));
+    } else {
+      out.add(EscPosCommands.line('ITENS'));
+    }
     out.add(EscPosCommands.boldOff);
+    out.add(EscPosCommands.separator(cols));
 
     if (itens.isEmpty) {
       out.add(EscPosCommands.line('(Sem itens)'));
@@ -198,7 +206,13 @@ abstract final class EscPosOrcamentoBuilder {
         final unit = _moeda.format(item.precoUnitario);
         final sub = _moeda.format(qtdEfetiva * item.precoUnitario);
         out.add(EscPosCommands.line(
-          _trunc('  $qtdTxt x R\$ $unit = R\$ $sub', cols),
+          _linhaQtdComTotal(
+            qtd: qtdTxt,
+            un: '',
+            unit: unit,
+            tot: sub,
+            cols: cols,
+          ),
         ));
       }
     }
@@ -347,5 +361,22 @@ abstract final class EscPosOrcamentoBuilder {
     final space = cols - l.length - r.length;
     if (space <= 0) return _trunc('$l $r', cols);
     return '$l${' ' * space}$r';
+  }
+
+  static String _linhaQtdComTotal({
+    required String qtd,
+    required String un,
+    required String unit,
+    required String tot,
+    required int cols,
+  }) {
+    final qtdUn = un.trim().isEmpty ? qtd.trim() : '${qtd.trim()} ${un.trim()}';
+    final esquerda = _trunc('  QTD: $qtdUn  x  R\$ $unit', cols - 1);
+    final total = _trunc(tot, cols ~/ 3);
+    final espaco = cols - esquerda.length;
+    if (espaco <= 0) {
+      return _trunc('$esquerda $total', cols);
+    }
+    return '$esquerda${total.padLeft(espaco)}';
   }
 }

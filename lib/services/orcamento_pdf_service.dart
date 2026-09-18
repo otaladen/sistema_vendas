@@ -175,16 +175,27 @@ abstract final class OrcamentoPdfService {
       cliente: c,
       itens: itensOrcamento,
     );
+    final telClienteVisivel = temCliente &&
+        layout.exibirTelefoneCliente &&
+        (c?.telefone.trim().isNotEmpty ?? false);
+    final quebrasCabecalho = CupomPdfLayout.linhasExtrasQuebraOrcamento(
+      layout: layout,
+      nomeLoja: empresa.nomeLoja,
+      endereco: empresa.endereco,
+      linhasEntrega: linhasEntrega,
+      rodape: empresa.rodapeOrcamento,
+    );
     final pageFormat = CupomPdfLayout.formatoPaginaOrcamentoSalvar(
       modelo: modelo,
       layout: layout,
       qtdItens: unidadesItens > 0 ? unidadesItens : itensOrcamento.length,
       linhasTexto: 12 +
-          (temCliente ? 2 : 0) +
+          (temCliente ? (telClienteVisivel ? 3 : 2) : 0) +
           (temVendedor ? 1 : 0) +
           (layout.exibirValidadeOrcamento ? 1 : 0) +
           (telLoja.isNotEmpty || whatsappLoja.isNotEmpty ? 1 : 0) +
-          (cnpjEmpresa.trim().isNotEmpty ? 1 : 0),
+          (cnpjEmpresa.trim().isNotEmpty ? 1 : 0) +
+          quebrasCabecalho,
       // Folga: aviso fiscal + forma de pagamento escolhida (+ rodape config).
       linhasExtras: 7 +
           OrcamentoCondicoesPagamento.quantidadeLinhasLayout(
