@@ -464,7 +464,7 @@ class ProdutoRepository extends ChangeNotifier
   }
 
   /// Pagina de busca para listas longas (cadastro, estoque, dialogo de pesquisa).
-  /// Mesmo ranking do PDV ([compararResultadoBuscaProduto] / ordenacao de cabos).
+  /// Com texto e so ativos: mesmo motor do PDV (sem produtos `__...__`).
   List<Produto> pesquisarPaginaCadastro(
     String termo, {
     int offset = 0,
@@ -472,13 +472,17 @@ class ProdutoRepository extends ChangeNotifier
     bool somenteAtivos = true,
     bool somenteInativos = false,
   }) {
+    final consulta = termo.trim();
+    final comoPdv = consulta.isNotEmpty &&
+        somenteAtivos &&
+        !somenteInativos;
     return pesquisar(
       termo,
       offset: offset,
       limite: limite,
       somenteAtivos: somenteAtivos,
       somenteInativos: somenteInativos,
-      excluirProdutosInternos: false,
+      excluirProdutosInternos: comoPdv,
     );
   }
 

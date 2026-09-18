@@ -334,6 +334,24 @@ class ProdutoApiRepository extends ChangeNotifier {
   }) async {
     final t = termo.trim();
     if (t.isNotEmpty) {
+      final comoPdv = somenteAtivos && !somenteInativos;
+      final local = comoPdv
+          ? pesquisarPadraoPdv(
+              t,
+              offset: offset,
+              limite: limite,
+              somenteAtivos: somenteAtivos,
+              somenteInativos: somenteInativos,
+            )
+          : pesquisar(
+              t,
+              offset: offset,
+              limite: limite,
+              somenteAtivos: somenteAtivos,
+              somenteInativos: somenteInativos,
+              excluirProdutosInternos: false,
+            );
+      if (local.isNotEmpty || _offline) return local;
       return pesquisarRemoto(
         t,
         offset: offset,

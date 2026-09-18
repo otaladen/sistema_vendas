@@ -38,6 +38,8 @@ final NumberFormat _moedaListaProduto = NumberFormat('#,##0.00', 'pt_BR');
 
 /// Ordenacao client-side da lista (apos busca / paginacao).
 enum ProdutoPesquisaOrdenacao {
+  /// Ordem do ranking de busca (igual ao PDV).
+  relevancia,
   nomeAz,
   estoqueMenor,
   estoqueMaior,
@@ -48,6 +50,7 @@ enum ProdutoPesquisaOrdenacao {
 
 extension ProdutoPesquisaOrdenacaoRotulo on ProdutoPesquisaOrdenacao {
   String get rotulo => switch (this) {
+        ProdutoPesquisaOrdenacao.relevancia => 'Relevancia (PDV)',
         ProdutoPesquisaOrdenacao.nomeAz => 'Nome A-Z',
         ProdutoPesquisaOrdenacao.estoqueMenor => 'Menor estoque',
         ProdutoPesquisaOrdenacao.estoqueMaior => 'Maior estoque',
@@ -83,7 +86,7 @@ class ProdutoPesquisaCadastroSessao {
   double scrollOffset = 0;
   int? produtoIdEmDestaque;
   String categoriaFiltro = _kTodasCategorias;
-  ProdutoPesquisaOrdenacao ordenacao = ProdutoPesquisaOrdenacao.nomeAz;
+  ProdutoPesquisaOrdenacao ordenacao = ProdutoPesquisaOrdenacao.relevancia;
   bool painelDetalheAberto = false;
 
   bool get temEstadoSalvo =>
@@ -103,7 +106,7 @@ class ProdutoPesquisaCadastroSessao {
     scrollOffset = 0;
     produtoIdEmDestaque = null;
     categoriaFiltro = _kTodasCategorias;
-    ordenacao = ProdutoPesquisaOrdenacao.nomeAz;
+    ordenacao = ProdutoPesquisaOrdenacao.relevancia;
     painelDetalheAberto = false;
   }
 
@@ -186,7 +189,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   var _excluindo = false;
   var _aplicandoFoto = false;
   var _categoriaFiltro = _kTodasCategorias;
-  var _ordenacao = ProdutoPesquisaOrdenacao.nomeAz;
+  var _ordenacao = ProdutoPesquisaOrdenacao.relevancia;
   var _painelDetalheAberto = false;
 
   bool get _usarPainelDetalhe =>
@@ -200,12 +203,17 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
       );
     }
     final lista = base.toList();
+    if (_ordenacao == ProdutoPesquisaOrdenacao.relevancia) {
+      return lista;
+    }
     lista.sort(_compararOrdenacao);
     return lista;
   }
 
   int _compararOrdenacao(Produto a, Produto b) {
     switch (_ordenacao) {
+      case ProdutoPesquisaOrdenacao.relevancia:
+        return 0;
       case ProdutoPesquisaOrdenacao.estoqueMenor:
         final c = a.estoqueReal.compareTo(b.estoqueReal);
         return c != 0 ? c : a.nome.compareTo(b.nome);
@@ -670,16 +678,10 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           somenteInativos: _somenteInativos,
         ),
       );
-      final pagina = reordenarResultadoBuscaProdutos(
-        (raw as List).whereType<Produto>(),
-        _pesquisaController.text,
-      );
+      final pagina = (raw as List).whereType<Produto>().toList();
       if (!mounted) return;
       setState(() {
-        _carregados = reordenarResultadoBuscaProdutos(
-          [..._carregados, ...pagina],
-          _pesquisaController.text,
-        );
+        _carregados = [..._carregados, ...pagina];
         _atualizarExibidos(_carregados.length);
         _temMaisNoRepo = pagina.length >= _kLoteRepoVazio;
         if (_indiceSelecionado.value < 0 && _carregados.isNotEmpty) {
@@ -730,10 +732,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           somenteInativos: _somenteInativos,
         ),
       );
-      final lista = reordenarResultadoBuscaProdutos(
-        (raw as List).whereType<Produto>(),
-        _pesquisaController.text,
-      );
+      final lista = (raw as List).whereType<Produto>().toList();
       if (!mounted) return;
       final destaque = widget.sessaoCadastro?.produtoIdEmDestaque;
       setState(() {

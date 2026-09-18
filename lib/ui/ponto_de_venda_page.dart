@@ -67,6 +67,7 @@ import '../data/venda_repository.dart';
 import '../data/vendedor_repository.dart';
 import 'vales/vale_credito_busca_dialog.dart';
 import 'pdv/dialogs/orcamento_salvo_dialog.dart';
+import 'pdv/dialogs/selecionar_cliente_dialog.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/kit_orcamento.dart';
@@ -198,9 +199,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   static const int _validadeOrcamentoDias = 7;
-  static const int _selecaoSemClienteValor = -1;
-  static const int _selecaoNovoClienteValor = -2;
-  static const int _selecaoSomenteCotacaoValor = -3;
   static const double _larguraPreviewCarrinhoPdv = 280;
   static const double _breakpointPreviewCarrinhoPdv = 720;
 
@@ -3524,14 +3522,38 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                     itemBuilder: (context, index) {
                       final cliente = _pdvClientesSugeridos[index];
                       final selecionado = index == _pdvIndiceSugestaoCliente;
+                      final titulo = nomeExibicaoClienteListaPdv(cliente);
+                      final subtitulo = subtituloClienteListaPdv(cliente);
+                      final iniciais = iniciaisAvatarClientePdv(cliente);
                       return ListTile(
                         dense: true,
                         selected: selecionado,
+                        leading: CircleAvatar(
+                          radius: 16,
+                          child: iniciais.isNotEmpty
+                              ? Text(
+                                  iniciais,
+                                  style: theme.textTheme.labelSmall,
+                                )
+                              : Icon(
+                                  clienteEhPessoaJuridica(cliente)
+                                      ? Icons.business_rounded
+                                      : Icons.person_outline_rounded,
+                                  size: 18,
+                                ),
+                        ),
                         title: Text(
-                          cliente.nomeRazao,
+                          titulo,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        subtitle: subtitulo == null
+                            ? null
+                            : Text(
+                                subtitulo,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                         onTap: () => unawaited(_aplicarClientePdv(cliente)),
                       );
                     },
@@ -3945,8 +3967,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     bool permitirSemCliente = true,
     String? motivoObrigatorio,
   }) async {
-    final pesquisaController = TextEditingController();
-    Timer? debounceApi;
     final tituloObrigatorio = motivoObrigatorio == null ||
             motivoObrigatorio.trim().isEmpty
         ? 'Cliente obrigatorio'
@@ -3954,176 +3974,47 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     final podeCotacaoSemCliente = !permitirSemCliente &&
         _carrinhoTemItemCarreto &&
         !_pdvExigeClientePorRetiradaFutura;
-    final resultado = await showDialog<int>(
-      context: context,
-      builder: (dialogContext) {
-        var filtrados = widget.clienteRepository.listarPaginado(
-          limit: 60,
-          somenteAtivos: true,
-        );
-        var somenteCotacao = _entregaSomenteCotacao;
-        return StatefulBuilder(
-          builder: (context, setDialogStateInner) {
-            return AlertDialog(
-              title: Text(
-                permitirSemCliente
-                    ? 'Selecionar cliente'
-                    : tituloObrigatorio,
-              ),
-              content: AdaptiveDialogPane(
-                desktopWidth: 680,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (podeCotacaoSemCliente) ...[
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: somenteCotacao,
-                        onChanged: (v) {
-                          setDialogStateInner(() {
-                            somenteCotacao = v;
-                          });
-                        },
-                        title: const Text(
-                          'Só cotação (sem cadastro de cliente)',
-                        ),
-                        subtitle: const Text(
-                          'Cliente apenas cotando preços. '
-                          'Endereço e dados ficam para depois.',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    TextField(
-                      controller: pesquisaController,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Buscar por nome, documento, telefone...',
-                        prefixIcon: Icon(Icons.search),
-                      ),
-                      onChanged: (value) {
-                        final termo = value.trim();
-                        setDialogStateInner(() {
-                          filtrados = _filtrarClientesAtivosParaSeletor(
-                            termo,
-                            limit: 60,
-                          );
-                        });
-                        final repo = widget.clienteRepository;
-                        if (repo is ClienteApiRepository && termo.isNotEmpty) {
-                          debounceApi?.cancel();
-                          _agendarPesquisaClienteRemotaPdv(
-                            repo,
-                            termo,
-                            limit: 60,
-                            aindaMontado: () => dialogContext.mounted,
-                            aplicar: (_) {
-                              setDialogStateInner(() {
-                                filtrados = _filtrarClientesAtivosParaSeletor(
-                                  termo,
-                                  limit: 60,
-                                );
-                              });
-                            },
-                            registrarTimer: (t) => debounceApi = t,
-                          );
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    if (permitirSemCliente)
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.person_off_outlined),
-                        title: const Text('Sem cliente'),
-                        onTap: () => Navigator.pop(
-                          dialogContext,
-                          _selecaoSemClienteValor,
-                        ),
-                      ),
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.app_registration_outlined),
-                      title: const Text('+ Cadastro...'),
-                      onTap: () => Navigator.pop(
-                        dialogContext,
-                        _selecaoNovoClienteValor,
-                      ),
-                    ),
-                    const Divider(height: 12),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: adaptiveDialogListMaxHeight(
-                          context,
-                          desktopFactor: 0.45,
-                          mobileFactor: 0.38,
-                        ),
-                      ),
-                      child: filtrados.isEmpty
-                          ? const Center(
-                              child: Text('Nenhum cliente encontrado.'),
-                            )
-                          : ListView.builder(
-                              shrinkWrap: true,
-                              itemCount: filtrados.length,
-                              itemBuilder: (context, index) {
-                                final c = filtrados[index];
-                                final documento = c.documento.trim().isEmpty
-                                    ? '-'
-                                    : c.documento;
-                                return ListTile(
-                                  dense: true,
-                                  title: Text(c.nomeRazao),
-                                  subtitle: Text(
-                                    'Doc: $documento | Tel: ${c.telefone.trim().isEmpty ? '-' : c.telefone}',
-                                  ),
-                                  onTap: () =>
-                                      Navigator.pop(dialogContext, c.id),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Cancelar'),
-                ),
-                if (podeCotacaoSemCliente)
-                  FilledButton(
-                    onPressed: somenteCotacao
-                        ? () => Navigator.pop(
-                              dialogContext,
-                              _selecaoSomenteCotacaoValor,
-                            )
-                        : null,
-                    child: const Text('Avançar'),
-                  ),
-              ],
-            );
-          },
-        );
-      },
+    final repo = widget.clienteRepository;
+    final resultado = await mostrarSelecionarClientePdvDialog(
+      context,
+      titulo: permitirSemCliente ? 'Selecionar cliente' : tituloObrigatorio,
+      permitirSemCliente: permitirSemCliente,
+      mostrarOpcaoSomenteCotacao: podeCotacaoSemCliente,
+      somenteCotacaoInicial: _entregaSomenteCotacao,
+      filtrarClientes: (termo) =>
+          _filtrarClientesAtivosParaSeletor(termo, limit: 60),
+      agendarPesquisaRemota: repo is ClienteApiRepository
+          ? ({
+              required String termo,
+              required VoidCallback aoConcluir,
+              required void Function(Timer timer) registrarDebounce,
+            }) {
+              _agendarPesquisaClienteRemotaPdv(
+                repo,
+                termo,
+                limit: 60,
+                aindaMontado: () => mounted,
+                aplicar: (_) => aoConcluir(),
+                registrarTimer: registrarDebounce,
+              );
+            }
+          : null,
     );
-    debounceApi?.cancel();
-    pesquisaController.dispose();
 
     if (!mounted || resultado == null) {
       return;
     }
-    if (resultado == _selecaoSomenteCotacaoValor) {
+    if (resultado == kSelecionarClienteSomenteCotacao) {
       setState(_ativarEntregaSomenteCotacao);
       _sincronizarTextoBuscaClientePdv();
       setDialogState?.call(() {});
       return;
     }
-    if (resultado == _selecaoNovoClienteValor) {
+    if (resultado == kSelecionarClienteNovoCadastro) {
       await _abrirCadastroNovoClienteNoPdv(setDialogState: setDialogState);
       return;
     }
-    if (resultado == _selecaoSemClienteValor) {
+    if (resultado == kSelecionarClienteSemCliente) {
       await _selecionarClienteNoOrcamento(null);
       _sincronizarTextoBuscaClientePdv();
       setDialogState?.call(() {});
