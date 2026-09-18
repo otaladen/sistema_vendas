@@ -79,6 +79,8 @@ import '../../services/print_service.dart';
 import '../clientes_page.dart';
 import '../cupom_venda_impressao_helper.dart';
 import '../../services/esc_pos_cupom_builder.dart';
+import '../../services/esc_pos_fechamento_caixa_builder.dart';
+import '../../services/esc_pos_printer_service.dart';
 import '../../services/impressoes_service.dart';
 import '../segunda_via_cupom_autorizacao.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
@@ -3889,12 +3891,18 @@ class _CaixaPageState extends State<CaixaPage>
     if (!mounted) return;
     final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
+    final modoEscPos = config.modoImpressaoBalcao == 'escpos';
     final acao = await showDialog<String>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('Relatorio de fechamento'),
-          content: const Text('Deseja imprimir o fechamento ou salvar em PDF?'),
+          content: Text(
+            modoEscPos
+                ? 'Deseja imprimir o fechamento na termica (ESC/POS) '
+                    'ou salvar em PDF?'
+                : 'Deseja imprimir o fechamento ou salvar em PDF?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, 'fechar'),
@@ -3908,12 +3916,12 @@ class _CaixaPageState extends State<CaixaPage>
             OutlinedButton.icon(
               onPressed: () => Navigator.pop(context, 'direto'),
               icon: const Icon(Icons.print),
-              label: const Text('Impressao direta'),
+              label: Text(modoEscPos ? 'Termica direta' : 'Impressao direta'),
             ),
             ElevatedButton.icon(
               onPressed: () => Navigator.pop(context, 'imprimir'),
               icon: const Icon(Icons.print_outlined),
-              label: const Text('Imprimir'),
+              label: Text(modoEscPos ? 'Imprimir termica' : 'Imprimir'),
             ),
           ],
         );
@@ -3921,6 +3929,33 @@ class _CaixaPageState extends State<CaixaPage>
     );
     if (!mounted || acao == null || acao == 'fechar') return;
     try {
+      if (modoEscPos && (acao == 'imprimir' || acao == 'direto')) {
+        final r = await EscPosPrinterService.imprimirFechamentoCaixaDireto(
+          FechamentoCaixaEscPosDados(
+            config: config,
+            operador: operador,
+            aberturaEm: aberturaEm,
+            fechamentoEm: fechamentoEm,
+            fundoTroco: fundoTroco,
+            suprimentos: suprimentos,
+            sangrias: sangrias,
+            esperadoDinheiro: esperadoDinheiro,
+            esperadoPix: esperadoPix,
+            esperadoDebito: esperadoDebito,
+            esperadoCredito: esperadoCredito,
+            declaradoDinheiro: declaradoDinheiro,
+            declaradoPix: declaradoPix,
+            declaradoDebito: declaradoDebito,
+            declaradoCredito: declaradoCredito,
+            observacao: observacao,
+          ),
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(r.mensagem)),
+        );
+        return;
+      }
       final pdfBytes = await _gerarRelatorioFechamentoPdfBytes(
         operador: operador,
         aberturaEm: aberturaEm,

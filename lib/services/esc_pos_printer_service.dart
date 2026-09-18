@@ -4,6 +4,7 @@ import '../data/app_config_repository.dart';
 import 'configuracoes_service.dart';
 import 'esc_pos_commands.dart';
 import 'esc_pos_cupom_builder.dart';
+import 'esc_pos_fechamento_caixa_builder.dart';
 import 'esc_pos_orcamento_builder.dart';
 import 'esc_pos_transport.dart';
 import 'gaveta_esc_pos_service.dart';
@@ -122,6 +123,39 @@ class EscPosPrinterService {
       return EscPosImpressaoResultado(
         sucesso: false,
         mensagem: 'Falha na impressao ESC/POS do orcamento: $e',
+      );
+    }
+  }
+
+  static Future<EscPosImpressaoResultado> imprimirFechamentoCaixaDireto(
+    FechamentoCaixaEscPosDados dados, {
+    bool cortar = true,
+  }) async {
+    final config = dados.config;
+    try {
+      final bytes = EscPosFechamentoCaixaBuilder.montar(
+        dados,
+        largura: EscPosLarguraBobina.fromConfig(config.escPosLargura),
+        cortar: cortar,
+      );
+      await EscPosTransport.enviar(
+        EscPosDestino.fromConfig(
+          tipo: config.escPosDestino,
+          impressoraWindows: config.impressoraPadrao,
+          host: config.escPosHost,
+          portaTcp: config.escPosPortaTcp,
+          portaCom: config.escPosPortaCom,
+        ),
+        bytes,
+      );
+      return const EscPosImpressaoResultado(
+        sucesso: true,
+        mensagem: 'Relatorio de fechamento enviado para a impressora termica.',
+      );
+    } catch (e) {
+      return EscPosImpressaoResultado(
+        sucesso: false,
+        mensagem: 'Falha na impressao ESC/POS do fechamento: $e',
       );
     }
   }

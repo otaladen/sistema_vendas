@@ -25,7 +25,8 @@ void main() {
   test('pagamento misto com frete reconcilia vPag ao valor_total da nota', () {
     final item = ItemVenda(
       nomeProduto: 'Tijolo',
-      quantidade: 10,
+      // 10 un. na escala PDV (milésimos): 10 * 1000.
+      quantidade: 10000,
       precoUnitario: 5,
       precoCustoUnitario: 1,
     )..produto.target = Produto(

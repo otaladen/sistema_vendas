@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-import '../data/app_config_repository.dart';
 import 'configuracoes_service.dart';
 import '../domain/recebimento_fiado_codec.dart';
 import '../model/cliente.dart';

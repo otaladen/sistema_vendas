@@ -51,7 +51,7 @@ abstract final class LojaOrigemMercadoria {
     required String origemVenda,
     bool cargaSaiu = false,
   }) {
-    final raw = (origemItem ?? '').trim();
+    final raw = origemItem.trim();
     if (raw.isEmpty) {
       return cargaSaiu ? local : outraLoja;
     }

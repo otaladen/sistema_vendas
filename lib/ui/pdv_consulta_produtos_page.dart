@@ -136,7 +136,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   SugestaoVendaMetricaRepository? _sugestaoMetricaRepo;
 
   late String _precoListaAtivo;
-  double _quantidadeAdicionar = 1;
   final GlobalKey<PdvConsultaControlesAdicionarState> _controlesQuantidadeKey =
       GlobalKey<PdvConsultaControlesAdicionarState>();
   List<Produto> _produtosBase = [];
@@ -634,7 +633,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
             _indiceSelecionado = _produtos.isEmpty ? null : 0;
             _produtoPreviewPainel =
                 _produtos.isEmpty ? null : _produtos.first;
-            _quantidadeAdicionar = 1;
           } else {
             _produtosBase = [..._produtosBase, ...limpos];
             _produtos = _filtrarProdutos(_produtosBase);
@@ -761,7 +759,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       _subtituloLista = _montarSubtituloLista(lista, termo);
       _indiceSelecionado = filtrada.isEmpty ? null : 0;
       _produtoPreviewPainel = filtrada.isEmpty ? null : filtrada.first;
-      _quantidadeAdicionar = 1;
     });
     _debouncePreview?.cancel();
 
@@ -847,7 +844,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
         _subtituloLista = _montarSubtituloLista(remotos, termo);
         _indiceSelecionado = filtrada.isEmpty ? null : 0;
         _produtoPreviewPainel = filtrada.isEmpty ? null : filtrada.first;
-        _quantidadeAdicionar = 1;
       });
       if (_produtos.isNotEmpty) {
         _reposicionarListaAposBusca();
@@ -1176,7 +1172,6 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     if (index < 0 || index >= _produtos.length) return;
     setState(() {
       _indiceSelecionado = index;
-      _quantidadeAdicionar = 1;
       _sincronizarPainelPreview(imediato: true);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1198,9 +1193,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     }
   }
 
-  void _atualizarQuantidadeAdicionar(double quantidade) {
-    _quantidadeAdicionar = quantidade;
-  }
+  void _atualizarQuantidadeAdicionar(double quantidade) {}
 
   /// Fecha a consulta uma unica vez (Esc nao deve dar pop duplo).
   void _fecharConsulta() {

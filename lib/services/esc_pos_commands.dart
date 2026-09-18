@@ -13,6 +13,9 @@ abstract final class EscPosCommands {
   static final Uint8List boldOff = Uint8List.fromList([0x1B, 0x45, 0]);
   static final Uint8List doubleHeightOn =
       Uint8List.fromList([0x1D, 0x21, 0x01]);
+  /// Dupla largura (GS ! 16) — reduz colunas efetivas pela metade.
+  static final Uint8List doubleWidthOn =
+      Uint8List.fromList([0x1D, 0x21, 0x10]);
   static final Uint8List normalSize = Uint8List.fromList([0x1D, 0x21, 0x00]);
   static final Uint8List underlineOn = Uint8List.fromList([0x1B, 0x2D, 1]);
   static final Uint8List underlineOff = Uint8List.fromList([0x1B, 0x2D, 0]);

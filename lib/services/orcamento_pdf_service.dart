@@ -177,7 +177,7 @@ abstract final class OrcamentoPdfService {
     );
     final telClienteVisivel = temCliente &&
         layout.exibirTelefoneCliente &&
-        (c?.telefone.trim().isNotEmpty ?? false);
+        c.telefone.trim().isNotEmpty;
     final quebrasCabecalho = CupomPdfLayout.linhasExtrasQuebraOrcamento(
       layout: layout,
       nomeLoja: empresa.nomeLoja,

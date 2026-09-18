@@ -15,6 +15,7 @@ import '../model/vendedor.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
 import 'cupom_pdf_layout.dart';
 import 'esc_pos_commands.dart';
+import 'esc_pos_text_layout.dart';
 import 'fiscal_config_store.dart';
 import 'impressoes_service.dart';
 
@@ -114,14 +115,14 @@ abstract final class EscPosCupomBuilder {
     // --- Cabecalho ---
     out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
-    for (final l in _wrap(config.nomeLoja.trim(), cols)) {
+    for (final l in EscPosTextLayout.wrap(config.nomeLoja.trim(), cols)) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.boldOff);
     final razao = fiscal.razaoSocialEmitente.trim();
     if (razao.isNotEmpty &&
         razao.toLowerCase() != config.nomeLoja.trim().toLowerCase()) {
-      for (final l in _wrap(razao, cols)) {
+      for (final l in EscPosTextLayout.wrap(razao, cols)) {
         out.add(EscPosCommands.line(l));
       }
     }
@@ -137,7 +138,7 @@ abstract final class EscPosCupomBuilder {
     out.add(EscPosCommands.line(
       FiscalRegimePadrao.rotuloRegime(regime),
     ));
-    for (final l in _wrap(config.endereco.trim(), cols)) {
+    for (final l in EscPosTextLayout.wrap(config.endereco.trim(), cols)) {
       out.add(EscPosCommands.line(l));
     }
     if (config.telefone.trim().isNotEmpty) {
@@ -162,7 +163,7 @@ abstract final class EscPosCupomBuilder {
     if (temNfceReal) {
       final prot = venda.nfceProtocolo.trim();
       if (prot.isNotEmpty && !prot.startsWith('emissao:')) {
-        out.add(EscPosCommands.line('Protocolo: ${_trunc(prot, cols - 11)}'));
+        out.add(EscPosCommands.line('Protocolo: ${EscPosTextLayout.trunc(prot, cols - 11)}'));
       }
     }
     out.add(EscPosCommands.boldOn);
@@ -177,7 +178,7 @@ abstract final class EscPosCupomBuilder {
     final vendNome = CupomNaoFiscalVendaPdf.rotuloVendedorUmLinha(dados.vendedor);
     if (vendNome.trim().isNotEmpty &&
         vendNome.trim().toLowerCase() != 'sem vendedor') {
-      out.add(EscPosCommands.line('Vendedor: ${_trunc(vendNome, cols - 10)}'));
+      out.add(EscPosCommands.line('Vendedor: ${EscPosTextLayout.trunc(vendNome, cols - 10)}'));
     }
 
     _adicionarBlocoEntregaCarreto(
@@ -191,7 +192,7 @@ abstract final class EscPosCupomBuilder {
     final cli = dados.cliente;
     if (temNfceReal && homolog) {
       out.add(EscPosCommands.line(
-        _trunc('Cliente: NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO', cols),
+        EscPosTextLayout.trunc('Cliente: NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO', cols),
       ));
     }
 
@@ -200,7 +201,7 @@ abstract final class EscPosCupomBuilder {
     if (cols >= 42) {
       out.add(EscPosCommands.line('CODIGO / DESCRICAO'));
       out.add(EscPosCommands.line(
-        _padCols('QTD x UN    VALOR UN', 'TOTAL', cols),
+        EscPosTextLayout.padCols('QTD x UN    VALOR UN', 'TOTAL', cols),
       ));
     } else {
       out.add(EscPosCommands.line('ITENS'));
@@ -227,7 +228,7 @@ abstract final class EscPosCupomBuilder {
       final unit = _moeda.format(item.precoUnitario);
       final tot = _moeda.format(item.subtotal);
       final titulo = '$cod - $nome';
-      for (final l in _wrap(titulo, cols)) {
+      for (final l in EscPosTextLayout.wrap(titulo, cols)) {
         out.add(EscPosCommands.line(l));
       }
       out.add(EscPosCommands.line(
@@ -246,21 +247,21 @@ abstract final class EscPosCupomBuilder {
     final desc = venda.descontoImplicitoTotal;
     final frete = venda.valorFrete;
     out.add(EscPosCommands.line(
-      _padCols('Subtotal', _moeda.format(sub), cols),
+      EscPosTextLayout.padCols('Subtotal', _moeda.format(sub), cols),
     ));
     if (desc > 0.0001) {
       out.add(EscPosCommands.line(
-        _padCols('Desconto', '-${_moeda.format(desc)}', cols),
+        EscPosTextLayout.padCols('Desconto', '-${_moeda.format(desc)}', cols),
       ));
     }
     if (frete > 0.0001) {
       out.add(EscPosCommands.line(
-        _padCols('Acrescimo/Frete', _moeda.format(frete), cols),
+        EscPosTextLayout.padCols('Acrescimo/Frete', _moeda.format(frete), cols),
       ));
     }
     out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line(
-      _padCols('TOTAL', 'R\$ ${_moeda.format(venda.total)}', cols),
+      EscPosTextLayout.padCols('TOTAL', 'R\$ ${_moeda.format(venda.total)}', cols),
     ));
     out.add(EscPosCommands.boldOff);
 
@@ -269,12 +270,12 @@ abstract final class EscPosCupomBuilder {
     ));
     if (dados.totalRecebido > 0.0001) {
       out.add(EscPosCommands.line(
-        _padCols('Recebido', _moeda.format(dados.totalRecebido), cols),
+        EscPosTextLayout.padCols('Recebido', _moeda.format(dados.totalRecebido), cols),
       ));
     }
     if (dados.troco > 0.0001) {
       out.add(EscPosCommands.line(
-        _padCols('Troco', _moeda.format(dados.troco), cols),
+        EscPosTextLayout.padCols('Troco', _moeda.format(dados.troco), cols),
       ));
     }
 
@@ -283,7 +284,7 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.separator(cols));
       out.add(EscPosCommands.alignCenter);
       out.add(EscPosCommands.boldOn);
-      for (final l in _wrap(
+      for (final l in EscPosTextLayout.wrap(
         'NOTA EMITIDA EM CONTIGENCIA-AUTORIZACAO PENDENTE',
         cols,
       )) {
@@ -297,7 +298,7 @@ abstract final class EscPosCupomBuilder {
 
     final urlConsulta = CupomPdfLayout.urlConsultaNfcePorUf();
     out.add(EscPosCommands.line('Consulte pela Chave de Acesso em'));
-    for (final l in _wrap(urlConsulta, cols)) {
+    for (final l in EscPosTextLayout.wrap(urlConsulta, cols)) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.line(''));
@@ -322,7 +323,7 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.separator(cols));
       out.add(EscPosCommands.boldOn);
       for (final linha in CupomPdfLayout.linhasIdentificacaoConsumidor(cli)) {
-        for (final l in _wrap(linha, cols)) {
+        for (final l in EscPosTextLayout.wrap(linha, cols)) {
           out.add(EscPosCommands.line(l));
         }
       }
@@ -333,7 +334,7 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.separator(cols));
       out.add(EscPosCommands.alignCenter);
       out.add(EscPosCommands.boldOn);
-      for (final l in _wrap('SEM VALOR FISCAL', cols)) {
+      for (final l in EscPosTextLayout.wrap('SEM VALOR FISCAL', cols)) {
         out.add(EscPosCommands.line(l));
       }
       out.add(EscPosCommands.boldOff);
@@ -341,7 +342,7 @@ abstract final class EscPosCupomBuilder {
     } else if (temNfceReal) {
       final rodape = config.rodapeNota.trim();
       if (rodape.isNotEmpty && !_pareceRodapeNaoFiscal(rodape)) {
-        for (final l in _wrap(rodape, cols)) {
+        for (final l in EscPosTextLayout.wrap(rodape, cols)) {
           out.add(EscPosCommands.line(l));
         }
       } else {
@@ -379,12 +380,12 @@ abstract final class EscPosCupomBuilder {
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.alignLeft);
     out.add(EscPosCommands.boldOn);
-    for (final l in _wrap(EntregaVendaHelper.tituloBlocoEntregaImpressao, cols)) {
+    for (final l in EscPosTextLayout.wrap(EntregaVendaHelper.tituloBlocoEntregaImpressao, cols)) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.boldOff);
     for (final linha in linhas) {
-      for (final l in _wrap(linha, cols)) {
+      for (final l in EscPosTextLayout.wrap(linha, cols)) {
         out.add(EscPosCommands.line(l));
       }
     }
@@ -421,10 +422,10 @@ abstract final class EscPosCupomBuilder {
     if (!homolog) return;
     out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
-    for (final l in _wrap('EMISSAO EM AMBIENTE DE HOMOLOGACAO', cols)) {
+    for (final l in EscPosTextLayout.wrap('EMISSAO EM AMBIENTE DE HOMOLOGACAO', cols)) {
       out.add(EscPosCommands.line(l));
     }
-    for (final l in _wrap('SEM VALOR FISCAL', cols)) {
+    for (final l in EscPosTextLayout.wrap('SEM VALOR FISCAL', cols)) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.boldOff);
@@ -448,37 +449,6 @@ abstract final class EscPosCupomBuilder {
         '${d.substring(8, 12)}-${d.substring(12)}';
   }
 
-  static String _trunc(String s, int max) {
-    final t = s.trim();
-    if (t.length <= max) return t;
-    if (max <= 1) return t.substring(0, max);
-    return '${t.substring(0, max - 1)}.';
-  }
-
-  static List<String> _wrap(String s, int cols) {
-    final t = s.trim();
-    if (t.isEmpty) return const [];
-    if (t.length <= cols) return [t];
-    final out = <String>[];
-    var rest = t;
-    while (rest.length > cols) {
-      var cut = rest.lastIndexOf(' ', cols);
-      if (cut < cols ~/ 2) cut = cols;
-      out.add(rest.substring(0, cut).trimRight());
-      rest = rest.substring(cut).trimLeft();
-    }
-    if (rest.isNotEmpty) out.add(rest);
-    return out;
-  }
-
-  static String _padCols(String left, String right, int cols) {
-    final l = _trunc(left, cols - 1);
-    final r = _trunc(right, cols - 1);
-    final space = cols - l.length - r.length;
-    if (space <= 0) return _trunc('$l $r', cols);
-    return '$l${' ' * space}$r';
-  }
-
   /// Linha 2 do item: quantidade destacada + total alinhado a direita (padLeft).
   static String _linhaQtdComTotal({
     required String qtd,
@@ -488,11 +458,11 @@ abstract final class EscPosCupomBuilder {
     required int cols,
   }) {
     final qtdUn = un.trim().isEmpty ? qtd.trim() : '${qtd.trim()} ${un.trim()}';
-    final esquerda = _trunc('  QTD: $qtdUn  x  R\$ $unit', cols - 1);
-    final total = _trunc(tot, cols ~/ 3);
+    final esquerda = EscPosTextLayout.trunc('  QTD: $qtdUn  x  R\$ $unit', cols - 1);
+    final total = EscPosTextLayout.trunc(tot, cols ~/ 3);
     final espaco = cols - esquerda.length;
     if (espaco <= 0) {
-      return _trunc('$esquerda $total', cols);
+      return EscPosTextLayout.trunc('$esquerda $total', cols);
     }
     return '$esquerda${total.padLeft(espaco)}';
   }

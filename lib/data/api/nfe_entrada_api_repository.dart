@@ -1,6 +1,5 @@
 import '../../domain/conferencia_nfe_opcoes.dart';
 import '../../domain/nfe_entrada_conversao_util.dart';
-import '../../domain/produto_embalagem.dart';
 import '../../model/item_nota_temporario.dart';
 import '../../model/produto.dart';
 import '../../services/xml_nfe_parser_service.dart';
@@ -72,10 +71,12 @@ class NfeEntradaApiRepository {
       Produto? produtoResolvido;
       var resolvidoPorEan = false;
       if (item.codigoBarras.isNotEmpty) {
-        produtoResolvido = _produtoRepository.resolverLeitorCodigoBarras(
-          item.codigoBarras,
-          somenteAtivos: false,
-        ) as dynamic;
+        produtoResolvido =
+            _produtoRepository.resolverLeitorCodigoBarras(
+                  item.codigoBarras,
+                  somenteAtivos: false,
+                )
+                as dynamic;
         if (produtoResolvido != null) {
           resolvidoPorEan = true;
         }
@@ -126,7 +127,7 @@ class NfeEntradaApiRepository {
     return prepararSugestoesConferencia(parse.nfe);
   }
 
-  Future<void> confirmarEntrada({
+  Future<List<int>> confirmarEntrada({
     required NfeXmlParseResult nfe,
     required List<ConferenciaNfeLinhaConfirmacao> linhas,
     ConferenciaNfeOpcoes opcoes = const ConferenciaNfeOpcoes(),
@@ -159,24 +160,25 @@ class NfeEntradaApiRepository {
               if (l.numeroLoteEfetivo.isNotEmpty)
                 'numeroLote': l.numeroLoteEfetivo,
               if (l.dataValidadeEfetiva != null)
-                'dataValidade':
-                    l.dataValidadeEfetiva!.toUtc().toIso8601String(),
+                'dataValidade': l.dataValidadeEfetiva!
+                    .toUtc()
+                    .toIso8601String(),
             },
           )
           .toList(),
     });
-    final repo = _produtoRepository;
-    if (repo is ProdutoApiRepository) {
-      final idsRaw = m['produtoIds'];
-      final ids = idsRaw is List
-          ? idsRaw
+    final idsRaw = m['produtoIds'];
+    final ids = idsRaw is List
+        ? idsRaw
               .map((e) => (e as num?)?.toInt() ?? 0)
               .where((id) => id > 0)
               .toList()
-          : <int>[
-              for (final l in linhas)
-                if ((l.produtoExistenteId ?? 0) > 0) l.produtoExistenteId!,
-            ];
+        : <int>[
+            for (final l in linhas)
+              if ((l.produtoExistenteId ?? 0) > 0) l.produtoExistenteId!,
+          ];
+    final repo = _produtoRepository;
+    if (repo is ProdutoApiRepository) {
       if (ids.isNotEmpty) {
         await repo.atualizarEstoquePorIds(ids);
       } else {
@@ -184,6 +186,7 @@ class NfeEntradaApiRepository {
       }
       repo.invalidarCacheBusca();
     }
+    return ids;
   }
 
   Future<Map<String, dynamic>> solicitarDevolucaoRemoto({
@@ -191,12 +194,11 @@ class NfeEntradaApiRepository {
     required String usuarioLogin,
     String terminalId = '',
     Map<String, dynamic>? detalhes,
-  }) =>
-      _client.solicitarDevolucaoFornecedor(importacaoId, {
-        'usuarioLogin': usuarioLogin,
-        'terminalId': terminalId,
-        if (detalhes != null) ...detalhes,
-      });
+  }) => _client.solicitarDevolucaoFornecedor(importacaoId, {
+    'usuarioLogin': usuarioLogin,
+    'terminalId': terminalId,
+    if (detalhes != null) ...detalhes,
+  });
 
   /// Listagem remota do historico de entradas (Terminal Leve).
   Future<Map<String, dynamic>> listarImportadasRemoto({
@@ -244,8 +246,8 @@ class NfeEntradaApiRepository {
           produtoNovo: sm['produtoNovo'] == true,
           produtoExistenteId: (sm['produtoExistenteId'] as num?)?.toInt(),
           fatorInicial: (sm['fatorInicial'] as num?)?.toDouble() ?? 1,
-          unidadeInternaInicial:
-              (sm['unidadeInternaInicial'] ?? 'UN').toString(),
+          unidadeInternaInicial: (sm['unidadeInternaInicial'] ?? 'UN')
+              .toString(),
           embalagemMultiplicaInicial: sm['embalagemMultiplicaInicial'] != false,
           tipoMatch: tipo,
         ),
@@ -266,7 +268,7 @@ class NfeEntradaApiRepository {
       numeroNota: (m['numeroNota'] as num?)?.toInt() ?? 0,
       dataEmissao:
           DateTime.tryParse((m['dataEmissao'] ?? '').toString())?.toUtc() ??
-              DateTime.now().toUtc(),
+          DateTime.now().toUtc(),
       emitente: EmitenteNfeTemporario(
         cnpj: (emit['cnpj'] ?? '').toString(),
         razaoSocial: (emit['razaoSocial'] ?? '').toString(),
@@ -285,9 +287,9 @@ class NfeEntradaApiRepository {
       ),
       itens: itensRaw is List
           ? itensRaw
-              .whereType<Map>()
-              .map((e) => _itemDeMap(Map<String, dynamic>.from(e)))
-              .toList()
+                .whereType<Map>()
+                .map((e) => _itemDeMap(Map<String, dynamic>.from(e)))
+                .toList()
           : const [],
       duplicatas: dupsRaw is List
           ? dupsRaw.whereType<Map>().map((e) {
@@ -305,36 +307,35 @@ class NfeEntradaApiRepository {
     );
   }
 
-  static ItemNotaTemporario _itemDeMap(Map<String, dynamic> im) =>
-      ItemNotaTemporario(
-        numeroItem: (im['numeroItem'] as num?)?.toInt() ?? 0,
-        codigo: (im['codigo'] ?? '').toString(),
-        descricao: (im['descricao'] ?? '').toString(),
-        unidadeComercial: (im['unidadeComercial'] ?? '').toString(),
-        quantidadeComercial:
-            (im['quantidadeComercial'] as num?)?.toDouble() ?? 0,
-        valorUnitarioComercial:
-            (im['valorUnitarioComercial'] as num?)?.toDouble() ?? 0,
-        unidadeTributavel: (im['unidadeTributavel'] ?? '').toString(),
-        quantidadeTributavel:
-            (im['quantidadeTributavel'] as num?)?.toDouble() ?? 0,
-        valorUnitarioTributavel:
-            (im['valorUnitarioTributavel'] as num?)?.toDouble() ?? 0,
-        codigoBarras: (im['codigoBarras'] ?? '').toString(),
-        ncm: (im['ncm'] ?? '').toString(),
-        cfop: (im['cfop'] ?? '').toString(),
-        icmsOrigem: (im['icmsOrigem'] ?? '').toString(),
-        icmsSituacaoTributaria: (im['icmsSituacaoTributaria'] ?? '').toString(),
-        icmsBaseCalculo: (im['icmsBaseCalculo'] as num?)?.toDouble() ?? 0,
-        icmsAliquota: (im['icmsAliquota'] as num?)?.toDouble() ?? 0,
-        icmsValor: (im['icmsValor'] as num?)?.toDouble() ?? 0,
-        icmsBaseCalculoSt: (im['icmsBaseCalculoSt'] as num?)?.toDouble() ?? 0,
-        icmsAliquotaSt: (im['icmsAliquotaSt'] as num?)?.toDouble() ?? 0,
-        icmsValorSt: (im['icmsValorSt'] as num?)?.toDouble() ?? 0,
-        ipiValor: (im['ipiValor'] as num?)?.toDouble() ?? 0,
-        numeroLote: (im['numeroLote'] ?? '').toString(),
-        dataValidade: DateTime.tryParse(
-          (im['dataValidade'] ?? '').toString(),
-        )?.toUtc(),
-      );
+  static ItemNotaTemporario _itemDeMap(
+    Map<String, dynamic> im,
+  ) => ItemNotaTemporario(
+    numeroItem: (im['numeroItem'] as num?)?.toInt() ?? 0,
+    codigo: (im['codigo'] ?? '').toString(),
+    descricao: (im['descricao'] ?? '').toString(),
+    unidadeComercial: (im['unidadeComercial'] ?? '').toString(),
+    quantidadeComercial: (im['quantidadeComercial'] as num?)?.toDouble() ?? 0,
+    valorUnitarioComercial:
+        (im['valorUnitarioComercial'] as num?)?.toDouble() ?? 0,
+    unidadeTributavel: (im['unidadeTributavel'] ?? '').toString(),
+    quantidadeTributavel: (im['quantidadeTributavel'] as num?)?.toDouble() ?? 0,
+    valorUnitarioTributavel:
+        (im['valorUnitarioTributavel'] as num?)?.toDouble() ?? 0,
+    codigoBarras: (im['codigoBarras'] ?? '').toString(),
+    ncm: (im['ncm'] ?? '').toString(),
+    cfop: (im['cfop'] ?? '').toString(),
+    icmsOrigem: (im['icmsOrigem'] ?? '').toString(),
+    icmsSituacaoTributaria: (im['icmsSituacaoTributaria'] ?? '').toString(),
+    icmsBaseCalculo: (im['icmsBaseCalculo'] as num?)?.toDouble() ?? 0,
+    icmsAliquota: (im['icmsAliquota'] as num?)?.toDouble() ?? 0,
+    icmsValor: (im['icmsValor'] as num?)?.toDouble() ?? 0,
+    icmsBaseCalculoSt: (im['icmsBaseCalculoSt'] as num?)?.toDouble() ?? 0,
+    icmsAliquotaSt: (im['icmsAliquotaSt'] as num?)?.toDouble() ?? 0,
+    icmsValorSt: (im['icmsValorSt'] as num?)?.toDouble() ?? 0,
+    ipiValor: (im['ipiValor'] as num?)?.toDouble() ?? 0,
+    numeroLote: (im['numeroLote'] ?? '').toString(),
+    dataValidade: DateTime.tryParse(
+      (im['dataValidade'] ?? '').toString(),
+    )?.toUtc(),
+  );
 }

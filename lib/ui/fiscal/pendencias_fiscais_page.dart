@@ -305,7 +305,7 @@ class _PendenciasFiscaisPageState extends State<PendenciasFiscaisPage> {
         return;
       }
       final produtoRepo = _produtoRepository(context);
-      final ok = await NfceEmissaoPendenteFlow.emitir(
+      await NfceEmissaoPendenteFlow.emitir(
         context,
         venda: venda,
         vendaRepository: widget.vendaRepository as VendaRepository,

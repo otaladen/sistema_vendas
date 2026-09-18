@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import '../data/app_config_repository.dart' show EmpresaConfig;
 import 'configuracoes_service.dart';
 import 'esc_pos_commands.dart';
 import 'esc_pos_transport.dart';

@@ -80,7 +80,7 @@ Future<void> mostrarFluxoImpressaoCupomVenda(
   if (config.pdvAutoImpressaoAoFinalizarVenda) {
     try {
       if (modoEscPos) {
-        final r = await EscPosPrinterService.imprimirCupomDireto(dadosEscPos!);
+        final r = await EscPosPrinterService.imprimirCupomDireto(dadosEscPos);
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(r.mensagem)),

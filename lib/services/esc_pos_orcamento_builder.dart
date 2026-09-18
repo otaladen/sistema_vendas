@@ -16,6 +16,7 @@ import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
 import 'esc_pos_commands.dart';
+import 'esc_pos_text_layout.dart';
 import 'fiscal_config_store.dart';
 import 'impressoes_service.dart';
 import 'orcamento_pdf_service.dart';
@@ -85,7 +86,7 @@ abstract final class EscPosOrcamentoBuilder {
     // Sem double-height: na TM-T20 corta o nome no meio da palavra.
     out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
-    for (final l in _wrap(config.nomeLoja.trim(), cols)) {
+    for (final l in EscPosTextLayout.wrap(config.nomeLoja.trim(), cols)) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.boldOff);
@@ -107,14 +108,14 @@ abstract final class EscPosOrcamentoBuilder {
     out.add(EscPosCommands.line(
       FiscalRegimePadrao.rotuloRegime(FiscalRegimePadrao.regimeEfetivo(fiscal)),
     ));
-    for (final l in _wrap(config.endereco.trim(), cols)) {
+    for (final l in EscPosTextLayout.wrap(config.endereco.trim(), cols)) {
       out.add(EscPosCommands.line(l));
     }
 
     out.add(EscPosCommands.separator(cols));
     if (homolog) {
       out.add(EscPosCommands.boldOn);
-      for (final l in _wrap('EMISSAO EM AMBIENTE DE HOMOLOGACAO', cols)) {
+      for (final l in EscPosTextLayout.wrap('EMISSAO EM AMBIENTE DE HOMOLOGACAO', cols)) {
         out.add(EscPosCommands.line(l));
       }
       out.add(EscPosCommands.boldOff);
@@ -139,7 +140,7 @@ abstract final class EscPosOrcamentoBuilder {
       out.add(EscPosCommands.line('CLIENTE'));
       out.add(EscPosCommands.boldOff);
       out.add(EscPosCommands.line(
-        'Nome: ${_trunc(cliente.nomeRazao.trim(), cols - 6)}',
+        'Nome: ${EscPosTextLayout.trunc(cliente.nomeRazao.trim(), cols - 6)}',
       ));
       final telCli = cliente.telefone.trim();
       if (telCli.isNotEmpty) {
@@ -155,7 +156,7 @@ abstract final class EscPosOrcamentoBuilder {
       final codigo = vend.codigoInterno.trim();
       final rotulo = codigo.isNotEmpty ? '$codigo - $nome' : nome;
       out.add(EscPosCommands.line(
-        'Vendedor: ${_trunc(rotulo, cols - 10)}',
+        'Vendedor: ${EscPosTextLayout.trunc(rotulo, cols - 10)}',
       ));
     }
 
@@ -172,7 +173,7 @@ abstract final class EscPosOrcamentoBuilder {
     if (cols >= 42) {
       out.add(EscPosCommands.line('CODIGO / DESCRICAO'));
       out.add(EscPosCommands.line(
-        _padCols('QTD x UN    VALOR UN', 'TOTAL', cols),
+        EscPosTextLayout.padCols('QTD x UN    VALOR UN', 'TOTAL', cols),
       ));
     } else {
       out.add(EscPosCommands.line('ITENS'));
@@ -196,7 +197,7 @@ abstract final class EscPosOrcamentoBuilder {
             : (snap.isEmpty ? 'Produto' : snap);
         final sku = (produto?.codigoInterno ?? '').trim();
         final titulo = sku.isEmpty ? nome : '$sku - $nome';
-        for (final l in _wrap(titulo, cols)) {
+        for (final l in EscPosTextLayout.wrap(titulo, cols)) {
           out.add(EscPosCommands.line(l));
         }
         final qtdTxt = OrcamentoPdfService.quantidadeComUnidade(
@@ -230,21 +231,21 @@ abstract final class EscPosOrcamentoBuilder {
     final valorFrete = OrcamentoTotaisImpressao.freteInformado(venda);
 
     out.add(EscPosCommands.line(
-      _padCols('Subtotal produtos:', 'R\$ ${_moeda.format(subtotalItens)}', cols),
+      EscPosTextLayout.padCols('Subtotal produtos:', 'R\$ ${_moeda.format(subtotalItens)}', cols),
     ));
     if (temFrete) {
       out.add(EscPosCommands.line(
-        _padCols('Frete/Entrega:', 'R\$ ${_moeda.format(valorFrete)}', cols),
+        EscPosTextLayout.padCols('Frete/Entrega:', 'R\$ ${_moeda.format(valorFrete)}', cols),
       ));
     }
     if (OrcamentoTotaisImpressao.imprimirLinhaDesconto(desconto)) {
       out.add(EscPosCommands.line(
-        _padCols('Desconto:', '- R\$ ${_moeda.format(desconto)}', cols),
+        EscPosTextLayout.padCols('Desconto:', '- R\$ ${_moeda.format(desconto)}', cols),
       ));
     }
     out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line(
-      _padCols('VALOR TOTAL:', 'R\$ ${_moeda.format(total)}', cols),
+      EscPosTextLayout.padCols('VALOR TOTAL:', 'R\$ ${_moeda.format(total)}', cols),
     ));
     out.add(EscPosCommands.boldOff);
 
@@ -257,7 +258,7 @@ abstract final class EscPosOrcamentoBuilder {
       formatarMoeda: (v) => 'R\$ ${_moeda.format(v)}',
     )) {
       out.add(EscPosCommands.line(
-        _padCols(linha.rotulo, linha.valor, cols),
+        EscPosTextLayout.padCols(linha.rotulo, linha.valor, cols),
       ));
     }
     out.add(EscPosCommands.boldOff);
@@ -265,7 +266,7 @@ abstract final class EscPosOrcamentoBuilder {
     if (PlanoFiadoCodec.vendaTemPlanoQuitacao(venda)) {
       out.add(EscPosCommands.line('Condição de quitação (fiado):'));
       for (final linha in PlanoFiadoCodec.linhasTextoPdf(venda)) {
-        for (final l in _wrap(linha, cols)) {
+        for (final l in EscPosTextLayout.wrap(linha, cols)) {
           out.add(EscPosCommands.line(l));
         }
       }
@@ -274,7 +275,7 @@ abstract final class EscPosOrcamentoBuilder {
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
-    for (final l in _wrap(
+    for (final l in EscPosTextLayout.wrap(
       'ESTE DOCUMENTO E UMA COTACAO E NAO POSSUI VALOR FISCAL.',
       cols,
     )) {
@@ -285,7 +286,7 @@ abstract final class EscPosOrcamentoBuilder {
     final rodape = config.rodapeOrcamento.trim();
     if (rodape.isNotEmpty) {
       out.add(EscPosCommands.line(''));
-      for (final l in _wrap(rodape, cols)) {
+      for (final l in EscPosTextLayout.wrap(rodape, cols)) {
         out.add(EscPosCommands.line(l));
       }
     }
@@ -314,12 +315,12 @@ abstract final class EscPosOrcamentoBuilder {
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.alignLeft);
     out.add(EscPosCommands.boldOn);
-    for (final l in _wrap(EntregaVendaHelper.tituloBlocoEntregaImpressao, cols)) {
+    for (final l in EscPosTextLayout.wrap(EntregaVendaHelper.tituloBlocoEntregaImpressao, cols)) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.boldOff);
     for (final linha in linhas) {
-      for (final l in _wrap(linha, cols)) {
+      for (final l in EscPosTextLayout.wrap(linha, cols)) {
         out.add(EscPosCommands.line(l));
       }
     }
@@ -332,37 +333,6 @@ abstract final class EscPosOrcamentoBuilder {
         '${d.substring(8, 12)}-${d.substring(12)}';
   }
 
-  static String _trunc(String s, int max) {
-    final t = s.trim();
-    if (t.length <= max) return t;
-    if (max <= 1) return t.substring(0, max);
-    return '${t.substring(0, max - 1)}.';
-  }
-
-  static List<String> _wrap(String s, int cols) {
-    final t = s.trim();
-    if (t.isEmpty) return const [];
-    if (t.length <= cols) return [t];
-    final out = <String>[];
-    var rest = t;
-    while (rest.length > cols) {
-      var cut = rest.lastIndexOf(' ', cols);
-      if (cut < cols ~/ 2) cut = cols;
-      out.add(rest.substring(0, cut).trimRight());
-      rest = rest.substring(cut).trimLeft();
-    }
-    if (rest.isNotEmpty) out.add(rest);
-    return out;
-  }
-
-  static String _padCols(String left, String right, int cols) {
-    final l = _trunc(left, cols - 1);
-    final r = _trunc(right, cols - 1);
-    final space = cols - l.length - r.length;
-    if (space <= 0) return _trunc('$l $r', cols);
-    return '$l${' ' * space}$r';
-  }
-
   static String _linhaQtdComTotal({
     required String qtd,
     required String un,
@@ -371,11 +341,11 @@ abstract final class EscPosOrcamentoBuilder {
     required int cols,
   }) {
     final qtdUn = un.trim().isEmpty ? qtd.trim() : '${qtd.trim()} ${un.trim()}';
-    final esquerda = _trunc('  QTD: $qtdUn  x  R\$ $unit', cols - 1);
-    final total = _trunc(tot, cols ~/ 3);
+    final esquerda = EscPosTextLayout.trunc('  QTD: $qtdUn  x  R\$ $unit', cols - 1);
+    final total = EscPosTextLayout.trunc(tot, cols ~/ 3);
     final espaco = cols - esquerda.length;
     if (espaco <= 0) {
-      return _trunc('$esquerda $total', cols);
+      return EscPosTextLayout.trunc('$esquerda $total', cols);
     }
     return '$esquerda${total.padLeft(espaco)}';
   }

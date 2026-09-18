@@ -50,7 +50,8 @@ void main() {
     () {
       final item1 = ItemVenda(
         nomeProduto: 'Tijolo',
-        quantidade: 10,
+        // 10 un. na escala PDV (milésimos): 10 * 1000.
+        quantidade: 10000,
         precoUnitario: 1.50,
         precoCustoUnitario: 1,
       )..produto.target = produto('1', 'Tijolo', 1.50);

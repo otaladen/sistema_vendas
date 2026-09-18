@@ -10,10 +10,12 @@ import '../services/configuracoes_service.dart';
 import '../data/nfe_entrada_repository.dart';
 import '../domain/conferencia_nfe_opcoes.dart';
 import '../domain/nfe_entrada_conversao_util.dart';
+import '../domain/nfe_revisao_preco.dart';
 import '../domain/produto_embalagem.dart';
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
 import 'layout/app_layout.dart';
+import 'fiscal/revisao_precos_nfe_dialog.dart';
 import 'fiscal/widgets/conferencia_nfe_cabecalho.dart';
 import 'fiscal/widgets/conferencia_nfe_financeiro_painel.dart';
 import 'fiscal/widgets/conferencia_nfe_opcoes_painel.dart';
@@ -160,8 +162,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         if (repo is NfeEntradaApiRepository && xml.isNotEmpty) {
           sugestoes = await repo.prepararSugestoesConferenciaRemoto(xml);
         } else {
-          sugestoes = repo.prepararSugestoesConferencia(widget.nfe)
-              as List<SugestaoLinhaConferencia>;
+          sugestoes =
+              repo.prepararSugestoesConferencia(widget.nfe)
+                  as List<SugestaoLinhaConferencia>;
         }
       }
       await _hidratarProdutosVinculados(sugestoes);
@@ -405,6 +408,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       comUnidade: true,
     );
   }
+
   double? _custoUnitarioXmlConvertidoInterno(_LinhaEdicao linha) {
     final f = _lerFator(linha.fatorCtrl.text);
     if (f <= 0) return null;
@@ -481,18 +485,19 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       }
       return;
     }
-    if (!linha.sugestao.produtoNovo && linha.sugestao.produtoExistenteId != null) {
+    if (!linha.sugestao.produtoNovo &&
+        linha.sugestao.produtoExistenteId != null) {
       linha.vinculoAutomaticoIgnorado = true;
       _aplicarPadraoNovoProduto(linha);
     }
   }
 
-
   static String _formatarReais(double v) => 'R\$ ${_nfMoeda.format(v)}';
 
   bool _linhaEhNovo(_LinhaEdicao linha) => linha.produtoDestinoId() == null;
 
-  bool _linhaEhVinculada(_LinhaEdicao linha) => linha.produtoDestinoId() != null;
+  bool _linhaEhVinculada(_LinhaEdicao linha) =>
+      linha.produtoDestinoId() != null;
 
   bool _linhaFatorValido(_LinhaEdicao linha) =>
       _lerFator(linha.fatorCtrl.text) > 0;
@@ -526,8 +531,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       _linhaFatorValido(linha) &&
       NfeEntradaRepository.unidadesInternasValidas.contains(linha.unidade);
 
-  int get _countVinculados =>
-      _linhas.where(_linhaEhVinculada).length;
+  int get _countVinculados => _linhas.where(_linhaEhVinculada).length;
 
   int get _countNovos => _linhas.where(_linhaEhNovo).length;
 
@@ -600,11 +604,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
 
   Widget _buildFiltros(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    ChoiceChip chip(
-      _ConferenciaNfeFiltro f,
-      String label,
-      int? count,
-    ) {
+    ChoiceChip chip(_ConferenciaNfeFiltro f, String label, int? count) {
       final sel = _filtro == f;
       return ChoiceChip(
         label: Text(count == null ? label : '$label ($count)'),
@@ -626,12 +626,16 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         children: [
           Text(
             'Filtrar:',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
           ),
           chip(_ConferenciaNfeFiltro.todos, 'Todos', _linhas.length),
-          chip(_ConferenciaNfeFiltro.vinculados, 'Vinculados', _countVinculados),
+          chip(
+            _ConferenciaNfeFiltro.vinculados,
+            'Vinculados',
+            _countVinculados,
+          ),
           chip(_ConferenciaNfeFiltro.novos, 'Novos', _countNovos),
           if (_countAtencao > 0)
             chip(_ConferenciaNfeFiltro.atencao, 'Atenção', _countAtencao),
@@ -668,18 +672,18 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               Text(
                 rotulo,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 2),
           Text(
             valor,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
         ],
       ),
@@ -687,7 +691,10 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   }
 
   /// Painel custo cadastro vs XML; so quando ja existe produto destino.
-  Widget _buildComparativoCustoPainel(BuildContext context, _LinhaEdicao linha) {
+  Widget _buildComparativoCustoPainel(
+    BuildContext context,
+    _LinhaEdicao linha,
+  ) {
     final id = linha.produtoDestinoId();
     if (id == null) {
       return const SizedBox.shrink();
@@ -706,9 +713,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         child: Text(
           'Informe uma qtd. na embalagem valida para comparar o custo unitario do XML com o cadastro.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontStyle: FontStyle.italic,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            fontStyle: FontStyle.italic,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
       );
     }
@@ -744,8 +751,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     if (atual > eps) {
       final pct = (custoXml - atual) / atual * 100;
       if (pct > 5 + 1e-9) {
-        final pctTxt =
-            pct >= 10 ? pct.round().toString() : pct.toStringAsFixed(1);
+        final pctTxt = pct >= 10
+            ? pct.round().toString()
+            : pct.toStringAsFixed(1);
         indicadorVariacao = Wrap(
           spacing: 6,
           runSpacing: 4,
@@ -836,9 +844,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                   final titulo = Text(
                     'Custo vs cadastro',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                        ),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
+                    ),
                   );
 
                   if (maxW >= _custoPainelBreakpoint2Col) {
@@ -851,10 +859,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SizedBox(
-                              width: colW,
-                              child: textoCustoCadastro,
-                            ),
+                            SizedBox(width: colW, child: textoCustoCadastro),
                             const SizedBox(width: _erpGap16),
                             SizedBox(
                               width: colW,
@@ -901,9 +906,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           'Cadastre preco de venda para avaliar margem. '
           'O custo do XML sera aplicado ao confirmar a entrada.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontStyle: FontStyle.italic,
-                color: cs.onSurfaceVariant,
-              ),
+            fontStyle: FontStyle.italic,
+            color: cs.onSurfaceVariant,
+          ),
         ),
       );
     }
@@ -921,9 +926,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           const Divider(height: 20),
           Text(
             'Margem sobre venda (${_formatarReais(precoVenda)})',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
           Text(
@@ -956,9 +961,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               Text(
                 'Preco sugerido para ${_margemMinimaPadrao.toStringAsFixed(0)}%: '
                 '${_formatarReais(sugerido)}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
               ),
             ],
           ],
@@ -966,13 +971,13 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           Text(
             _opcoes.atualizarPrecoCusto
                 ? 'Ao confirmar, o preco de custo sera atualizado conforme as opcoes. '
-                  'Use o botao abaixo para aplicar antes, se preferir.'
+                      'Use o botao abaixo para aplicar antes, se preferir.'
                 : 'O preco de custo do cadastro nao sera alterado ao confirmar. '
-                  'O custo medio so muda se "Lancar estoque" estiver marcado.',
+                      'O custo medio so muda se "Lancar estoque" estiver marcado.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                  fontStyle: FontStyle.italic,
-                ),
+              color: cs.onSurfaceVariant,
+              fontStyle: FontStyle.italic,
+            ),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -986,8 +991,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               ),
               if (abaixoMin && sugerido != null)
                 FilledButton.tonalIcon(
-                  onPressed: () =>
-                      _aplicarPrecoSugeridoMargem(linha, sugerido),
+                  onPressed: () => _aplicarPrecoSugeridoMargem(linha, sugerido),
                   icon: const Icon(Icons.trending_up, size: 18),
                   label: const Text('Aplicar preco sugerido'),
                 ),
@@ -1036,8 +1040,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   }) {
     return SegmentedButton<bool>(
       style: SegmentedButton.styleFrom(
-        visualDensity:
-            compacto ? VisualDensity.compact : VisualDensity.standard,
+        visualDensity: compacto
+            ? VisualDensity.compact
+            : VisualDensity.standard,
         padding: compacto
             ? const EdgeInsets.symmetric(horizontal: 2)
             : const EdgeInsets.symmetric(horizontal: 8),
@@ -1159,8 +1164,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             ),
           ],
           selected: {_modoExibicao},
-          onSelectionChanged: (s) =>
-              setState(() => _modoExibicao = s.first),
+          onSelectionChanged: (s) => setState(() => _modoExibicao = s.first),
         ),
       ),
     );
@@ -1168,8 +1172,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
 
   List<ConferenciaNfeTabelaLinha> _montarLinhasTabela(BuildContext context) {
     return [
-      for (final index in _indicesFiltrados)
-        _linhaParaTabela(context, index),
+      for (final index in _indicesFiltrados) _linhaParaTabela(context, index),
     ];
   }
 
@@ -1208,10 +1211,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
-        builder: (_) => _ConferenciaItemDetalhePage(
-          screenState: this,
-          index: index,
-        ),
+        builder: (_) =>
+            _ConferenciaItemDetalhePage(screenState: this, index: index),
       ),
     );
     _agendarRebuild();
@@ -1225,8 +1226,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           child: Text(
             'Nenhum item neste filtro.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       );
@@ -1259,8 +1260,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     }
     return Column(
       children: [
-        for (final index in _indicesFiltrados)
-          _buildLinhaCard(context, index),
+        for (final index in _indicesFiltrados) _buildLinhaCard(context, index),
       ],
     );
   }
@@ -1294,9 +1294,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         children: [
           Text(
             'Produto no sistema',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
           if (rotuloVinculo != null)
@@ -1306,9 +1306,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               decoration: BoxDecoration(
                 color: cs.primaryContainer.withValues(alpha: 0.35),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: cs.primary.withValues(alpha: 0.35),
-                ),
+                border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
               ),
               child: Row(
                 children: [
@@ -1318,8 +1316,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                     child: Text(
                       rotuloVinculo,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -1332,9 +1330,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               decoration: BoxDecoration(
                 color: cs.tertiaryContainer.withValues(alpha: 0.35),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: cs.tertiary.withValues(alpha: 0.35),
-                ),
+                border: Border.all(color: cs.tertiary.withValues(alpha: 0.35)),
               ),
               child: Row(
                 children: [
@@ -1344,8 +1340,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                     child: Text(
                       'Novo cadastro sera criado ao confirmar a entrada.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1360,9 +1356,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                 onPressed: () => _abrirDialogVincularProduto(linha),
                 icon: const Icon(Icons.link, size: 18),
                 label: Text(
-                  destinoId == null
-                      ? 'Vincular produto'
-                      : 'Trocar vinculo',
+                  destinoId == null ? 'Vincular produto' : 'Trocar vinculo',
                 ),
               ),
               if (linha.temVinculoAtivo)
@@ -1386,22 +1380,24 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         children: [
           Text(
             'Dados do XML',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
           LayoutBuilder(
             builder: (context, c) {
               final cols = colsMetaGrid(c.maxWidth);
               final gap = 8.0;
-              final cellW =
-                  ((c.maxWidth - gap * (cols - 1)) / cols).floorToDouble();
+              final cellW = ((c.maxWidth - gap * (cols - 1)) / cols)
+                  .floorToDouble();
               final cells = <Widget>[
                 _buildMetaCelula(
                   context,
                   rotulo: 'Unidade nota',
-                  valor: item.unidadeComercial.isEmpty ? '—' : item.unidadeComercial,
+                  valor: item.unidadeComercial.isEmpty
+                      ? '—'
+                      : item.unidadeComercial,
                   icon: Icons.straighten,
                 ),
                 _buildMetaCelula(
@@ -1441,8 +1437,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                 spacing: gap,
                 runSpacing: gap,
                 children: [
-                  for (final cell in cells)
-                    SizedBox(width: cellW, child: cell),
+                  for (final cell in cells) SizedBox(width: cellW, child: cell),
                 ],
               );
             },
@@ -1468,18 +1463,18 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                 const SizedBox(width: 8),
                 Text(
                   'Conversao para estoque',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
               'Ajuste unidade, qtd. na embalagem e o modo x ou / quando a nota difere do cadastro.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
             Row(
@@ -1507,10 +1502,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                           initialValue: linha.unidade,
                           items: NfeEntradaRepository.unidadesInternasValidas
                               .map(
-                                (u) => DropdownMenuItem(
-                                  value: u,
-                                  child: Text(u),
-                                ),
+                                (u) =>
+                                    DropdownMenuItem(value: u, child: Text(u)),
                               )
                               .toList(),
                           onChanged: (v) {
@@ -1564,8 +1557,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                     flex: 2,
                     child: TextFormField(
                       controller: linha.loteCtrl,
-                      onChanged: (_) =>
-                          _atualizarUi(aoAtualizar: aoAtualizar),
+                      onChanged: (_) => _atualizarUi(aoAtualizar: aoAtualizar),
                       decoration: const InputDecoration(
                         labelText: 'Lote',
                         hintText: 'Nº do lote',
@@ -1601,8 +1593,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                         child: Text(
                           linha.dataValidade == null
                               ? 'Selecionar'
-                              : DateFormat('dd/MM/yyyy')
-                                  .format(linha.dataValidade!.toLocal()),
+                              : DateFormat(
+                                  'dd/MM/yyyy',
+                                ).format(linha.dataValidade!.toLocal()),
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),
@@ -1633,16 +1626,21 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
               decoration: BoxDecoration(
                 color: cs.surface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+                border: Border.all(
+                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                ),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 10,
+                ),
                 child: Text(
                   avisoConversao,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        height: 1.35,
-                      ),
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
                 ),
               ),
             ),
@@ -1659,11 +1657,12 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                       Text(
                         'Entrada: ${_rotuloEntradaEstoque(linha)}',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: cs.primary,
-                              fontWeight: FontWeight.w800,
-                            ),
+                          color: cs.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                      if (_estoqueTotalAposConfirmar(linha) case final total?) ...[
+                      if (_estoqueTotalAposConfirmar(linha)
+                          case final total?) ...[
                         Builder(
                           builder: (context) {
                             final atual = _produtoDestinoLinha(linha);
@@ -1672,9 +1671,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                                 : ' (atual ${_nfQtd.format(atual.estoqueExibicao)})';
                             return Text(
                               'Estoque apos confirmar: ${_nfQtd.format(total)} ${linha.unidade.trim()}$atualTxt',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     color: cs.onSurfaceVariant,
                                     fontWeight: FontWeight.w600,
@@ -1712,9 +1709,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                 const SizedBox(width: 8),
                 Text(
                   'Custo e margem',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ],
             ),
@@ -1752,9 +1749,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           ),
           title: Text(
             'Custo e margem',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
           subtitle: atencao
               ? Text(
@@ -1762,9 +1759,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                   style: TextStyle(color: cs.error, fontSize: 12),
                 )
               : null,
-          children: [
-            _buildComparativoCustoPainel(context, linha),
-          ],
+          children: [_buildComparativoCustoPainel(context, linha)],
         ),
       );
     }
@@ -1783,9 +1778,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       ),
       child: Container(
         decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(color: status.fg, width: 4),
-          ),
+          border: Border(left: BorderSide(color: status.fg, width: 4)),
         ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -1816,9 +1809,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
                           children: [
                             Text(
                               item.descricao,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleSmall
+                              style: Theme.of(context).textTheme.titleSmall
                                   ?.copyWith(
                                     fontWeight: FontWeight.w800,
                                     height: 1.25,
@@ -1925,14 +1916,81 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
   }
 
   NfeXmlParseResult _nfeParaConfirmar() => NfeXmlParseResult(
-        chaveAcesso: widget.nfe.chaveAcesso,
-        numeroNota: widget.nfe.numeroNota,
-        dataEmissao: widget.nfe.dataEmissao,
-        emitente: widget.nfe.emitente,
-        itens: widget.nfe.itens,
-        duplicatas: _duplicatas,
-        valorTotalNota: widget.nfe.valorTotalNota,
+    chaveAcesso: widget.nfe.chaveAcesso,
+    numeroNota: widget.nfe.numeroNota,
+    dataEmissao: widget.nfe.dataEmissao,
+    emitente: widget.nfe.emitente,
+    itens: widget.nfe.itens,
+    duplicatas: _duplicatas,
+    valorTotalNota: widget.nfe.valorTotalNota,
+  );
+
+  /// Copia custo/preco atuais ANTES da gravacao (o cadastro pode atualizar custo).
+  Map<int, NfeRevisaoPrecoItem> _capturarRevisaoAntesConfirmar() {
+    final mapa = <int, NfeRevisaoPrecoItem>{};
+    for (final linha in _linhas) {
+      final id = linha.produtoDestinoId();
+      if (id == null || id <= 0) continue;
+      final p = _produtoDestinoLinha(linha);
+      if (p == null) continue;
+      final custoXml = _custoUnitarioXmlConvertidoInterno(linha) ?? 0;
+      NfeRevisaoPrecoCalculo.upsert(
+        mapa,
+        NfeRevisaoPrecoCalculo.deProduto(
+          produto: p,
+          custoNovo: custoXml,
+          margemMinimaPadrao: _margemMinimaPadrao,
+        ),
       );
+    }
+    return mapa;
+  }
+
+  Future<List<NfeRevisaoPrecoItem>> _montarItensRevisao({
+    required Map<int, NfeRevisaoPrecoItem> snapshots,
+    required List<int> produtoIds,
+  }) async {
+    final mapa = Map<int, NfeRevisaoPrecoItem>.from(snapshots);
+    for (final id in produtoIds) {
+      if (id <= 0 || mapa.containsKey(id)) continue;
+      final p = await _obterProdutoDestino(id);
+      if (p == null) continue;
+      NfeRevisaoPrecoCalculo.upsert(
+        mapa,
+        NfeRevisaoPrecoCalculo.deProduto(
+          produto: p,
+          custoNovo: p.precoCusto,
+          margemMinimaPadrao: _margemMinimaPadrao,
+          produtoNovo: true,
+        ),
+      );
+    }
+    final ordem = <int>[...snapshots.keys, ...produtoIds];
+    final vistos = <int>{};
+    final out = <NfeRevisaoPrecoItem>[];
+    for (final id in ordem) {
+      if (id <= 0 || !vistos.add(id)) continue;
+      final item = mapa[id];
+      if (item != null) out.add(item);
+    }
+    return out;
+  }
+
+  static List<int> _idsConfirmarEntrada(dynamic resultado) {
+    if (resultado is List<int>) {
+      return resultado.where((id) => id > 0).toList();
+    }
+    if (resultado is List) {
+      return [
+        for (final e in resultado)
+          if (e is int && e > 0)
+            e
+          else if (e is num && e.toInt() > 0)
+            e.toInt(),
+      ];
+    }
+    return const [];
+  }
 
   Future<void> _confirmar() async {
     for (final linha in _linhas) {
@@ -1969,7 +2027,9 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         setState(() {});
         return;
       }
-      if (!NfeEntradaRepository.unidadesInternasValidas.contains(linha.unidade)) {
+      if (!NfeEntradaRepository.unidadesInternasValidas.contains(
+        linha.unidade,
+      )) {
         linha.erroValidacao = 'Unidade invalida: ${linha.unidade}';
         setState(() {});
         return;
@@ -1999,6 +2059,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
           !LanApiEventHub.instance.garantirOnlineOuAvisar(context)) {
         return;
       }
+      final snapshots = _capturarRevisaoAntesConfirmar();
       final confirmar = widget.nfeRepository.confirmarEntrada(
         nfe: _nfeParaConfirmar(),
         linhas: confirmacoes,
@@ -2006,23 +2067,51 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         margemMinimaVendaPercentual: _margemMinimaPadrao,
         xmlOriginal: widget.xmlOriginal,
       );
+      List<int> produtoIds = const [];
       if (confirmar is Future) {
-        await confirmar;
+        produtoIds = _idsConfirmarEntrada(await confirmar);
+      } else {
+        produtoIds = _idsConfirmarEntrada(confirmar);
       }
       try {
         widget.produtoRepository.invalidarCacheBusca();
       } catch (_) {}
       if (!mounted) return;
-      OperacaoFeedback.sucesso(context, 'Entrada da NF-e registrada com sucesso.');
+      OperacaoFeedback.sucesso(
+        context,
+        'Entrada da NF-e registrada com sucesso.',
+      );
+      try {
+        final revisao = await _montarItensRevisao(
+          snapshots: snapshots,
+          produtoIds: produtoIds,
+        );
+        if (mounted && revisao.isNotEmpty) {
+          await mostrarRevisaoPrecosNfeDialog(
+            context,
+            itens: revisao,
+            produtoRepository: widget.produtoRepository,
+            numeroNota: widget.nfe.numeroNota,
+            emitente: widget.nfe.emitente.nomeFantasia.trim().isNotEmpty
+                ? widget.nfe.emitente.nomeFantasia
+                : widget.nfe.emitente.razaoSocial,
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          LanApiFeedback.snackErro(context, e, prefixo: 'Revisao de precos');
+        }
+      }
+      if (!mounted) return;
       Navigator.of(context).pop(true);
     } on LanApiException catch (e) {
       if (!mounted) return;
       LanApiFeedback.snackErro(context, e, prefixo: 'Confirmar NF-e');
     } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       if (!mounted) return;
       LanApiFeedback.snackErro(context, e, prefixo: 'Erro ao confirmar');
@@ -2043,10 +2132,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             children: [
               const Icon(Icons.error_outline, size: 48),
               const SizedBox(height: 16),
-              Text(
-                _initError!,
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
+              Text(_initError!, style: Theme.of(context).textTheme.bodyLarge),
               const SizedBox(height: 24),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(false),
@@ -2068,89 +2154,87 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         },
       },
       child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Entrada de NF-e'),
-            centerTitle: false,
-            actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Center(
-                  child: Text(
-                    'F10 confirmar · Esc voltar',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant,
-                        ),
+        appBar: AppBar(
+          title: const Text('Entrada de NF-e'),
+          centerTitle: false,
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Text(
+                  'F10 confirmar · Esc voltar',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
-            ],
-          ),
-          bottomNavigationBar: ConferenciaNfeRodape(
-            totalItens: _linhas.length,
-            itensProntos: _countProntos,
-            valorTotalNota: widget.nfe.valorTotalNota,
-            confirmando: _confirmando,
-            onConfirmar: _confirmar,
-          ),
-          body: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_erroConfirmacaoGlobal != null)
-                MaterialBanner(
-                  content: Text(_erroConfirmacaoGlobal!),
-                  leading: Icon(
-                    Icons.error_outline,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () =>
-                          setState(() => _erroConfirmacaoGlobal = null),
-                      child: const Text('Fechar'),
-                    ),
-                  ],
-                ),
-              Expanded(
-                child: ListView(
-                  padding: EdgeInsets.fromLTRB(
-                    context.isCompactLayout ? 12 : 20,
-                    12,
-                    context.isCompactLayout ? 12 : 20,
-                    24,
-                  ),
-                  children: [
-                    _buildPassoConferencia(context),
-                    ConferenciaNfeCabecalho(
-                      nfe: widget.nfe,
-                      totalItens: _linhas.length,
-                      itensVinculados: _countVinculados,
-                      itensNovos: _countNovos,
-                      itensAtencao: _countAtencao,
-                    ),
-                    const SizedBox(height: 12),
-                    ConferenciaNfeOpcoesPainel(
-                      opcoes: _opcoes,
-                      onChanged: _alterarOpcoes,
-                    ),
-                    const SizedBox(height: 12),
-                    ConferenciaNfeFinanceiroPainel(
-                      duplicatas: _duplicatas,
-                      valorTotalNota: widget.nfe.valorTotalNota,
-                      onDuplicatasChanged: (dups) =>
-                          setState(() => _duplicatas = dups),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildModoExibicaoToggle(context),
-                    _buildFiltros(context),
-                    _buildListaItens(context),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+        bottomNavigationBar: ConferenciaNfeRodape(
+          totalItens: _linhas.length,
+          itensProntos: _countProntos,
+          valorTotalNota: widget.nfe.valorTotalNota,
+          confirmando: _confirmando,
+          onConfirmar: _confirmar,
+        ),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_erroConfirmacaoGlobal != null)
+              MaterialBanner(
+                content: Text(_erroConfirmacaoGlobal!),
+                leading: Icon(
+                  Icons.error_outline,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _erroConfirmacaoGlobal = null),
+                    child: const Text('Fechar'),
+                  ),
+                ],
+              ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(
+                  context.isCompactLayout ? 12 : 20,
+                  12,
+                  context.isCompactLayout ? 12 : 20,
+                  24,
+                ),
+                children: [
+                  _buildPassoConferencia(context),
+                  ConferenciaNfeCabecalho(
+                    nfe: widget.nfe,
+                    totalItens: _linhas.length,
+                    itensVinculados: _countVinculados,
+                    itensNovos: _countNovos,
+                    itensAtencao: _countAtencao,
+                  ),
+                  const SizedBox(height: 12),
+                  ConferenciaNfeOpcoesPainel(
+                    opcoes: _opcoes,
+                    onChanged: _alterarOpcoes,
+                  ),
+                  const SizedBox(height: 12),
+                  ConferenciaNfeFinanceiroPainel(
+                    duplicatas: _duplicatas,
+                    valorTotalNota: widget.nfe.valorTotalNota,
+                    onDuplicatasChanged: (dups) =>
+                        setState(() => _duplicatas = dups),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildModoExibicaoToggle(context),
+                  _buildFiltros(context),
+                  _buildListaItens(context),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2170,7 +2254,8 @@ class _ConferenciaItemDetalhePage extends StatefulWidget {
       _ConferenciaItemDetalhePageState();
 }
 
-class _ConferenciaItemDetalhePageState extends State<_ConferenciaItemDetalhePage> {
+class _ConferenciaItemDetalhePageState
+    extends State<_ConferenciaItemDetalhePage> {
   @override
   Widget build(BuildContext context) {
     final item = widget.screenState._linhas[widget.index].sugestao.item;
@@ -2187,9 +2272,9 @@ class _ConferenciaItemDetalhePageState extends State<_ConferenciaItemDetalhePage
         children: [
           Text(
             item.descricao,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 12),
           widget.screenState._buildLinhaCard(
