@@ -9,6 +9,7 @@ import '../../domain/fiscal/nfe_venda_sync.dart';
 import '../../domain/fiscal/venda_nfce_obrigatoria_helper.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/limite_credito_helper.dart';
+import '../../domain/listagem_vendas_busca_relevancia.dart';
 import '../../domain/listagem_vendas_dedupe.dart';
 import '../../domain/listagem_vendas_periodo.dart';
 import '../../domain/pagamento_orcamento.dart';
@@ -394,11 +395,14 @@ class VendaApiRepository extends ChangeNotifier {
       busca: busca,
       filtroFiscal: 'todos',
     );
-    final filtradas = ListagemVendasDedupe.sanitizar(
-      todas.where((v) => _correspondeFiltroFiscalListagem(
-            v,
-            filtroFiscal,
-          )),
+    final filtradas = ListagemVendasBuscaRelevancia.ordenar(
+      ListagemVendasDedupe.sanitizar(
+        todas.where((v) => _correspondeFiltroFiscalListagem(
+              v,
+              filtroFiscal,
+            )),
+      ),
+      textoBusca: busca,
     );
     final total = filtradas.length;
     final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
@@ -1031,16 +1035,25 @@ class VendaApiRepository extends ChangeNotifier {
         }
       }
       if (textoBusca.isNotEmpty) {
-        final n = v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '${v.id}';
+        final id = '${v.id}';
+        final controle =
+            v.numeroControle > 0 ? '${v.numeroControle}' : '';
+        final orc =
+            v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '';
         final cli = _nomeCliente(v.cliente.targetId).toLowerCase();
-        final hay = '$n ${v.nfceNumero} ${v.nfeNumero} $cli'.toLowerCase();
+        final hay =
+            '$id $controle $orc ${v.nfceNumero} ${v.nfeNumero} $cli'
+                .toLowerCase();
         if (!hay.contains(textoBusca)) return false;
       }
       return true;
     }).toList();
 
     out.sort((a, b) => b.data.compareTo(a.data));
-    return ListagemVendasDedupe.sanitizar(out);
+    return ListagemVendasBuscaRelevancia.ordenar(
+      ListagemVendasDedupe.sanitizar(out),
+      textoBusca: textoBusca,
+    );
   }
 
   void _cacheItensDaVenda(Venda v) {

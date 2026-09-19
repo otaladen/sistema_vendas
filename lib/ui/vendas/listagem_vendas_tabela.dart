@@ -21,6 +21,7 @@ class ListagemVendasTabela extends StatefulWidget {
     required this.onTapItem,
     required this.onAcaoMenu,
     required this.menuBuilder,
+    this.textoBusca = '',
     this.temMais = false,
     this.carregandoMais = false,
     this.onChegouAoFim,
@@ -30,6 +31,7 @@ class ListagemVendasTabela extends StatefulWidget {
   final ValueChanged<ListagemVendaItemUi> onTapItem;
   final ListagemVendaAcaoCallback onAcaoMenu;
   final ListagemVendaMenuBuilder menuBuilder;
+  final String textoBusca;
   final bool temMais;
   final bool carregandoMais;
   final VoidCallback? onChegouAoFim;
@@ -114,6 +116,7 @@ class _ListagemVendasTabelaState extends State<ListagemVendasTabela> {
         widget.itens,
         coluna: _coluna,
         ascendente: _ascendente,
+        textoBusca: widget.textoBusca,
       );
 
   @override

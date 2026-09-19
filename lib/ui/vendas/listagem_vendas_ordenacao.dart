@@ -1,3 +1,4 @@
+import '../../domain/listagem_vendas_busca_relevancia.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_finalizacao_caixa_helper.dart';
 import 'listagem_venda_item_ui.dart';
@@ -32,6 +33,7 @@ List<ListagemVendaItemUi> ordenarItensListagemVendas(
   List<ListagemVendaItemUi> itens, {
   required ListagemVendasColuna coluna,
   required bool ascendente,
+  String textoBusca = '',
 }) {
   final copia = [...itens];
   final fator = ascendente ? 1 : -1;
@@ -45,6 +47,12 @@ List<ListagemVendaItemUi> ordenarItensListagemVendas(
   }
 
   copia.sort((a, b) {
+    final relev = ListagemVendasBuscaRelevancia.compararScore(
+      a.venda,
+      b.venda,
+      textoBusca,
+    );
+    if (relev != 0) return relev;
     final r = switch (coluna) {
       ListagemVendasColuna.controle =>
         cmpNum(numeroControle(a), numeroControle(b)),

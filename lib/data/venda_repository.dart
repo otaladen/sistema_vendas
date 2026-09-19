@@ -20,6 +20,7 @@ import '../domain/operacao_permissao_guard.dart';
 import '../domain/entregas/agenda_carreto_ocupacao.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
+import '../domain/listagem_vendas_busca_relevancia.dart';
 import '../domain/listagem_vendas_dedupe.dart';
 import '../config/fiscal_config.dart';
 import '../domain/fiscal/fiscal_emissao_lock.dart';
@@ -1450,31 +1451,41 @@ class VendaRepository {
     if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
       f.filtroFiscal,
     )) {
-      final filtradas = _filtrarListagemFiscal(
-        _listarCandidatasListagemFiscal(f),
-        f,
-      );
-      final total = filtradas.length;
-      final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
-      final vendas = filtradas.skip(offset).take(limite).toList();
-      return ListagemVendasPagina(
-        vendas: vendas,
-        total: total,
-        totalValor: totalValor,
+      return _paginarListagemVendas(
+        _ordenarListagemPorBusca(
+          _filtrarListagemFiscal(_listarCandidatasListagemFiscal(f), f),
+          f,
+        ),
+        offset: offset,
+        limite: limite,
       );
     }
     if (f.temFiltroSessaoCaixa) {
-      final filtradas = _listarListagemVendasFiltradasSessao(f);
-      final total = filtradas.length;
-      final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
-      final vendas = filtradas.skip(offset).take(limite).toList();
-      return ListagemVendasPagina(
-        vendas: vendas,
-        total: total,
-        totalValor: totalValor,
+      return _paginarListagemVendas(
+        _ordenarListagemPorBusca(_listarListagemVendasFiltradasSessao(f), f),
+        offset: offset,
+        limite: limite,
       );
     }
     final cond = _condicaoListagemVendas(f);
+    final buscaNumerica =
+        ListagemVendasBuscaRelevancia.buscaSomenteNumeros(f.textoBusca);
+    // Match exato de Controle/NFC-e precisa vir antes da fatia paginada.
+    if (buscaNumerica) {
+      final query = _queryListagemVendasOrdenada(cond, f);
+      try {
+        return _paginarListagemVendas(
+          _ordenarListagemPorBusca(
+            _sanitizarListagemVendas(query.find()),
+            f,
+          ),
+          offset: offset,
+          limite: limite,
+        );
+      } finally {
+        query.close();
+      }
+    }
     final qCount = _db.vendaBox.query(cond).build();
     final total = qCount.count();
     qCount.close();
@@ -1500,21 +1511,59 @@ class VendaRepository {
     if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
       f.filtroFiscal,
     )) {
-      return _filtrarListagemFiscal(
-        _listarCandidatasListagemFiscal(f),
+      return _ordenarListagemPorBusca(
+        _filtrarListagemFiscal(_listarCandidatasListagemFiscal(f), f),
         f,
       );
     }
     if (f.temFiltroSessaoCaixa) {
-      return _listarListagemVendasFiltradasSessao(f);
+      return _ordenarListagemPorBusca(
+        _listarListagemVendasFiltradasSessao(f),
+        f,
+      );
     }
     final cond = _condicaoListagemVendas(f);
     final query = _queryListagemVendasOrdenada(cond, f);
     try {
-      return _sanitizarListagemVendas(query.find());
+      return _ordenarListagemPorBusca(
+        _sanitizarListagemVendas(query.find()),
+        f,
+      );
     } finally {
       query.close();
     }
+  }
+
+  List<Venda> _ordenarListagemPorBusca(
+    List<Venda> vendas,
+    FiltroListagemVendas f,
+  ) {
+    return ListagemVendasBuscaRelevancia.ordenar(
+      vendas,
+      textoBusca: f.textoBusca,
+    );
+  }
+
+  ListagemVendasPagina _paginarListagemVendas(
+    List<Venda> filtradas, {
+    required int offset,
+    required int limite,
+  }) {
+    final total = filtradas.length;
+    final totalValor = filtradas.fold<double>(0, (s, v) => s + v.total);
+    if (offset >= total || limite <= 0) {
+      return ListagemVendasPagina(
+        vendas: const [],
+        total: total,
+        totalValor: totalValor,
+      );
+    }
+    final end = (offset + limite).clamp(0, total);
+    return ListagemVendasPagina(
+      vendas: filtradas.sublist(offset, end),
+      total: total,
+      totalValor: totalValor,
+    );
   }
 
   List<Venda> _listarListagemVendasFiltradasSessao(FiltroListagemVendas f) {

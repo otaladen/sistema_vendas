@@ -17,6 +17,7 @@ import '../data/venda_repository.dart';
 import 'shell/main_menu_deps.dart';
 import '../domain/cancelada_por_rotulo.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/listagem_vendas_busca_relevancia.dart';
 import '../domain/listagem_vendas_dedupe.dart';
 import '../domain/sessao_caixa_referencia.dart';
 import 'vendas/sessao_caixa_picker_dialog.dart';
@@ -1168,7 +1169,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       if (!mounted || seq != _pesquisaSeq) return;
       final scheme = Theme.of(context).colorScheme;
       final vendasBrutas = (pagina.vendas as List).whereType<Venda>().toList();
-      final vendas = ListagemVendasDedupe.sanitizar(vendasBrutas);
+      final vendas = ListagemVendasBuscaRelevancia.ordenar(
+        ListagemVendasDedupe.sanitizar(vendasBrutas),
+        textoBusca: _buscaController.text,
+      );
       final itensUi = _mapearVendasParaItensUi(vendas, scheme);
       setState(() {
         _resultados = vendas;
@@ -1214,7 +1218,10 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       final scheme = Theme.of(context).colorScheme;
       final novas = (pagina.vendas as List).whereType<Venda>().toList();
       setState(() {
-        _resultados = ListagemVendasDedupe.sanitizar([..._resultados, ...novas]);
+        _resultados = ListagemVendasBuscaRelevancia.ordenar(
+          ListagemVendasDedupe.sanitizar([..._resultados, ...novas]),
+          textoBusca: _buscaController.text,
+        );
         _offsetListagem += novas.length;
         _totalListagemVendas = pagina.total;
         _valorTotalFiltro = pagina.totalValor;
@@ -1771,6 +1778,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
             itensUiBrutos,
             coluna: _colunaOrdenacao,
             ascendente: _ordenacaoAscendente,
+            textoBusca: _buscaController.text,
           );
     final theme = Theme.of(context);
 
@@ -2247,6 +2255,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                         : usarTabela
                         ? ListagemVendasTabela(
                             itens: itensUiBrutos,
+                            textoBusca: _buscaController.text,
                             temMais: _temMaisVendas,
                             carregandoMais: _carregandoMais,
                             onChegouAoFim: () =>
