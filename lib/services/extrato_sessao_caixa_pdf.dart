@@ -146,6 +146,16 @@ class ExtratoSessaoCaixaPdf {
                 '${dados.quantidadeVendas} venda(s)',
                 style: const pw.TextStyle(fontSize: 8),
               ),
+              if (dados.quantidadeRecebimentosFiado > 0) ...[
+                linha(
+                  'Receb. fiado (${dados.quantidadeRecebimentosFiado})',
+                  _moeda(dados.totalRecebimentosFiado),
+                ),
+                pw.Text(
+                  'Resumo acima inclui quitacoes de fiado por forma de pagamento.',
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+              ],
               pw.SizedBox(height: 6),
               pw.Text(
                 'Fundo inicial: ${_moeda(sessao.fundoTroco)} · '
@@ -180,6 +190,28 @@ class ExtratoSessaoCaixaPdf {
                           style: const pw.TextStyle(fontSize: 8),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+              pw.Divider(thickness: 0.5),
+              pw.Text(
+                'Recebimentos de fiado',
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+              ),
+              pw.SizedBox(height: 4),
+              if (dados.recebimentos.isEmpty)
+                pw.Text(
+                  'Nenhum recebimento no periodo.',
+                  style: const pw.TextStyle(fontSize: 8),
+                )
+              else
+                ...dados.recebimentos.map(
+                  (rec) => pw.Padding(
+                    padding: const pw.EdgeInsets.only(bottom: 3),
+                    child: pw.Text(
+                      '${rec.hora} · Rec ${rec.recebimentoId} · '
+                      '${rec.cliente} · ${_moeda(rec.valor)} · ${rec.formaPagamento}',
+                      style: const pw.TextStyle(fontSize: 8),
                     ),
                   ),
                 ),

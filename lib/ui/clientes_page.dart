@@ -22,6 +22,7 @@ import 'widgets/cliente/cliente_cadastro_rodape.dart';
 import 'widgets/extrato_fiado_cliente_card.dart';
 import 'widgets/lan_api_feedback.dart';
 import 'widgets/mascaras_cadastro_input.dart';
+import 'cadastros/clientes/widgets/cliente_relacionamento_painel.dart';
 
 class _CadastroClienteSalvarIntent extends Intent {
   const _CadastroClienteSalvarIntent();
@@ -2176,10 +2177,7 @@ class _ClientesPageState extends State<ClientesPage>
                       );
                     },
                   ),
-                  _buildAbaRelacionamento(
-                    theme: denseTheme,
-                    emEdicao: emEdicao,
-                  ),
+                  _buildAbaRelacionamento(emEdicao: emEdicao),
                 ],
               ),
             ),
@@ -2410,225 +2408,22 @@ class _ClientesPageState extends State<ClientesPage>
     );
   }
 
-  Widget _buildAbaRelacionamento({
-    required ThemeData theme,
-    required bool emEdicao,
-  }) {
-    final compras = _comprasDoClienteAtual();
-    final totalGasto = compras.fold<double>(0, (acc, v) => acc + v.total);
-    final ticketMedio = compras.isEmpty ? 0.0 : totalGasto / compras.length;
-    final ultimaCompra = compras.isEmpty ? null : compras.first;
-    final quantidadeItens = compras.fold<int>(
-      0,
-      (acc, compra) =>
-          acc +
-          _itensDaCompraSafe(compra).fold<int>(
-            0,
-            (soma, item) => soma + item.quantidade,
-          ),
-    );
-    final topMap = <String, int>{};
-    for (final compra in compras) {
-      for (final item in _itensDaCompraSafe(compra)) {
-        final nome = item.nomeProduto.trim();
-        if (nome.isEmpty) continue;
-        topMap[nome] = (topMap[nome] ?? 0) + item.quantidade;
-      }
-    }
-    final topProdutos = topMap.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    return Scrollbar(
-      controller: _scrollRelacionamento,
-      thumbVisibility: true,
-      trackVisibility: true,
-      child: ListView(
-        controller: _scrollRelacionamento,
-        primary: false,
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-        children: [
-          _buildConteudoHistoricoCompras(
-            theme: theme,
-            emEdicao: emEdicao,
-            compras: compras,
-            totalGasto: totalGasto,
-            ticketMedio: ticketMedio,
-            ultimaCompra: ultimaCompra,
-            quantidadeItens: quantidadeItens,
-            topProdutos: topProdutos,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Historico de compras (Column no scroll do formulario).
-  Widget _buildConteudoHistoricoCompras({
-    required ThemeData theme,
-    required bool emEdicao,
-    required List<Venda> compras,
-    required double totalGasto,
-    required double ticketMedio,
-    required Venda? ultimaCompra,
-    required int quantidadeItens,
-    required List<MapEntry<String, int>> topProdutos,
-    VoidCallback? onAtualizarUi,
-  }) {
-    final tituloSecao = theme.textTheme.titleSmall?.copyWith(
-      fontWeight: FontWeight.w600,
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-          Card(
-            elevation: 0,
-            color: theme.colorScheme.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-              side: BorderSide(color: theme.colorScheme.outlineVariant),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 12, 10, 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.history_outlined,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Historico de compras',
-                          style: tituloSecao,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (!emEdicao)
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 8),
-                          child: Text(
-                            'Salve o cliente para habilitar o historico de compras.',
-                          ),
-                        )
-                      else ...[
-                        if (_carregandoCompras)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 8),
-                            child: LinearProgressIndicator(minHeight: 2),
-                          ),
-                        DropdownButtonFormField<String>(
-                          initialValue: _periodoHistorico,
-                          decoration: const InputDecoration(
-                            labelText: 'Periodo do historico',
-                            isDense: true,
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'todo',
-                              child: Text('Todo o periodo'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'ultimos_30',
-                              child: Text('Ultimos 30 dias'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'ultimos_90',
-                              child: Text('Ultimos 90 dias'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'ano_atual',
-                              child: Text('Ano atual'),
-                            ),
-                          ],
-                          onChanged: (value) {
-                            if (value == null) return;
-                            setState(() => _periodoHistorico = value);
-                            onAtualizarUi?.call();
-                            final id = _clienteEmEdicaoId;
-                            if (id != null) {
-                              unawaited(_carregarComprasCliente(id).then((_) {
-                                onAtualizarUi?.call();
-                              }));
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Total ja gasto na loja: ${_formatarMoeda(totalGasto)}',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text('Ticket medio: ${_formatarMoeda(ticketMedio)}'),
-                        Text('Total de itens comprados: $quantidadeItens'),
-                        Text(
-                          'Ultima compra: ${ultimaCompra == null ? 'Nao disponivel' : _dataHora.format(ultimaCompra.data.toLocal())}',
-                        ),
-                        Text('Compras registradas: ${compras.length}'),
-                        if (topProdutos.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            'Top produtos',
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          ...topProdutos
-                              .take(3)
-                              .map((e) => Text('${e.key} - ${e.value} un')),
-                        ],
-                        const SizedBox(height: 8),
-                        if (compras.isEmpty)
-                          const Text(
-                            'Este cliente ainda nao tem compras finalizadas.',
-                          )
-                        else
-                          ...compras.map((compra) {
-                            final nota = compra.numeroOrcamento > 0
-                                ? '${compra.numeroOrcamento}'
-                                : 'ID ${compra.id}';
-                            return ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 0,
-                              ),
-                              leading: const Icon(
-                                Icons.receipt_long_outlined,
-                                size: 20,
-                              ),
-                              title: Text('Nota/Orcamento: $nota'),
-                              subtitle: Text(
-                                _dataHora.format(compra.data.toLocal()),
-                              ),
-                              trailing: Text(
-                                _formatarMoeda(compra.total),
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            );
-                          }),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
+  Widget _buildAbaRelacionamento({required bool emEdicao}) {
+    return ClienteRelacionamentoPainel(
+      emEdicao: emEdicao,
+      carregandoCompras: _carregandoCompras,
+      periodoHistorico: _periodoHistorico,
+      compras: _comprasDoClienteAtual(),
+      vendaRepository: widget.vendaRepository,
+      resolveItensDaCompra: _itensDaCompraSafe,
+      scrollController: _scrollRelacionamento,
+      onPeriodoChanged: (value) {
+        setState(() => _periodoHistorico = value);
+        final id = _clienteEmEdicaoId;
+        if (id != null) {
+          unawaited(_carregarComprasCliente(id));
+        }
+      },
     );
   }
 

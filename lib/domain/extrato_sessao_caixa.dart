@@ -2,6 +2,7 @@ import '../data/caixa_auditoria_repository.dart';
 import '../domain/pagamento_orcamento.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/venda_finalizacao_caixa_helper.dart';
+import '../model/recebimento_fiado.dart';
 import '../model/venda.dart';
 import '../services/cupom_nao_fiscal_venda_pdf.dart';
 import 'caixa_meio_pagamento_fechamento.dart';
@@ -62,22 +63,44 @@ class ExtratoSessaoCaixaMovimento {
   final String observacao;
 }
 
+class ExtratoSessaoCaixaLinhaRecebimento {
+  const ExtratoSessaoCaixaLinhaRecebimento({
+    required this.recebimentoId,
+    required this.hora,
+    required this.cliente,
+    required this.valor,
+    required this.formaPagamento,
+  });
+
+  final int recebimentoId;
+  final String hora;
+  final String cliente;
+  final double valor;
+  final String formaPagamento;
+}
+
 class ExtratoSessaoCaixaDados {
   const ExtratoSessaoCaixaDados({
     required this.sessao,
     required this.resumo,
     required this.vendas,
+    required this.recebimentos,
     required this.movimentos,
     required this.quantidadeVendas,
     required this.totalVendas,
+    required this.quantidadeRecebimentosFiado,
+    required this.totalRecebimentosFiado,
   });
 
   final SessaoCaixaReferencia sessao;
   final ExtratoSessaoCaixaResumoPagamento resumo;
   final List<ExtratoSessaoCaixaLinhaVenda> vendas;
+  final List<ExtratoSessaoCaixaLinhaRecebimento> recebimentos;
   final List<ExtratoSessaoCaixaMovimento> movimentos;
   final int quantidadeVendas;
   final double totalVendas;
+  final int quantidadeRecebimentosFiado;
+  final double totalRecebimentosFiado;
 }
 
 /// Monta o extrato detalhado de uma sessao de caixa.
@@ -97,7 +120,36 @@ abstract final class ExtratoSessaoCaixaMontador {
       fim: intervalo.$2,
     );
 
-    final resumo = _resumoPagamentos(vendas);
+    final resumoVendas = _resumoPagamentos(vendas);
+    final recebimentosBruto = _listarRecebimentosSessao(
+      vendaRepository,
+      inicio: intervalo.$1,
+      fim: intervalo.$2,
+    );
+    final resumoRecebimentos = _resumoRecebimentos(recebimentosBruto);
+    final resumo = ExtratoSessaoCaixaResumoPagamento(
+      dinheiro: resumoVendas.dinheiro + resumoRecebimentos.dinheiro,
+      pix: resumoVendas.pix + resumoRecebimentos.pix,
+      cartaoDebito: resumoVendas.cartaoDebito + resumoRecebimentos.cartaoDebito,
+      cartaoCredito:
+          resumoVendas.cartaoCredito + resumoRecebimentos.cartaoCredito,
+      fiado: resumoVendas.fiado,
+      outros: resumoVendas.outros + resumoRecebimentos.outros,
+    );
+    final linhasRecebimentos = recebimentosBruto.map((rec) {
+      final momento = rec.data;
+      return ExtratoSessaoCaixaLinhaRecebimento(
+        recebimentoId: rec.id,
+        hora: _fmtHora.format(momento.toLocal()),
+        cliente: nomeCliente(rec.cliente.targetId).trim().isEmpty
+            ? 'Sem cliente'
+            : nomeCliente(rec.cliente.targetId),
+        valor: rec.valorTotal,
+        formaPagamento:
+            CupomNaoFiscalVendaPdf.rotuloFormaPagamento(rec.formaPagamento),
+      );
+    }).toList()
+      ..sort((a, b) => a.hora.compareTo(b.hora));
     final linhas = vendas.map((v) {
       final momento = VendaFinalizacaoCaixaHelper.momentoFinalizacao(v);
       return ExtratoSessaoCaixaLinhaVenda(
@@ -120,18 +172,42 @@ abstract final class ExtratoSessaoCaixaMontador {
     );
 
     final totalVendas = vendas.fold<double>(0, (s, v) => s + v.total);
+    final totalRecebimentos = recebimentosBruto.fold<double>(
+      0,
+      (s, r) => s + r.valorTotal,
+    );
 
     return ExtratoSessaoCaixaDados(
       sessao: sessao,
       resumo: resumo,
       vendas: linhas,
+      recebimentos: linhasRecebimentos,
       movimentos: movimentos,
       quantidadeVendas: vendas.length,
       totalVendas: totalVendas,
+      quantidadeRecebimentosFiado: recebimentosBruto.length,
+      totalRecebimentosFiado: totalRecebimentos,
     );
   }
 
   static final _fmtHora = _HoraLocal();
+
+  static List<RecebimentoFiado> _listarRecebimentosSessao(
+    dynamic repo, {
+    required DateTime inicio,
+    required DateTime fim,
+  }) {
+    try {
+      return (repo.recebimentos.listarNoPeriodo(
+            inicio: inicio,
+            fim: fim,
+          ) as List)
+          .whereType<RecebimentoFiado>()
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   static List<Venda> _listarVendasSessao(
     dynamic repo, {
@@ -200,6 +276,47 @@ abstract final class ExtratoSessaoCaixaMontador {
       cartaoDebito: debito,
       cartaoCredito: credito,
       fiado: fiado,
+      outros: outros,
+    );
+  }
+
+  /// Quitacoes de fiado (entrada real no caixa), mesma regra da leitura parcial.
+  static ExtratoSessaoCaixaResumoPagamento _resumoRecebimentos(
+    List<RecebimentoFiado> recebimentos,
+  ) {
+    var dinheiro = 0.0;
+    var pix = 0.0;
+    var debito = 0.0;
+    var credito = 0.0;
+    var outros = 0.0;
+
+    for (final rec in recebimentos) {
+      final valor = rec.valorTotal;
+      if (valor <= 0) continue;
+      switch (rec.formaPagamento.trim().toLowerCase()) {
+        case 'dinheiro':
+          dinheiro += valor;
+          break;
+        case 'pix':
+          pix += valor;
+          break;
+        case 'cartao_debito':
+          debito += valor;
+          break;
+        case 'cartao_credito':
+          credito += valor;
+          break;
+        default:
+          outros += valor;
+          break;
+      }
+    }
+
+    return ExtratoSessaoCaixaResumoPagamento(
+      dinheiro: dinheiro,
+      pix: pix,
+      cartaoDebito: debito,
+      cartaoCredito: credito,
       outros: outros,
     );
   }

@@ -273,12 +273,24 @@ class _ExtratoSessaoCaixaPageState extends State<ExtratoSessaoCaixaPage> {
                 _linhaResumo('Fiado', dados.resumo.fiado),
                 if (dados.resumo.outros > 0.009)
                   _linhaResumo('Outros', dados.resumo.outros),
+                if (dados.quantidadeRecebimentosFiado > 0) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Inclui recebimentos de fiado no dinheiro, PIX e cartao.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
                 const Divider(),
                 _linhaResumo(
-                  'Total (${dados.quantidadeVendas} venda(s))',
+                  'Total vendas (${dados.quantidadeVendas})',
                   dados.totalVendas,
                   bold: true,
                 ),
+                if (dados.quantidadeRecebimentosFiado > 0)
+                  _linhaResumo(
+                    'Receb. fiado (${dados.quantidadeRecebimentosFiado})',
+                    dados.totalRecebimentosFiado,
+                  ),
               ],
             ),
           ),
@@ -302,6 +314,27 @@ class _ExtratoSessaoCaixaPageState extends State<ExtratoSessaoCaixaPage> {
               subtitle: Text('${v.cliente} · ${v.formaPagamento}'),
               trailing: Text(
                 _fmtMoeda.format(v.valor),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        const SizedBox(height: 12),
+        Text(
+          'Recebimentos de fiado',
+          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 6),
+        if (dados.recebimentos.isEmpty)
+          const Text('Nenhum recebimento de fiado neste turno.')
+        else
+          ...dados.recebimentos.map(
+            (rec) => ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text('Rec. ${rec.recebimentoId} · ${rec.hora}'),
+              subtitle: Text('${rec.cliente} · ${rec.formaPagamento}'),
+              trailing: Text(
+                _fmtMoeda.format(rec.valor),
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),

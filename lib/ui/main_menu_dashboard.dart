@@ -17,6 +17,7 @@ import '../../data/recado_loja_repository.dart';
 import '../../data/sync/caixa_local_refresh_hub.dart';
 import '../../data/sync/caixa_status_hub.dart';
 import '../../data/sync/sync_refresh_hub.dart';
+import '../../data/titulo_receber_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../domain/dashboard_alertas.dart';
@@ -696,15 +697,19 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
           PermissaoUsuario.financeiro,
         );
         if (podeFinanceiro) {
-          final titulosAbertos = deps.vendaRepository.titulos
-              .listarTodosAbertos();
+          final titulosAbertos = List<TituloReceberResumoLinha>.from(
+            deps.vendaRepository.titulos.listarTodosAbertos(),
+          );
           totalAReceber = titulosAbertos.fold<double>(
             0.0,
-            (s, l) => s + l.titulo.saldo,
+            (double s, TituloReceberResumoLinha l) => s + l.titulo.saldo,
           );
           totalFiadoVencido = titulosAbertos
               .where(ContasReceberHelper.ehVencido)
-              .fold<double>(0.0, (s, l) => s + l.titulo.saldo);
+              .fold<double>(
+                0.0,
+                (double s, TituloReceberResumoLinha l) => s + l.titulo.saldo,
+              );
         }
 
         final backupManual = await deps.configuracoesService.repository
