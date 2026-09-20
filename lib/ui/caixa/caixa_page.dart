@@ -207,6 +207,7 @@ class _CaixaPageState extends State<CaixaPage>
   bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _permitirVendaSemEstoque = false;
   bool _mostrarDescontoCaixa = true;
+  bool _exibirBuscaRapidaOrcamentoCaixa = true;
   double _maxDescontoPercentualPdv = 15;
   final Map<int, double> _descontoPdvBasePorVendaId = {};
   int? _mistoPreparadoParaId;
@@ -870,6 +871,8 @@ class _CaixaPageState extends State<CaixaPage>
           config.exigirAutorizacaoSegundaViaCupom;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
       _mostrarDescontoCaixa = config.mostrarCampoDescontoCaixa;
+      _exibirBuscaRapidaOrcamentoCaixa =
+          config.exibirBuscaRapidaOrcamentoCaixa;
       _maxDescontoPercentualPdv = config.maxDescontoPercentualPdv;
       _caixaFiscalNaoBloqueante = config.caixaFiscalNaoBloqueante;
       _caixaLimiteOrcamentosPendentes =
@@ -7446,14 +7449,16 @@ class _CaixaPageState extends State<CaixaPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        CaixaImportarOrcamentoField(
-          controller: _importarOrcamentoController,
-          focusNode: _importarOrcamentoFocus,
-          habilitado: _caixaAberto,
-          onImportar: (n) => unawaited(_importarOrcamentoPorNumero(n)),
-          onAbrirPesquisa: () => unawaited(_abrirPesquisaOrcamento()),
-        ),
-        const SizedBox(height: 8),
+        if (_exibirBuscaRapidaOrcamentoCaixa) ...[
+          CaixaImportarOrcamentoField(
+            controller: _importarOrcamentoController,
+            focusNode: _importarOrcamentoFocus,
+            habilitado: _caixaAberto,
+            onImportar: (n) => unawaited(_importarOrcamentoPorNumero(n)),
+            onAbrirPesquisa: () => unawaited(_abrirPesquisaOrcamento()),
+          ),
+          const SizedBox(height: 8),
+        ],
         _buildBarraAcoesIniciaisCaixa(context),
         const SizedBox(height: 10),
         Expanded(child: _buildPainelStatusCaixa(context)),

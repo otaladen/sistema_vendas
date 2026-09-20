@@ -51,6 +51,7 @@ class EmpresaConfig {
     this.logoPath = '',
     this.limiteDivergenciaCaixa = 20,
     this.mostrarCampoDescontoCaixa = true,
+    this.exibirBuscaRapidaOrcamentoCaixa = true,
     this.exigirAutorizacaoSegundaViaCupom = true,
 
     /// Limite de desconto (%) sobre o subtotal de produtos no PDV ao enviar ao caixa (0 = desabilitado).
@@ -173,6 +174,9 @@ class EmpresaConfig {
 
   /// Quando falso, o painel de desconto rapido some na tela do Caixa.
   final bool mostrarCampoDescontoCaixa;
+
+  /// Quando falso, oculta o campo de numero do orcamento na etapa fila do Caixa (F1 permanece).
+  final bool exibirBuscaRapidaOrcamentoCaixa;
 
   /// Quando falso, segunda via do cupom nao exige login/senha de supervisor.
   final bool exigirAutorizacaoSegundaViaCupom;
@@ -308,6 +312,7 @@ class EmpresaConfig {
     String? logoPath,
     double? limiteDivergenciaCaixa,
     bool? mostrarCampoDescontoCaixa,
+    bool? exibirBuscaRapidaOrcamentoCaixa,
     bool? exigirAutorizacaoSegundaViaCupom,
     double? maxDescontoPercentualPdv,
     bool? permitirVendaSemEstoque,
@@ -386,6 +391,8 @@ class EmpresaConfig {
           limiteDivergenciaCaixa ?? this.limiteDivergenciaCaixa,
       mostrarCampoDescontoCaixa:
           mostrarCampoDescontoCaixa ?? this.mostrarCampoDescontoCaixa,
+      exibirBuscaRapidaOrcamentoCaixa: exibirBuscaRapidaOrcamentoCaixa ??
+          this.exibirBuscaRapidaOrcamentoCaixa,
       exigirAutorizacaoSegundaViaCupom: exigirAutorizacaoSegundaViaCupom ??
           this.exigirAutorizacaoSegundaViaCupom,
       maxDescontoPercentualPdv:
@@ -548,6 +555,8 @@ class AppConfigRepository {
   static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
   static const _kMostrarCampoDescontoCaixa =
       'config_mostrar_campo_desconto_caixa';
+  static const _kExibirBuscaRapidaOrcamentoCaixa =
+      'config_exibir_busca_rapida_orcamento_caixa_v1';
   static const _kExigirAutorizacaoSegundaViaCupom =
       'config_exigir_autorizacao_segunda_via_cupom';
   static const _kMaxDescontoPercentualPdv =
@@ -652,6 +661,8 @@ class AppConfigRepository {
       limiteDivergenciaCaixa: prefs.getDouble(_kLimiteDivergenciaCaixa) ?? 20,
       mostrarCampoDescontoCaixa:
           prefs.getBool(_kMostrarCampoDescontoCaixa) ?? true,
+      exibirBuscaRapidaOrcamentoCaixa:
+          prefs.getBool(_kExibirBuscaRapidaOrcamentoCaixa) ?? true,
       exigirAutorizacaoSegundaViaCupom:
           prefs.getBool(_kExigirAutorizacaoSegundaViaCupom) ?? true,
       maxDescontoPercentualPdv: () {
@@ -840,6 +851,10 @@ class AppConfigRepository {
     await prefs.setBool(
       _kMostrarCampoDescontoCaixa,
       config.mostrarCampoDescontoCaixa,
+    );
+    await prefs.setBool(
+      _kExibirBuscaRapidaOrcamentoCaixa,
+      config.exibirBuscaRapidaOrcamentoCaixa,
     );
     await prefs.setBool(
       _kExigirAutorizacaoSegundaViaCupom,

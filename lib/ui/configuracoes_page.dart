@@ -139,6 +139,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _caixaFiscalNaoBloqueante = true;
   final _caixaLimiteOrcamentosController = TextEditingController(text: '120');
   bool _mostrarCampoDescontoCaixa = true;
+  bool _exibirBuscaRapidaOrcamentoCaixa = true;
   bool _exigirAutorizacaoSegundaViaCupom = true;
   bool _umCaixaAbertoPorLoja = true;
   int _indiceSecaoConfig = 0;
@@ -412,6 +413,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       _caixaLimiteOrcamentosController.text =
           '${config.caixaLimiteOrcamentosPendentes}';
       _mostrarCampoDescontoCaixa = config.mostrarCampoDescontoCaixa;
+      _exibirBuscaRapidaOrcamentoCaixa =
+          config.exibirBuscaRapidaOrcamentoCaixa;
       _exigirAutorizacaoSegundaViaCupom =
           config.exigirAutorizacaoSegundaViaCupom;
       _maxDescontoPercentualPdvController.text = config.maxDescontoPercentualPdv
@@ -591,6 +594,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         limiteDivergenciaCaixa:
             _parseMoeda(_limiteDivergenciaCaixaController.text) ?? 20,
         mostrarCampoDescontoCaixa: _mostrarCampoDescontoCaixa,
+        exibirBuscaRapidaOrcamentoCaixa: _exibirBuscaRapidaOrcamentoCaixa,
         exigirAutorizacaoSegundaViaCupom: _exigirAutorizacaoSegundaViaCupom,
         maxDescontoPercentualPdv:
             (_parseMoeda(_maxDescontoPercentualPdvController.text) ?? 15)
@@ -1251,6 +1255,18 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 title: const Text('Mostrar desconto rapido no Caixa'),
                 subtitle: const Text(
                   'Desligue para ocultar o campo de desconto na tela do Caixa.',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _exibirBuscaRapidaOrcamentoCaixa,
+                onChanged: (value) {
+                  setState(() => _exibirBuscaRapidaOrcamentoCaixa = value);
+                },
+                title: const Text('Exibir busca rapida de orcamento no Caixa'),
+                subtitle: const Text(
+                  'Mostra o campo de entrada direta por numero de orcamento '
+                  'acima dos botoes de atalho.',
                 ),
               ),
               SwitchListTile.adaptive(

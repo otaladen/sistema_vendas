@@ -8301,11 +8301,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                       ),
                 actions: _pdvUiCelular
                     ? [
-                        IconButton(
-                          tooltip: 'Consultar produtos',
-                          onPressed: () => unawaited(_abrirConsultaProdutos()),
-                          icon: const Icon(Icons.search),
-                        ),
                         if (pdvLeitorCameraDisponivel)
                           IconButton(
                             tooltip: 'Bipar codigo de barras',
@@ -8367,11 +8362,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                           tooltip: 'Calculadora (F11)',
                           onPressed: _toggleCalculadoraPdv,
                           icon: const Icon(Icons.calculate_outlined),
-                        ),
-                        IconButton(
-                          tooltip: 'Consultar produtos (F4)',
-                          onPressed: () => unawaited(_abrirConsultaProdutos()),
-                          icon: const Icon(Icons.search),
                         ),
                         IconButton(
                           tooltip: 'Ler orcamento para editar',

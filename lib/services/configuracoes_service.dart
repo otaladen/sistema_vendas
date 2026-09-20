@@ -20,6 +20,7 @@ abstract final class ConfiguracaoEscopo {
     'rodapeOrcamento',
     'limiteDivergenciaCaixa',
     'mostrarCampoDescontoCaixa',
+    'exibirBuscaRapidaOrcamentoCaixa',
     'exigirAutorizacaoSegundaViaCupom',
     'maxDescontoPercentualPdv',
     'permitirVendaSemEstoque',

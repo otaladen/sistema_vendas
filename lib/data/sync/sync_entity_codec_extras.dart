@@ -635,6 +635,7 @@ class SyncEntityCodecExtras {
         'rodapeOrcamento': c.rodapeOrcamento,
         'limiteDivergenciaCaixa': c.limiteDivergenciaCaixa,
         'mostrarCampoDescontoCaixa': c.mostrarCampoDescontoCaixa,
+        'exibirBuscaRapidaOrcamentoCaixa': c.exibirBuscaRapidaOrcamentoCaixa,
         'exigirAutorizacaoSegundaViaCupom': c.exigirAutorizacaoSegundaViaCupom,
         'maxDescontoPercentualPdv': c.maxDescontoPercentualPdv,
         'permitirVendaSemEstoque': c.permitirVendaSemEstoque,
@@ -699,6 +700,9 @@ class SyncEntityCodecExtras {
               base.limiteDivergenciaCaixa,
       mostrarCampoDescontoCaixa:
           m['mostrarCampoDescontoCaixa'] as bool? ?? base.mostrarCampoDescontoCaixa,
+      exibirBuscaRapidaOrcamentoCaixa:
+          m['exibirBuscaRapidaOrcamentoCaixa'] as bool? ??
+              base.exibirBuscaRapidaOrcamentoCaixa,
       exigirAutorizacaoSegundaViaCupom:
           m['exigirAutorizacaoSegundaViaCupom'] as bool? ??
               base.exigirAutorizacaoSegundaViaCupom,
