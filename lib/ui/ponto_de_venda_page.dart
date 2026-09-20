@@ -226,6 +226,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Dialogo "Dados para enviar ao caixa" aberto (atalhos F10/Esc/1-6).
   bool _checkoutDialogAberto = false;
 
+  /// Agenda de carretos aberta (consulta ou definir data) — evita reentrada.
+  bool _agendaCarretoDialogAberto = false;
+
   /// Dialogo "Orcamento salvo" (imprimir/PDF) — bloqueia F10 do PDV.
   bool _dialogoOrcamentoSalvoAberto = false;
 
@@ -1796,6 +1799,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         keys.contains(LogicalKeyboardKey.shiftRight);
   }
 
+  bool _altPressionado() {
+    return HardwareKeyboard.instance.isAltPressed;
+  }
+
   List<FocusNode> _cadeiaFocoCheckout() {
     if (_checkoutDialogAberto) {
       final nodes = <FocusNode>[_focusClientePdV, _focusVendedorPdV];
@@ -1877,6 +1884,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
     if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.f12) {
       _toggleObraCalculadoraPdv();
+      return true;
+    }
+
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.keyE &&
+        _altPressionado()) {
+      unawaited(_abrirAgendaCarretosPdv(somenteConsulta: true));
       return true;
     }
 
@@ -2679,6 +2693,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.keyE) {
+      if (_altPressionado()) return KeyEventResult.ignored;
       _alternarTipoEntregaLinhaCarrinho(idx);
       return KeyEventResult.handled;
     }
@@ -4063,6 +4078,103 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return partes.isEmpty
         ? 'Sem dados de entrega informados.'
         : partes.join(' | ');
+  }
+
+  /// Abre a agenda de carretos sem exigir cliente, endereco, frete ou
+  /// salvamento do orcamento. [somenteConsulta] nao devolve/grava data.
+  Future<DateTime?> _abrirAgendaCarretosPdv({
+    required bool somenteConsulta,
+    StateSetter? setDialogState,
+  }) async {
+    if (_agendaCarretoDialogAberto) return null;
+    if (!mounted) return null;
+    _agendaCarretoDialogAberto = true;
+    try {
+      final agora = DateTime.now();
+      final inicial = !somenteConsulta && _dataEntregaMarcada != null
+          ? _dataEntregaMarcada
+          : agora;
+      final escolhido = await mostrarAgendaCarretoPdvDialog(
+        context: context,
+        vendaRepository: widget.vendaRepository,
+        dataInicial: inicial,
+        firstDate: somenteConsulta
+            ? null
+            : DateTime(agora.year, agora.month, agora.day),
+        lastDate: DateTime(agora.year + 3, 12, 31),
+        somenteConsulta: somenteConsulta,
+      );
+      if (!mounted || somenteConsulta || escolhido == null) return null;
+      void aplicar() {
+        _dataEntregaMarcada = escolhido;
+        _entregaSemDataCombinada = false;
+      }
+
+      if (setDialogState != null) {
+        _atualizarCheckoutFechamento(setDialogState, aplicar);
+      } else {
+        setState(aplicar);
+      }
+      return escolhido;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nao foi possivel abrir a agenda de carretos.'),
+          ),
+        );
+      }
+      return null;
+    } finally {
+      _agendaCarretoDialogAberto = false;
+    }
+  }
+
+  void _consultarAgendaCarretosPdv() {
+    unawaited(_abrirAgendaCarretosPdv(somenteConsulta: true));
+  }
+
+  Widget _buildBotaoConsultaAgendaAppBarPdv({bool compacto = true}) {
+    return Tooltip(
+      message: 'Consultar agenda de carretos (Alt+E)',
+      waitDuration: const Duration(milliseconds: 400),
+      child: IconButton(
+        visualDensity: compacto ? VisualDensity.compact : null,
+        padding: compacto ? EdgeInsets.zero : null,
+        constraints: compacto
+            ? const BoxConstraints.tightFor(width: 32, height: 30)
+            : null,
+        onPressed: _consultarAgendaCarretosPdv,
+        icon: Icon(
+          Icons.event_note_outlined,
+          size: compacto ? 20 : 24,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBotaoAgendaCarretosCheckout({
+    required StateSetter setDialogState,
+    required bool somenteConsulta,
+  }) {
+    final rotulo = somenteConsulta
+        ? 'Consultar agenda de carretos'
+        : (_dataEntregaMarcada == null
+            ? 'Agenda de carretos — definir data'
+            : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}');
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () => unawaited(
+          _abrirAgendaCarretosPdv(
+            somenteConsulta: somenteConsulta,
+            setDialogState: setDialogState,
+          ),
+        ),
+        icon: const Icon(Icons.calendar_month_outlined),
+        label: Text(rotulo),
+      ),
+    );
   }
 
   Future<_EntregaDialogResult?> _abrirDialogEntregaCliente({
@@ -5814,10 +5926,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             const SizedBox(height: 10),
             Text(
               'Só cotação — Consumidor Final. Informe o frete estimado; '
-              'endereço e agenda ficam para depois.',
+              'endereço e data da entrega ficam para depois. '
+              'A agenda pode ser consultada a qualquer momento, sem gravar o orçamento.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
+            ),
+            const SizedBox(height: 8),
+            _buildBotaoAgendaCarretosCheckout(
+              setDialogState: setDialogState,
+              somenteConsulta: true,
             ),
           ],
           if (!_entregaSomenteCotacao &&
@@ -5936,32 +6054,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             ],
             ),
             const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  final agora = DateTime.now();
-                  final inicial = _dataEntregaMarcada ?? agora;
-                  final escolhido = await mostrarAgendaCarretoPdvDialog(
-                    context: context,
-                    vendaRepository: widget.vendaRepository,
-                    dataInicial: inicial,
-                    firstDate: DateTime(agora.year, agora.month, agora.day),
-                    lastDate: DateTime(agora.year + 3, 12, 31),
-                  );
-                  if (!mounted || escolhido == null) return;
-                  _atualizarCheckoutFechamento(setDialogState, () {
-                    _dataEntregaMarcada = escolhido;
-                    _entregaSemDataCombinada = false;
-                  });
-                },
-                icon: const Icon(Icons.calendar_month_outlined),
-                label: Text(
-                  _dataEntregaMarcada == null
-                      ? 'Agenda de carretos — definir data'
-                      : 'Data da entrega: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
-                ),
-              ),
+            _buildBotaoAgendaCarretosCheckout(
+              setDialogState: setDialogState,
+              somenteConsulta: false,
             ),
             const SizedBox(height: 2),
             InkWell(
@@ -8086,6 +8181,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             PdvLerOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, control: true):
             PdvLimparPesquisaIntent(),
+        SingleActivator(LogicalKeyboardKey.keyE, alt: true):
+            PdvConsultarAgendaCarretoIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -8166,6 +8263,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                   return null;
                 },
               ),
+          PdvConsultarAgendaCarretoIntent:
+              CallbackAction<PdvConsultarAgendaCarretoIntent>(
+                onInvoke: (_) {
+                  _consultarAgendaCarretosPdv();
+                  return null;
+                },
+              ),
         },
         child: FocusTraversalGroup(
           policy: OrderedTraversalPolicy(),
@@ -8212,6 +8316,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                           tooltip: 'Mais acoes',
                           onSelected: (v) {
                             switch (v) {
+                              case 'agenda':
+                                _consultarAgendaCarretosPdv();
                               case 'obra':
                                 _toggleObraCalculadoraPdv();
                               case 'calc':
@@ -8223,6 +8329,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                             }
                           },
                           itemBuilder: (context) => const [
+                            PopupMenuItem(
+                              value: 'agenda',
+                              child: Text('Consultar agenda de carretos'),
+                            ),
                             PopupMenuItem(
                               value: 'obra',
                               child: Text('Calculadora de obra'),
@@ -8243,6 +8353,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                         ),
                       ]
                     : [
+                        IconButton(
+                          tooltip: 'Consultar agenda de carretos (Alt+E)',
+                          onPressed: _consultarAgendaCarretosPdv,
+                          icon: const Icon(Icons.event_note_outlined),
+                        ),
                         IconButton(
                           tooltip: 'Calculadora de obra (F12)',
                           onPressed: _toggleObraCalculadoraPdv,
@@ -8396,6 +8511,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           _buildSeletorVendedorAppBarPdv(),
           const SizedBox(width: 6),
           _buildSeletorEntregaPadraoAppBarPdv(),
+          _buildBotaoConsultaAgendaAppBarPdv(),
           const SizedBox(width: 6),
           _buildSeletorClienteAppBarPdv(),
         ],
@@ -9902,6 +10018,10 @@ class PdvToggleCalculadoraIntent extends Intent {
 
 class PdvToggleObraCalculadoraIntent extends Intent {
   const PdvToggleObraCalculadoraIntent();
+}
+
+class PdvConsultarAgendaCarretoIntent extends Intent {
+  const PdvConsultarAgendaCarretoIntent();
 }
 
 class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {

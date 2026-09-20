@@ -11,12 +11,16 @@ import '../entregas/planejamento_entrega_dia.dart';
 import '../shell/main_menu_deps.dart';
 
 /// Modal do PDV: calendario de carretos com ocupacao e detalhe do dia.
+///
+/// [somenteConsulta]: abre so para visualizar ocupacao; nao devolve data
+/// e nao altera o orcamento em andamento.
 Future<DateTime?> mostrarAgendaCarretoPdvDialog({
   required BuildContext context,
   required dynamic vendaRepository,
   DateTime? dataInicial,
   DateTime? firstDate,
   DateTime? lastDate,
+  bool somenteConsulta = false,
 }) {
   return showDialog<DateTime>(
     context: context,
@@ -26,6 +30,7 @@ Future<DateTime?> mostrarAgendaCarretoPdvDialog({
       dataInicial: dataInicial,
       firstDate: firstDate,
       lastDate: lastDate,
+      somenteConsulta: somenteConsulta,
       clienteRepository: MainMenuDeps.maybeOf(context)?.clienteRepository,
       lanApiClient: MainMenuDeps.maybeOf(context)?.lanApiClient,
     ),
@@ -38,6 +43,7 @@ class _AgendaCarretoPdvDialog extends StatefulWidget {
     this.dataInicial,
     this.firstDate,
     this.lastDate,
+    this.somenteConsulta = false,
     this.clienteRepository,
     this.lanApiClient,
   });
@@ -46,6 +52,7 @@ class _AgendaCarretoPdvDialog extends StatefulWidget {
   final DateTime? dataInicial;
   final DateTime? firstDate;
   final DateTime? lastDate;
+  final bool somenteConsulta;
   final dynamic clienteRepository;
   final LanApiClient? lanApiClient;
 
@@ -189,6 +196,7 @@ class _AgendaCarretoPdvDialogState extends State<_AgendaCarretoPdvDialog> {
   }
 
   bool _diaPermitido(DateTime dia) {
+    if (widget.somenteConsulta) return true;
     final d = AgendaCarretoOcupacaoMes.soDia(dia);
     final first = widget.firstDate == null
         ? null
@@ -238,7 +246,9 @@ class _AgendaCarretoPdvDialogState extends State<_AgendaCarretoPdvDialog> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Agenda de carretos',
+                      widget.somenteConsulta
+                          ? 'Consultar agenda de carretos'
+                          : 'Agenda de carretos',
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -255,7 +265,10 @@ class _AgendaCarretoPdvDialogState extends State<_AgendaCarretoPdvDialog> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                'Verde ≤3 · Amarelo 4–7 · Vermelho 8+. Toque no dia e expanda o card para ver os produtos.',
+                widget.somenteConsulta
+                    ? 'Somente consulta — nao altera o orcamento nem grava entrega. '
+                        'Verde ≤3 · Amarelo 4–7 · Vermelho 8+. Toque no dia para ver as entregas.'
+                    : 'Verde ≤3 · Amarelo 4–7 · Vermelho 8+. Toque no dia e expanda o card para ver os produtos.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -274,20 +287,23 @@ class _AgendaCarretoPdvDialogState extends State<_AgendaCarretoPdvDialog> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
-                  ),
-                  const Spacer(),
-                  FilledButton.icon(
-                    onPressed: diaSel == null || !_diaPermitido(diaSel)
-                        ? null
-                        : _usarDataSelecionada,
-                    icon: const Icon(Icons.check),
-                    label: Text(
-                      diaSel == null
-                          ? 'Usar esta data'
-                          : 'Usar ${DateFormat('dd/MM/yyyy').format(diaSel)}',
+                    child: Text(
+                      widget.somenteConsulta ? 'Fechar' : 'Cancelar',
                     ),
                   ),
+                  const Spacer(),
+                  if (!widget.somenteConsulta)
+                    FilledButton.icon(
+                      onPressed: diaSel == null || !_diaPermitido(diaSel)
+                          ? null
+                          : _usarDataSelecionada,
+                      icon: const Icon(Icons.check),
+                      label: Text(
+                        diaSel == null
+                            ? 'Usar esta data'
+                            : 'Usar ${DateFormat('dd/MM/yyyy').format(diaSel)}',
+                      ),
+                    ),
                 ],
               ),
             ),

@@ -211,6 +211,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
 
   static const _consulta = <_PdvAtalhoItem>[
     (tecla: 'F4', descricao: 'consulta de produtos', destaque: true),
+    (tecla: 'Alt+E', descricao: 'consultar agenda de carretos', destaque: true),
     (tecla: 'Enter', descricao: 'abre consulta', destaque: false),
     (tecla: 'F5', descricao: 'recarrega cadastros', destaque: false),
     (tecla: 'Ctrl+K', descricao: 'limpa busca', destaque: false),
