@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../../theme/app_semantic_colors.dart';
 
+const EdgeInsets _acaoBotaoPadding = EdgeInsets.symmetric(vertical: 12);
+const Size _acaoBotaoMinSize = Size(double.infinity, 48);
+
 /// Acoes retornadas ao fechar o dialogo (atalhos de teclado incluidos).
 Future<String?> mostrarDialogOrcamentoSalvo(
   BuildContext context, {
@@ -187,7 +190,8 @@ class _OrcamentoSalvoDialog extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: semantic.successFg,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: _acaoBotaoPadding,
+                  minimumSize: _acaoBotaoMinSize,
                 ),
                 onPressed: () => fechar(_acaoImprimir),
                 icon: const Icon(Icons.print),
@@ -198,15 +202,23 @@ class _OrcamentoSalvoDialog extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: _acaoBotaoPadding,
+                  minimumSize: _acaoBotaoMinSize,
+                ),
                 onPressed: () => fechar('pdf'),
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 label: const Text('Gerar PDF (2)'),
               ),
             ),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.center,
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
               child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: _acaoBotaoPadding,
+                  minimumSize: _acaoBotaoMinSize,
+                ),
                 onPressed: () => fechar('fechar'),
                 child: const Text('Fechar (Esc)'),
               ),

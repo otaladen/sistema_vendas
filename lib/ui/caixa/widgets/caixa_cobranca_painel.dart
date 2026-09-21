@@ -4,6 +4,11 @@ import 'package:flutter/services.dart';
 import '../../../domain/venda_documento_rotulo_helper.dart';
 import '../../theme/app_semantic_colors.dart';
 
+/// Altura util abaixo da qual o painel de cobranca usa espacamento compacto (ex.: 768px).
+bool caixaCobrancaViewportCompacto(BuildContext context) {
+  return MediaQuery.sizeOf(context).height < 820;
+}
+
 /// Banner de troco em destaque para leitura rapida no PDV.
 class CaixaBannerTrocoDestaque extends StatelessWidget {
   const CaixaBannerTrocoDestaque({
@@ -85,6 +90,8 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
     this.valorRecebido,
     this.troco,
     this.onDesconto,
+    this.compact = false,
+    this.exibirCabecalhoForma = true,
   });
 
   final String tituloSecaoPagamento;
@@ -96,6 +103,8 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
   final double? valorRecebido;
   final double? troco;
   final VoidCallback? onDesconto;
+  final bool compact;
+  final bool exibirCabecalhoForma;
 
   @override
   Widget build(BuildContext context) {
@@ -103,10 +112,16 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
     final scheme = theme.colorScheme;
     final exibirRecebido = valorRecebido != null;
     final trocoValor = troco ?? 0;
+    final compact = this.compact;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 10 : 14,
+        compact ? 8 : 12,
+        compact ? 10 : 14,
+        compact ? 6 : 10,
+      ),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
         border: Border(
@@ -115,21 +130,26 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            tituloSecaoPagamento,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
+          if (exibirCabecalhoForma) ...[
+            Text(
+              tituloSecaoPagamento,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                fontSize: compact ? 11 : null,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            rotuloPagamento,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+            SizedBox(height: compact ? 0 : 2),
+            Text(
+              rotuloPagamento,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: compact ? 14 : null,
+              ),
             ),
-          ),
+          ],
           if (descontoPdvOrcamento > 0.001) ...[
             const SizedBox(height: 4),
             Text(
@@ -150,7 +170,7 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(height: 10),
+          SizedBox(height: compact ? 6 : 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -158,10 +178,13 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
+                    padding: EdgeInsets.only(bottom: compact ? 2 : 6),
                     child: Text(
                       'TOTAL',
-                      style: theme.textTheme.titleLarge?.copyWith(
+                      style: (compact
+                              ? theme.textTheme.titleMedium
+                              : theme.textTheme.titleLarge)
+                          ?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: scheme.onSurfaceVariant,
                         letterSpacing: 0.5,
@@ -194,7 +217,10 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
                     maxLines: 1,
                     softWrap: false,
                     textAlign: TextAlign.right,
-                    style: theme.textTheme.displaySmall?.copyWith(
+                    style: (compact
+                            ? theme.textTheme.headlineSmall
+                            : theme.textTheme.displaySmall)
+                        ?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: scheme.primary,
                       height: 1.0,
@@ -205,16 +231,18 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
             ],
           ),
           if (exibirRecebido) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: compact ? 4 : 8),
             if (trocoValor > 0.009) ...[
               _chipValor(
                 context,
                 rotulo: 'Recebido',
                 valor: formatarMoeda(valorRecebido!),
+                compact: compact,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: compact ? 4 : 8),
               CaixaBannerTrocoDestaque(
                 valorFormatado: formatarMoeda(trocoValor),
+                compact: compact,
               ),
             ] else
               Row(
@@ -224,14 +252,16 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
                       context,
                       rotulo: 'Recebido',
                       valor: formatarMoeda(valorRecebido!),
+                      compact: compact,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: compact ? 6 : 10),
                   Expanded(
                     child: _chipValor(
                       context,
                       rotulo: 'TROCO',
                       valor: formatarMoeda(trocoValor),
+                      compact: compact,
                     ),
                   ),
                 ],
@@ -248,6 +278,7 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
     required String valor,
     bool destaque = false,
     bool destaqueVerde = false,
+    bool compact = false,
   }) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -256,14 +287,17 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
     final bgVerde = semantic?.successBg ?? Colors.green.shade50;
     final bordaVerde = semantic?.successBorder ?? Colors.green.shade200;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: compact ? 4 : 8,
+      ),
       decoration: BoxDecoration(
         color: destaqueVerde
             ? bgVerde
             : destaque
                 ? scheme.primaryContainer.withValues(alpha: 0.65)
                 : scheme.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(compact ? 6 : 8),
         border: Border.all(
           color: destaqueVerde
               ? bordaVerde
@@ -291,7 +325,10 @@ class CaixaRodapeTotalDestaque extends StatelessWidget {
               valor,
               maxLines: 1,
               softWrap: false,
-              style: theme.textTheme.titleMedium?.copyWith(
+              style: (compact
+                      ? theme.textTheme.titleSmall
+                      : theme.textTheme.titleMedium)
+                  ?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: destaqueVerde
                     ? fgVerde
@@ -416,11 +453,8 @@ class CaixaCobrancaPainel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Expanded(
-              child: SingleChildScrollView(
-                child: recebimento,
-              ),
-            ),
+            recebimento,
+            const Spacer(),
             CaixaRodapeTotalDestaque(
               rotuloPagamento: rotuloPagamento,
               totalFormatado: formatarMoeda(totalComDesconto),
@@ -430,6 +464,7 @@ class CaixaCobrancaPainel extends StatelessWidget {
               valorRecebido: valorRecebidoExibicao,
               troco: troco,
               onDesconto: onDesconto,
+              compact: caixaCobrancaViewportCompacto(context),
             ),
             const SizedBox(height: 8),
             acaoConfirmar,
@@ -451,6 +486,8 @@ class CaixaCobrancaCampoDinheiro extends StatefulWidget {
     required this.formatarMoeda,
     required this.onChanged,
     this.onSubmitted,
+    this.compact = false,
+    this.mostrarBannerTroco = true,
   });
 
   final TextEditingController controller;
@@ -460,6 +497,8 @@ class CaixaCobrancaCampoDinheiro extends StatefulWidget {
   final String Function(double) formatarMoeda;
   final ValueChanged<String> onChanged;
   final ValueChanged<String>? onSubmitted;
+  final bool compact;
+  final bool mostrarBannerTroco;
 
   @override
   State<CaixaCobrancaCampoDinheiro> createState() =>
@@ -504,16 +543,19 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
+    final compact = widget.compact;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(compact ? 8 : 12),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(compact ? 8 : 10),
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -522,9 +564,10 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
                 'Dinheiro',
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
+                  fontSize: compact ? 13 : null,
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: compact ? 8 : 12),
               Expanded(
                 child: TextField(
                   controller: widget.controller,
@@ -535,7 +578,10 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[\d,.]')),
                   ],
-                  style: theme.textTheme.titleLarge?.copyWith(
+                  style: (compact
+                          ? theme.textTheme.titleMedium
+                          : theme.textTheme.titleLarge)
+                      ?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                   textAlign: TextAlign.right,
@@ -544,9 +590,9 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
                     hintText: widget.formatarMoeda(widget.totalAPagar),
                     border: const OutlineInputBorder(),
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: compact ? 10 : 12,
+                      vertical: compact ? 8 : 12,
                     ),
                   ),
                   onTap: () {
@@ -560,10 +606,11 @@ class _CaixaCobrancaCampoDinheiroState extends State<CaixaCobrancaCampoDinheiro>
               ),
             ],
           ),
-          if (widget.troco > 0.009) ...[
-            const SizedBox(height: 10),
+          if (widget.mostrarBannerTroco && widget.troco > 0.009) ...[
+            SizedBox(height: compact ? 6 : 10),
             CaixaBannerTrocoDestaque(
               valorFormatado: widget.formatarMoeda(widget.troco),
+              compact: compact,
             ),
           ],
         ],
@@ -611,6 +658,7 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final compact = caixaCobrancaViewportCompacto(context);
 
     return Material(
       elevation: 0,
@@ -620,7 +668,12 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
         side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.8)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: EdgeInsets.fromLTRB(
+          compact ? 8 : 12,
+          compact ? 6 : 10,
+          compact ? 8 : 12,
+          compact ? 6 : 10,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -630,6 +683,7 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
                   'Cobranca',
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w800,
+                    fontSize: compact ? 13 : null,
                   ),
                 ),
                 const Spacer(),
@@ -647,10 +701,13 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
                   IconButton(
                     tooltip: 'Fechar painel (Esc)',
                     onPressed: onFechar,
-                    icon: const Icon(Icons.close, size: 20),
+                    icon: Icon(Icons.close, size: compact ? 18 : 20),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    constraints: BoxConstraints(
+                      minWidth: compact ? 28 : 32,
+                      minHeight: compact ? 28 : 32,
+                    ),
                   ),
               ],
             ),
@@ -658,14 +715,14 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
               rotuloPagamento,
               style: theme.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: compact ? 13 : null,
               ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: SingleChildScrollView(
-                child: recebimento,
-              ),
-            ),
+            SizedBox(height: compact ? 6 : 10),
+            recebimento,
+            const Spacer(),
             CaixaRodapeTotalDestaque(
               rotuloPagamento: rotuloPagamento,
               totalFormatado: formatarMoeda(totalComDesconto),
@@ -675,25 +732,40 @@ class CaixaPainelCobrancaLateral extends StatelessWidget {
               valorRecebido: valorRecebidoExibicao,
               troco: troco,
               onDesconto: onDesconto,
+              compact: compact,
+              exibirCabecalhoForma: false,
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: compact ? 6 : 8),
             SizedBox(
-              height: 46,
+              height: compact ? 40 : 46,
               child: FilledButton.icon(
                 onPressed: processandoFinalizacao || !finalizarHabilitado
                     ? null
                     : onFinalizar,
+                style: FilledButton.styleFrom(
+                  visualDensity:
+                      compact ? VisualDensity.compact : VisualDensity.standard,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: compact ? 12 : 16,
+                    vertical: compact ? 8 : 12,
+                  ),
+                ),
                 icon: processandoFinalizacao
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    ? SizedBox(
+                        width: compact ? 16 : 18,
+                        height: compact ? 16 : 18,
+                        child: const CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.check_circle_outline),
+                    : Icon(Icons.check_circle_outline, size: compact ? 18 : 24),
                 label: Text(
                   processandoFinalizacao
                       ? 'Processando...'
                       : 'Finalizar venda (Enter)',
+                  style: compact
+                      ? theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        )
+                      : null,
                 ),
               ),
             ),
@@ -712,44 +784,53 @@ class CaixaCobrancaConfirmacaoSimples extends StatelessWidget {
     required this.titulo,
     required this.subtitulo,
     this.detalhe,
+    this.compact = false,
   });
 
   final IconData icone;
   final String titulo;
   final String subtitulo;
   final String? detalhe;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final compact = this.compact;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(compact ? 10 : 16),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(compact ? 8 : 10),
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icone, size: 32, color: scheme.primary),
-          const SizedBox(width: 12),
+          Icon(icone, size: compact ? 24 : 32, color: scheme.primary),
+          SizedBox(width: compact ? 8 : 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   titulo,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
+                    fontSize: compact ? 13 : null,
                   ),
                 ),
-                const SizedBox(height: 4),
+                SizedBox(height: compact ? 2 : 4),
                 Text(
                   subtitulo,
-                  style: theme.textTheme.bodyMedium,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontSize: compact ? 12 : null,
+                  ),
+                  maxLines: compact ? 3 : null,
+                  overflow: compact ? TextOverflow.ellipsis : null,
                 ),
                 if (detalhe != null && detalhe!.isNotEmpty) ...[
                   const SizedBox(height: 8),

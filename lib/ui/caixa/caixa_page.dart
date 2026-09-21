@@ -7803,7 +7803,7 @@ class _CaixaPageState extends State<CaixaPage>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    flex: 4,
+                    flex: 6,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -7827,10 +7827,15 @@ class _CaixaPageState extends State<CaixaPage>
                   if (painel != null) ...[
                     const SizedBox(width: 8),
                     Expanded(
-                      flex: 3,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minWidth: 460),
-                        child: painel,
+                      flex: 4,
+                      child: LayoutBuilder(
+                        builder: (context, panelConstraints) {
+                          final minW = constraints.maxWidth < 1100 ? 300.0 : 360.0;
+                          return ConstrainedBox(
+                            constraints: BoxConstraints(minWidth: minW),
+                            child: painel,
+                          );
+                        },
                       ),
                     ),
                   ],
@@ -7908,12 +7913,15 @@ class _CaixaPageState extends State<CaixaPage>
     if (_caixaPrecisaValorRecebidoDinheiro(selecionado)) {
       final parteDinheiro =
           _parteDinheiroNaFinalizacao(selecionado, totalComDesconto);
+      final compacto = caixaCobrancaViewportCompacto(context);
       return CaixaCobrancaCampoDinheiro(
         controller: _valorRecebidoController,
         focusNode: _valorRecebidoFocusNode,
         totalAPagar: parteDinheiro > 0.001 ? parteDinheiro : totalComDesconto,
         troco: troco,
         formatarMoeda: _formatarMoeda,
+        compact: compacto,
+        mostrarBannerTroco: false,
         onChanged: (value) {
           setState(() => _valorRecebido = _parseValor(value));
         },
@@ -7935,6 +7943,7 @@ class _CaixaPageState extends State<CaixaPage>
           'Confirme o recebimento de ${_formatarMoeda(totalComDesconto)} '
           'e pressione Enter para finalizar.',
       detalhe: detalhe.isEmpty ? null : detalhe,
+      compact: caixaCobrancaViewportCompacto(context),
     );
   }
 
@@ -8811,6 +8820,7 @@ class _CaixaPageState extends State<CaixaPage>
   }) {
     if (_mistoValorControllers.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
+    final compacto = caixaCobrancaViewportCompacto(context);
     final fiadoOrc = _valorFiadoMistoOrcamentoCaixa();
     final recebidoAgora = _somaMistoRecebidaNoCaixaAgora();
     final aPagarAgora =
@@ -8829,23 +8839,29 @@ class _CaixaPageState extends State<CaixaPage>
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      padding: EdgeInsets.fromLTRB(
+        compacto ? 8 : 10,
+        compacto ? 6 : 8,
+        compacto ? 8 : 10,
+        compacto ? 6 : 8,
+      ),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(compacto ? 8 : 10),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
               Icon(
                 Icons.account_balance_wallet_outlined,
-                size: 18,
+                size: compacto ? 16 : 18,
                 color: theme.colorScheme.primary,
               ),
-              const SizedBox(width: 6),
+              SizedBox(width: compacto ? 4 : 6),
               Expanded(
                 child: Text(
                   'Pagamento misto',
@@ -8871,15 +8887,16 @@ class _CaixaPageState extends State<CaixaPage>
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: compacto ? 4 : 6),
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: compacto ? 4 : 6,
+            runSpacing: compacto ? 4 : 6,
             children: [
               _buildChipResumoMisto(
                 context,
                 'A receber agora',
                 _formatarMoeda(aPagarAgora),
+                compacto: compacto,
               ),
               _buildChipResumoMisto(
                 context,
@@ -8888,6 +8905,7 @@ class _CaixaPageState extends State<CaixaPage>
                 corValor: pagamentoInsuficiente
                     ? theme.colorScheme.error
                     : null,
+                compacto: compacto,
               ),
               if (fiadoOrc > 0.001)
                 Tooltip(
@@ -8898,22 +8916,27 @@ class _CaixaPageState extends State<CaixaPage>
                     context,
                     'Fiado (depois)',
                     _formatarMoeda(fiadoOrc),
+                    compacto: compacto,
                   ),
                 ),
             ],
           ),
           if (!pagamentoInsuficiente && trocoSobreTotal > 0.009) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: compacto ? 4 : 8),
             CaixaBannerTrocoDestaque(
               valorFormatado: _formatarMoeda(trocoSobreTotal),
               compact: true,
             ),
           ],
           if (indicesCaixa.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: compacto ? 4 : 8),
             for (var j = 0; j < indicesCaixa.length; j++) ...[
-              if (j > 0) const SizedBox(height: 4),
-              _buildLinhaValorMistoCaixa(context, index: indicesCaixa[j]),
+              if (j > 0) SizedBox(height: compacto ? 2 : 4),
+              _buildLinhaValorMistoCaixa(
+                context,
+                index: indicesCaixa[j],
+                compacto: compacto,
+              ),
             ],
           ],
           if (pagamentoInsuficiente)
@@ -8938,6 +8961,7 @@ class _CaixaPageState extends State<CaixaPage>
     String valor, {
     Color? corValor,
     bool destaqueVerde = false,
+    bool compacto = false,
   }) {
     final theme = Theme.of(context);
     final semantic = theme.extension<AppSemanticColors>();
@@ -8945,10 +8969,13 @@ class _CaixaPageState extends State<CaixaPage>
     final bgVerde = semantic?.successBg ?? Colors.green.shade50;
     final bordaVerde = semantic?.successBorder ?? Colors.green.shade200;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: compacto ? 8 : 10,
+        vertical: compacto ? 4 : 8,
+      ),
       decoration: BoxDecoration(
         color: destaqueVerde ? bgVerde : theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(compacto ? 6 : 8),
         border: Border.all(
           color: destaqueVerde
               ? bordaVerde
@@ -8966,6 +8993,7 @@ class _CaixaPageState extends State<CaixaPage>
                   ? fgVerde
                   : theme.colorScheme.onSurfaceVariant,
               fontWeight: destaqueVerde ? FontWeight.w700 : null,
+              fontSize: compacto ? 10 : null,
             ),
           ),
           Text(
@@ -8973,6 +9001,7 @@ class _CaixaPageState extends State<CaixaPage>
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w800,
               color: destaqueVerde ? fgVerde : corValor,
+              fontSize: compacto ? 13 : null,
             ),
           ),
         ],
@@ -8980,7 +9009,11 @@ class _CaixaPageState extends State<CaixaPage>
     );
   }
 
-  Widget _buildLinhaValorMistoCaixa(BuildContext context, {required int index}) {
+  Widget _buildLinhaValorMistoCaixa(
+    BuildContext context, {
+    required int index,
+    bool compacto = false,
+  }) {
     final theme = Theme.of(context);
     final meio = _mistoLinhasModelo[index].meio;
     final parcelas = _mistoLinhasModelo[index].parcelas;
@@ -8991,17 +9024,18 @@ class _CaixaPageState extends State<CaixaPage>
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         SizedBox(
-          width: 118,
+          width: compacto ? 100 : 118,
           child: Text(
             rotulo,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w600,
+              fontSize: compacto ? 12 : null,
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: compacto ? 6 : 8),
         Expanded(
           child: TextField(
             controller: _mistoValorControllers[index],
@@ -9010,7 +9044,10 @@ class _CaixaPageState extends State<CaixaPage>
                 : null,
             keyboardType:
                 const TextInputType.numberWithOptions(decimal: true),
-            style: theme.textTheme.titleMedium?.copyWith(
+            style: (compacto
+                    ? theme.textTheme.titleSmall
+                    : theme.textTheme.titleMedium)
+                ?.copyWith(
               fontWeight: FontWeight.w700,
             ),
             textAlign: TextAlign.right,
@@ -9018,9 +9055,9 @@ class _CaixaPageState extends State<CaixaPage>
               isDense: true,
               hintText: _formatarMoeda(saldoEsperado),
               border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 10,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: compacto ? 8 : 10,
+                vertical: compacto ? 7 : 10,
               ),
             ),
             onChanged: (_) {
