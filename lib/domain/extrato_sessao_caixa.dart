@@ -120,7 +120,7 @@ abstract final class ExtratoSessaoCaixaMontador {
       fim: intervalo.$2,
     );
 
-    final resumoVendas = _resumoPagamentos(vendas);
+    final resumoVendas = resumoPagamentosVendas(vendas);
     final recebimentosBruto = _listarRecebimentosSessao(
       vendaRepository,
       inicio: intervalo.$1,
@@ -226,7 +226,10 @@ abstract final class ExtratoSessaoCaixaMontador {
     }
   }
 
-  static ExtratoSessaoCaixaResumoPagamento _resumoPagamentos(List<Venda> vendas) {
+  /// Totais por meio de pagamento das vendas (inclui linhas do pagamento misto).
+  static ExtratoSessaoCaixaResumoPagamento resumoPagamentosVendas(
+    List<Venda> vendas,
+  ) {
     var dinheiro = 0.0;
     var pix = 0.0;
     var debito = 0.0;

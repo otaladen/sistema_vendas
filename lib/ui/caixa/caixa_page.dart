@@ -84,6 +84,7 @@ import '../../services/esc_pos_printer_service.dart';
 import '../../services/impressoes_service.dart';
 import '../segunda_via_cupom_autorizacao.dart';
 import '../widgets/conta_sessao_app_bar_actions.dart';
+import '../widgets/search_text_field.dart';
 import '../widgets/lan_api_feedback.dart';
 import '../widgets/cadastro_rapido_cliente_dialog.dart';
 import '../widgets/pdv_tipo_entrega_item.dart';
@@ -244,6 +245,7 @@ class _CaixaPageState extends State<CaixaPage>
   int _caixaLimiteOrcamentosPendentes = 120;
   final _importarOrcamentoController = TextEditingController();
   final _importarOrcamentoFocus = FocusNode(debugLabel: 'caixaImportarOrcamento');
+  final _buscaVendasSessaoController = TextEditingController();
 
   PromocaoPrecoService? get _promoPreco {
     try {
@@ -5092,6 +5094,29 @@ class _CaixaPageState extends State<CaixaPage>
     }
   }
 
+  /// Rotulo curto para badge na lista de vendas da sessao.
+  String _rotuloFormaPagamentoBadgeLista(Venda v) {
+    switch (v.formaPagamento) {
+      case 'pix':
+        return 'Pix';
+      case 'cartao_credito':
+        return 'Credito';
+      case 'cartao_debito':
+        return 'Debito';
+      case 'fiado':
+        return 'Fiado';
+      case 'vale':
+        return 'Vale';
+      case 'transferencia':
+        return 'Transf.';
+      case 'misto':
+        return 'Misto';
+      case 'dinheiro':
+      default:
+        return 'Dinheiro';
+    }
+  }
+
   String _textoEntregaCaixa(Venda v) =>
       EntregaVendaHelper.textoEntregaCabecalhoVenda(
         v,
@@ -6498,11 +6523,66 @@ class _CaixaPageState extends State<CaixaPage>
     );
   }
 
-  String? _mensagemListaVaziaUltimasVendasCaixa() {
+  String? _mensagemListaVaziaUltimasVendasCaixa({required bool buscaAtiva}) {
     if (!_caixaAberto) {
       return 'Abra o caixa para iniciar as operacoes de venda.';
     }
+    if (buscaAtiva) {
+      return 'Nenhuma venda corresponde a busca.';
+    }
     return null;
+  }
+
+  bool _aberturaCaixaEmDiaAnterior() {
+    final abertura = _aberturaCaixaEm;
+    if (abertura == null) return false;
+    final local = abertura.toLocal();
+    final hoje = DateTime.now();
+    final inicioHoje = DateTime(hoje.year, hoje.month, hoje.day);
+    final diaAbertura = DateTime(local.year, local.month, local.day);
+    return diaAbertura.isBefore(inicioHoje);
+  }
+
+  bool _vendaCombinaBuscaSessaoCaixa(Venda venda, String consulta) {
+    final q = consulta.trim();
+    if (q.isEmpty) return true;
+    final qLower = q.toLowerCase();
+
+    final controle = VendaDocumentoRotuloHelper.numeroControleInterno(venda);
+    if ('$controle'.contains(q)) return true;
+    final badge = VendaDocumentoRotuloHelper.badgeNumeroCurto(venda);
+    if (badge.contains(q)) return true;
+    if (VendaDocumentoRotuloHelper.rotuloControleInterno(venda)
+        .toLowerCase()
+        .contains(qLower)) {
+      return true;
+    }
+
+    final cliente = _clienteDaVenda(venda);
+    final nomeCliente = (cliente?.nomeRazao ?? '').trim();
+    if (nomeCliente.isNotEmpty && nomeCliente.toLowerCase().contains(qLower)) {
+      return true;
+    }
+
+    final totalFmt = _formatarMoeda(venda.total).toLowerCase();
+    if (totalFmt.contains(qLower)) return true;
+    final valor = _parseValor(q);
+    if (valor != null && (venda.total - valor).abs() < 0.02) return true;
+    final totalSemSeparador =
+        venda.total.toStringAsFixed(2).replaceAll('.', '').replaceAll(',', '');
+    final qDigitos = q.replaceAll(RegExp(r'[^\d]'), '');
+    if (qDigitos.isNotEmpty && totalSemSeparador.contains(qDigitos)) {
+      return true;
+    }
+    return false;
+  }
+
+  List<Venda> _filtrarVendasSessaoCaixa(List<Venda> vendas) {
+    final consulta = _buscaVendasSessaoController.text;
+    if (consulta.trim().isEmpty) return vendas;
+    return vendas
+        .where((v) => _vendaCombinaBuscaSessaoCaixa(v, consulta))
+        .toList();
   }
 
   void _atualizarListaUltimasVendasFinalizadasCaixa() {
@@ -7351,37 +7431,66 @@ class _CaixaPageState extends State<CaixaPage>
 
   /// Barra compacta de acoes quando nenhum orcamento esta selecionado.
   Widget _buildBarraAcoesIniciaisCaixa(BuildContext context) {
-    final outlinedCompact = OutlinedButton.styleFrom(
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-    final filledCompact = FilledButton.styleFrom(
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
+    final scheme = Theme.of(context).colorScheme;
+    final sem =
+        Theme.of(context).extension<AppSemanticColors>() ?? AppSemanticColors.claro;
 
-    Widget botao({
+    Widget botaoAtalhoBalcao({
       required String rotulo,
       required String dica,
       required IconData icone,
       required VoidCallback? onPressed,
-      required bool destaque,
+      required Color cor,
     }) {
-      final filho = destaque
-          ? FilledButton.tonalIcon(
-              style: filledCompact,
-              onPressed: onPressed,
-              icon: Icon(icone, size: 20),
-              label: Text(rotulo),
-            )
-          : OutlinedButton.icon(
-              style: outlinedCompact,
-              onPressed: onPressed,
-              icon: Icon(icone, size: 20),
-              label: Text(rotulo),
-            );
+      final habilitado = onPressed != null;
+      final filho = Material(
+        elevation: habilitado ? 5 : 0,
+        shadowColor: cor.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        color: habilitado ? cor : scheme.surfaceContainerHighest,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: habilitado
+                    ? cor.withValues(alpha: 0.85)
+                    : scheme.outlineVariant,
+                width: habilitado ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icone,
+                  size: 22,
+                  color: habilitado ? Colors.white : scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    rotulo,
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: habilitado
+                              ? Colors.white
+                              : scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w800,
+                          height: 1.1,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
       return Tooltip(message: dica, child: filho);
     }
 
@@ -7392,26 +7501,26 @@ class _CaixaPageState extends State<CaixaPage>
             ? 'Importar (F1)'
             : 'Importar Orçamento (F1)';
 
-        Widget importar() => botao(
+        Widget importar() => botaoAtalhoBalcao(
               rotulo: rotuloImportar,
               dica: 'Pesquisar orcamento para importar (F1)',
               icone: Icons.search,
               onPressed: _caixaAberto ? _abrirPesquisaOrcamento : null,
-              destaque: false,
+              cor: scheme.primary,
             );
-        Widget segundaVia() => botao(
+        Widget segundaVia() => botaoAtalhoBalcao(
               rotulo: '2a via (F2)',
               dica: 'Segunda via da nota (F2)',
               icone: Icons.receipt_long_outlined,
               onPressed: _abrirSegundaViaCupom,
-              destaque: false,
+              cor: scheme.tertiary,
             );
-        Widget fiado() => botao(
+        Widget fiado() => botaoAtalhoBalcao(
               rotulo: 'Fiado (F3)',
               dica: 'Receber fiado (F3)',
               icone: Icons.payments_outlined,
               onPressed: _caixaAberto ? _abrirReceberFiado : null,
-              destaque: true,
+              cor: sem.successFg,
             );
 
         if (estreito) {
@@ -8084,6 +8193,7 @@ class _CaixaPageState extends State<CaixaPage>
     _pesquisaProdutoConferenciaFocus.dispose();
     _importarOrcamentoController.dispose();
     _importarOrcamentoFocus.dispose();
+    _buscaVendasSessaoController.dispose();
     _disposeMistoEdicao();
     super.dispose();
   }
@@ -8270,54 +8380,7 @@ class _CaixaPageState extends State<CaixaPage>
     final theme = Theme.of(context);
     final widgets = <Widget>[];
 
-    if (_caixaAberto) {
-      final origem = _caixaAderidoRemoto
-          ? (_terminalSessaoAbertaId.isNotEmpty
-              ? _terminalSessaoAbertaId
-              : 'outro terminal')
-          : 'neste PC';
-      final abertura = _aberturaCaixaEm == null
-          ? ''
-          : ' · desde ${DateFormat('HH:mm').format(_aberturaCaixaEm!.toLocal())}';
-      final abertos = _sessoesRede.values.where((s) => s.aberto).length;
-      widgets.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Material(
-            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.lock_open_outlined,
-                    size: 18,
-                    color: theme.colorScheme.onPrimaryContainer,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Caixa aberto'
-                      '${_operadorCaixa.trim().isNotEmpty ? ' · $_operadorCaixa' : ''}'
-                      ' · $origem$abertura'
-                      '${abertos > 0 ? ' · $abertos na loja' : ''}'
-                      '${_caixaAderidoRemoto ? ' (aderido)' : ''}'
-                      '${_umCaixaPorLojaRemoto && abertos <= 1 ? '' : (!_umCaixaPorLojaRemoto ? ' · multi-caixa' : '')}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    } else if (_caixaApi != null) {
+    if (!_caixaAberto && _caixaApi != null) {
       final abertosRede =
           _sessoesRede.values.where((s) => s.aberto).toList(growable: false);
       widgets.add(
@@ -8569,6 +8632,213 @@ class _CaixaPageState extends State<CaixaPage>
     );
   }
 
+  Widget _buildCardResumoCaixaCompacto(
+    BuildContext context, {
+    required String rotulo,
+    required String valor,
+    required IconData icone,
+    required Color corDestaque,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: corDestaque.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: corDestaque.withValues(alpha: 0.38)),
+          boxShadow: [
+            BoxShadow(
+              color: scheme.shadow.withValues(alpha: 0.07),
+              blurRadius: 5,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(icone, size: 15, color: corDestaque),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    rotulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(
+              valor,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: corDestaque,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGridResumoValoresCaixa(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final sem =
+        Theme.of(context).extension<AppSemanticColors>() ?? AppSemanticColors.claro;
+    final statusCor = _caixaAberto ? sem.successFg : scheme.error;
+    final statusTexto = _caixaAberto
+        ? (_caixaAderidoRemoto ? 'Aberto · aderido' : 'Aberto')
+        : 'Fechado';
+
+    Widget linha(List<Widget> cards) => Row(
+          children: [
+            for (var i = 0; i < cards.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              cards[i],
+            ],
+          ],
+        );
+
+    final cards = [
+      _buildCardResumoCaixaCompacto(
+        context,
+        rotulo: 'Status',
+        valor: statusTexto,
+        icone: _caixaAberto
+            ? Icons.lock_open_outlined
+            : Icons.lock_outline,
+        corDestaque: statusCor,
+      ),
+      _buildCardResumoCaixaCompacto(
+        context,
+        rotulo: 'Fundo inicial',
+        valor: _formatarMoeda(_fundoTrocoAbertura),
+        icone: Icons.account_balance_wallet_outlined,
+        corDestaque: scheme.primary,
+      ),
+      _buildCardResumoCaixaCompacto(
+        context,
+        rotulo: 'Suprimentos',
+        valor: _formatarMoeda(_totalSuprimentos),
+        icone: Icons.add_circle_outline,
+        corDestaque: sem.infoFg,
+      ),
+      _buildCardResumoCaixaCompacto(
+        context,
+        rotulo: 'Sangrias',
+        valor: _formatarMoeda(_totalSangrias),
+        icone: Icons.remove_circle_outline,
+        corDestaque: sem.warningFg,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 420) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              linha(cards.sublist(0, 2)),
+              const SizedBox(height: 8),
+              linha(cards.sublist(2, 4)),
+            ],
+          );
+        }
+        return linha(cards);
+      },
+    );
+  }
+
+  Widget _buildBarraStatusCaixaUnificada(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem =
+        theme.extension<AppSemanticColors>() ?? AppSemanticColors.claro;
+    final operador = _operadorCaixa.trim().isEmpty ? '-' : _operadorCaixa;
+    final aberturaFmt = _aberturaCaixaEm == null
+        ? '-'
+        : DateFormat('dd/MM/yyyy HH:mm').format(_aberturaCaixaEm!.toLocal());
+    final terminal = _terminalId.trim().isEmpty ? '-' : _terminalId;
+    final sessaoAntiga = _caixaAberto && _aberturaCaixaEmDiaAnterior();
+
+    final statusRotulo = _caixaAberto ? 'Caixa Aberto' : 'Caixa Fechado';
+    final linhaStatus =
+        '$statusRotulo · Operador: $operador · Abertura: $aberturaFmt · '
+        'Terminal: $terminal';
+
+    final corFundo = _caixaAberto ? sem.successBg : theme.colorScheme.surfaceContainerHighest;
+    final corBorda = _caixaAberto ? sem.successBorder : theme.colorScheme.outlineVariant;
+    final corIcone = _caixaAberto ? sem.successFg : theme.colorScheme.onSurfaceVariant;
+    final icone = _caixaAberto
+        ? Icons.check_circle_outline
+        : Icons.lock_outline;
+
+    return Material(
+      color: corFundo,
+      elevation: 0,
+      shape: StadiumBorder(side: BorderSide(color: corBorda)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(icone, size: 18, color: corIcone),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                linhaStatus,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: corIcone,
+                  fontWeight: FontWeight.w600,
+                  height: 1.25,
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (sessaoAntiga) ...[
+              const SizedBox(width: 8),
+              Tooltip(
+                message:
+                    'A sessao foi aberta em dia anterior. '
+                    'Feche o caixa do turno passado antes de continuar.',
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: sem.warningBg,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: sem.warningBorder),
+                  ),
+                  child: Text(
+                    '⚠️ Aberto em data anterior',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: sem.warningFg,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildGestaoCaixaColapsavel(BuildContext context) {
     final theme = Theme.of(context);
     final status = _caixaAberto
@@ -8576,9 +8846,6 @@ class _CaixaPageState extends State<CaixaPage>
         : 'Fechado';
     final operador = _operadorCaixa.trim().isEmpty ? '-' : _operadorCaixa;
     final avisosRede = _buildAvisosCaixasRemotos(context);
-    final aberturaFmt = _aberturaCaixaEm == null
-        ? '-'
-        : DateFormat('dd/MM/yyyy HH:mm').format(_aberturaCaixaEm!.toLocal());
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -8627,6 +8894,10 @@ class _CaixaPageState extends State<CaixaPage>
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: _buildBarraStatusCaixaUnificada(context),
+          ),
           if (_gestaoCaixaExpandida) ...[
             const Divider(height: 1),
             Padding(
@@ -8634,21 +8905,11 @@ class _CaixaPageState extends State<CaixaPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_caixaAberto ? 'Status: Aberto' : 'Status: Fechado'),
-                  Text('Operador: $operador'),
-                  Text('Abertura: $aberturaFmt'),
-                  const SizedBox(height: 4),
-                  Text('Fundo inicial: ${_formatarMoeda(_fundoTrocoAbertura)}'),
-                  Text('Suprimentos: ${_formatarMoeda(_totalSuprimentos)}'),
-                  Text('Sangrias: ${_formatarMoeda(_totalSangrias)}'),
-                  if (_terminalId.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Terminal: $_terminalId',
-                      style: theme.textTheme.bodySmall,
-                    ),
+                  _buildGridResumoValoresCaixa(context),
+                  if (avisosRede.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    ...avisosRede,
                   ],
-                  ...avisosRede,
                   const SizedBox(height: 10),
                   _buildBotoesGestaoCaixa(),
                 ],
@@ -8663,9 +8924,15 @@ class _CaixaPageState extends State<CaixaPage>
   Widget _buildPainelStatusCaixa(BuildContext context) {
     final theme = Theme.of(context);
     final vendasSessao = _ultimasVendasFinalizadasParaCaixa();
+    final buscaAtiva = _buscaVendasSessaoController.text.trim().isNotEmpty;
+    final vendasExibidas = _filtrarVendasSessaoCaixa(vendasSessao);
     final tituloVendasSessao = _caixaAberto
-        ? 'Vendas finalizadas nesta sessao (${vendasSessao.length} '
-            '${vendasSessao.length == 1 ? 'venda' : 'vendas'})'
+        ? buscaAtiva
+            ? 'Vendas finalizadas nesta sessao '
+                '(${vendasExibidas.length} de ${vendasSessao.length} '
+                '${vendasSessao.length == 1 ? 'venda' : 'vendas'})'
+            : 'Vendas finalizadas nesta sessao (${vendasSessao.length} '
+                '${vendasSessao.length == 1 ? 'venda' : 'vendas'})'
         : 'Ultimas vendas finalizadas';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -8743,11 +9010,22 @@ class _CaixaPageState extends State<CaixaPage>
                       ),
                     ],
                   ),
+                  if (_caixaAberto) ...[
+                    const SizedBox(height: 8),
+                    SearchTextField(
+                      controller: _buscaVendasSessaoController,
+                      hintText:
+                          'Buscar por controle, cliente ou valor...',
+                      enabled: vendasSessao.isNotEmpty,
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Expanded(
                     child: _buildListaUltimasVendasFinalizadasCaixa(
                       context,
-                      vendasSessao,
+                      vendasExibidas,
+                      buscaAtiva: buscaAtiva,
                     ),
                   ),
                 ],
@@ -8761,15 +9039,18 @@ class _CaixaPageState extends State<CaixaPage>
 
   Widget _buildListaUltimasVendasFinalizadasCaixa(
     BuildContext context,
-    List<Venda> vendas,
-  ) {
+    List<Venda> vendas, {
+    required bool buscaAtiva,
+  }) {
     return CaixaUltimasVendasList(
       vendas: vendas,
       clienteDaVenda: _clienteDaVenda,
       formatarMoeda: _formatarMoeda,
+      rotuloFormaPagamento: _rotuloFormaPagamentoBadgeLista,
       onVendaTap: _abrirAcoesVendaFinalizada,
       ordenacao: _ordenacaoUltimasVendas,
-      mensagemListaVazia: _mensagemListaVaziaUltimasVendasCaixa(),
+      mensagemListaVazia:
+          _mensagemListaVaziaUltimasVendasCaixa(buscaAtiva: buscaAtiva),
       quantidadeItens: (v) {
         try {
           final repo = widget.vendaRepository;

@@ -71,6 +71,7 @@ dependencies:
   mailer: ^6.1.2
   syncfusion_flutter_pdf: ^33.2.13
   window_manager: ^0.5.2
+  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:

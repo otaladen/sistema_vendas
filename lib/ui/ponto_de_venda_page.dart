@@ -7858,6 +7858,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         cliente: _clienteDaVenda(venda),
         valorTotal: venda.total,
         nomeLoja: nomeLoja,
+        gerarPdfOrcamento: _gerarOrcamentoPdfBytes,
         onDialogoFilhoComDigitacao: (aberto) {
           if (!mounted) return;
           setState(() => _dialogoWhatsappSobreOrcamentoSalvo = aberto);

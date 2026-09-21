@@ -12,6 +12,7 @@ class ChatInternoPendente {
     this.tipo = '',
     this.payload = const {},
     this.mencoes = const [],
+    this.falhouEnvio = false,
   });
 
   final String clientId;
@@ -21,6 +22,20 @@ class ChatInternoPendente {
   final String tipo;
   final Map<String, dynamic> payload;
   final List<String> mencoes;
+  final bool falhouEnvio;
+
+  ChatInternoPendente copyWith({bool? falhouEnvio}) {
+    return ChatInternoPendente(
+      clientId: clientId,
+      vendedor: vendedor,
+      texto: texto,
+      criadoEm: criadoEm,
+      tipo: tipo,
+      payload: payload,
+      mencoes: mencoes,
+      falhouEnvio: falhouEnvio ?? this.falhouEnvio,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         'clientId': clientId,
@@ -30,6 +45,7 @@ class ChatInternoPendente {
         if (tipo.isNotEmpty) 'tipo': tipo,
         if (payload.isNotEmpty) 'payload': payload,
         if (mencoes.isNotEmpty) 'mencoes': mencoes,
+        if (falhouEnvio) 'falhouEnvio': true,
       };
 
   factory ChatInternoPendente.fromMap(Map<String, dynamic> map) {
@@ -55,6 +71,7 @@ class ChatInternoPendente {
       tipo: (map['tipo'] ?? '').toString().trim(),
       payload: payload,
       mencoes: mencoes,
+      falhouEnvio: map['falhouEnvio'] == true,
     );
   }
 }

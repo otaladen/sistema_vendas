@@ -6,6 +6,7 @@ import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_finalizacao_caixa_helper.dart';
 import '../../model/cliente.dart';
 import '../../model/venda.dart';
+import '../theme/app_semantic_colors.dart';
 
 /// Lista compacta das ultimas vendas finalizadas no painel lateral do caixa.
 class CaixaUltimasVendasList extends StatelessWidget {
@@ -15,6 +16,7 @@ class CaixaUltimasVendasList extends StatelessWidget {
     required this.clienteDaVenda,
     required this.formatarMoeda,
     required this.onVendaTap,
+    required this.rotuloFormaPagamento,
     this.ordenacao = UltimasVendasFinalizadasOrdenacao.padrao,
     this.quantidadeItens,
     this.mensagemListaVazia,
@@ -24,6 +26,7 @@ class CaixaUltimasVendasList extends StatelessWidget {
   final Cliente? Function(Venda venda) clienteDaVenda;
   final String Function(double valor) formatarMoeda;
   final void Function(Venda venda) onVendaTap;
+  final String Function(Venda venda) rotuloFormaPagamento;
   final UltimasVendasFinalizadasOrdenacao ordenacao;
 
   /// Terminal leve: evita ToMany detached (sempre 0). Servidor pode omitir.
@@ -104,6 +107,12 @@ class CaixaUltimasVendasList extends StatelessWidget {
                 children: [
                   ..._iconesNotaFiscalEmitida(v),
                   if (v.nfceEmitida || v.nfe55Autorizada) const SizedBox(width: 8),
+                  _chipFormaPagamento(
+                    context,
+                    rotuloFormaPagamento(v),
+                    v.formaPagamento,
+                  ),
+                  const SizedBox(width: 8),
                   Text(
                     formatarMoeda(v.total),
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -118,6 +127,47 @@ class CaixaUltimasVendasList extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static Widget _chipFormaPagamento(
+    BuildContext context,
+    String rotulo,
+    String forma,
+  ) {
+    final (bg, fg) = _coresFormaPagamento(context, forma);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: fg.withValues(alpha: 0.45)),
+      ),
+      child: Text(
+        rotulo,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: fg,
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
+            ),
+      ),
+    );
+  }
+
+  static (Color, Color) _coresFormaPagamento(BuildContext context, String forma) {
+    final sem =
+        Theme.of(context).extension<AppSemanticColors>() ?? AppSemanticColors.claro;
+    final scheme = Theme.of(context).colorScheme;
+    return switch (forma) {
+      'pix' => (sem.infoBg, sem.infoFg),
+      'cartao_credito' || 'cartao_debito' =>
+        (scheme.secondaryContainer, scheme.onSecondaryContainer),
+      'fiado' => (sem.warningBg, sem.warningFg),
+      'misto' => (scheme.tertiaryContainer, scheme.onTertiaryContainer),
+      'vale' || 'transferencia' =>
+        (scheme.surfaceContainerHighest, scheme.onSurfaceVariant),
+      'dinheiro' => (sem.successBg, sem.successFg),
+      _ => (sem.successBg, sem.successFg),
+    };
   }
 
   static int _qtdItensSafe(Venda v) {

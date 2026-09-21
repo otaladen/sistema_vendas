@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import '../../../model/cliente.dart';
 import '../../../model/venda.dart';
 import '../../theme/app_semantic_colors.dart';
-import 'enviar_whatsapp_dialog.dart';
+import 'enviar_whatsapp_dialog.dart' show GerarPdfOrcamentoWhatsapp, mostrarEnviarWhatsappDialog;
 
 const EdgeInsets _acaoBotaoPadding = EdgeInsets.symmetric(vertical: 12);
 const Size _acaoBotaoMinSize = Size(double.infinity, 48);
@@ -20,6 +20,7 @@ Future<String?> mostrarDialogOrcamentoSalvo(
   Cliente? cliente,
   required double valorTotal,
   required String nomeLoja,
+  required GerarPdfOrcamentoWhatsapp gerarPdfOrcamento,
   void Function(bool aberto)? onDialogoFilhoComDigitacao,
 }) {
   return showDialog<String>(
@@ -32,6 +33,7 @@ Future<String?> mostrarDialogOrcamentoSalvo(
       cliente: cliente,
       valorTotal: valorTotal,
       nomeLoja: nomeLoja,
+      gerarPdfOrcamento: gerarPdfOrcamento,
       onDialogoFilhoComDigitacao: onDialogoFilhoComDigitacao,
     ),
   );
@@ -80,6 +82,7 @@ class _OrcamentoSalvoDialog extends StatefulWidget {
     this.cliente,
     required this.valorTotal,
     required this.nomeLoja,
+    required this.gerarPdfOrcamento,
     this.onDialogoFilhoComDigitacao,
   });
 
@@ -89,6 +92,7 @@ class _OrcamentoSalvoDialog extends StatefulWidget {
   final Cliente? cliente;
   final double valorTotal;
   final String nomeLoja;
+  final GerarPdfOrcamentoWhatsapp gerarPdfOrcamento;
   final void Function(bool aberto)? onDialogoFilhoComDigitacao;
 
   @override
@@ -110,6 +114,7 @@ class _OrcamentoSalvoDialogState extends State<_OrcamentoSalvoDialog> {
         cliente: widget.cliente,
         valorTotal: widget.valorTotal,
         nomeLoja: widget.nomeLoja,
+        gerarPdfOrcamento: widget.gerarPdfOrcamento,
       );
     } finally {
       widget.onDialogoFilhoComDigitacao?.call(false);

@@ -88,9 +88,15 @@ class MensagemInternaRepository {
 
   void _podar() {
     final limite = DateTime.now().toUtc().subtract(ttl);
-    _cache = _cache.where((m) => !m.dataHora.isBefore(limite)).toList();
-    if (_cache.length > maxMensagens) {
-      _cache = _cache.sublist(_cache.length - maxMensagens);
+    _cache = _cache
+        .where(
+          (m) => m.preservarNaRetencao || !m.dataHora.isBefore(limite),
+        )
+        .toList();
+    while (_cache.length > maxMensagens) {
+      final idx = _cache.indexWhere((m) => !m.preservarNaRetencao);
+      if (idx < 0) break;
+      _cache.removeAt(idx);
     }
   }
 

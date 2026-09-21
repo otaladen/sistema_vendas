@@ -364,11 +364,7 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
               subtitle: ListenableBuilder(
                 listenable: ChatInternoHub.instance,
                 builder: (context, _) {
-                  final hub = ChatInternoHub.instance;
-                  if (hub.temPendentes) {
-                    return const Text('Enviando recado pendente...');
-                  }
-                  return const Text('Recados leves entre terminais');
+                  return _CabecalhoStatusChat(theme: theme);
                 },
               ),
               trailing: IconButton(
@@ -494,14 +490,24 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
     );
   }
 
+  Future<void> _reenviarPendentes() async {
+    await ChatInternoHub.instance.flushOutbox();
+  }
+
   Widget _bolha(MensagemInterna m, ThemeData theme) {
+    final hub = ChatInternoHub.instance;
     final hora = _fmt.format(m.dataHora.toLocal());
     final paraMim = ChatInternoParser.mencionadaPara(
-      ChatInternoHub.instance.perfilUsuario,
+      hub.perfilUsuario,
       m.mencoes,
     );
-    final minha = ChatInternoHub.instance.ehMensagemDesteTerminal(m);
+    final minha = hub.ehMensagemDesteTerminal(m);
+    final falhou = hub.envioFalhou(m);
+    final pendente = m.pendenteLocal;
     final scheme = theme.colorScheme;
+    final nomeOperador = m.vendedor.trim().isNotEmpty
+        ? m.vendedor.trim()
+        : hub.remetenteOperador();
     const verdeSuave = Color(0xFFDCF8C6);
     final fundo = minha
         ? verdeSuave
@@ -513,7 +519,8 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
         : (paraMim ? scheme.tertiary : const Color(0xFFE2E8F0));
     final maxLargura = MediaQuery.sizeOf(context).width.clamp(320, 420) * 0.78;
 
-    return Padding(
+    final terminalSub = minha ? hub.rotuloTerminal : '';
+    final bolha = Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Align(
         alignment: minha ? Alignment.centerRight : Alignment.centerLeft,
@@ -544,31 +551,55 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                     minha ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Flexible(
-                        child: Text(
-                          m.vendedor.trim().isNotEmpty
-                              ? m.vendedor.trim()
-                              : 'Terminal',
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 11,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: minha
+                              ? CrossAxisAlignment.end
+                              : CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              nomeOperador,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (terminalSub.isNotEmpty &&
+                                terminalSub != nomeOperador)
+                              Text(
+                                terminalSub,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontSize: 10,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
                         ),
                       ),
-                      if (m.pendenteLocal) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          'Enviando...',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: scheme.outline,
-                            fontSize: 10,
-                          ),
+                      const SizedBox(width: 6),
+                      if (pendente && !falhou)
+                        Icon(
+                          Icons.schedule,
+                          size: 14,
+                          color: scheme.outline,
+                        )
+                      else if (pendente && falhou)
+                        Icon(
+                          Icons.error_outline,
+                          size: 16,
+                          color: scheme.error,
+                        )
+                      else if (minha)
+                        Icon(
+                          Icons.check,
+                          size: 14,
+                          color: scheme.primary.withValues(alpha: 0.75),
                         ),
-                      ],
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 4),
                       Text(
                         hora,
                         style: theme.textTheme.labelSmall?.copyWith(
@@ -578,6 +609,26 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                       ),
                     ],
                   ),
+                  if (pendente && falhou) ...[
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment:
+                          minha ? Alignment.centerRight : Alignment.centerLeft,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          foregroundColor: scheme.error,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: () => unawaited(_reenviarPendentes()),
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text(
+                          'Tentar enviar novamente',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 4),
                   if (m.ehAutorizacaoPdv)
                     AutorizacaoPdvChatCard(
@@ -613,6 +664,78 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
           ),
         ),
       ),
+    );
+    if (pendente && !falhou) {
+      return Opacity(opacity: 0.72, child: bolha);
+    }
+    return bolha;
+  }
+}
+
+class _CabecalhoStatusChat extends StatelessWidget {
+  const _CabecalhoStatusChat({required this.theme});
+
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final hub = ChatInternoHub.instance;
+    final conectado = hub.redeConectada;
+    final pendentes = hub.contagemPendentesOutbox;
+    final scheme = theme.colorScheme;
+    final cor = conectado ? const Color(0xFF2E7D32) : scheme.error;
+    final status = conectado ? 'Conectado' : 'Desconectado · reconectando…';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: cor, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                status,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: conectado ? scheme.onSurface : scheme.error,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (!conectado && pendentes > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '$pendentes ${pendentes == 1 ? 'mensagem pendente' : 'mensagens pendentes'} na fila',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          )
+        else if (conectado && hub.temPendentes)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              'Enviando ${pendentes == 1 ? '1 recado' : '$pendentes recados'}…',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          )
+        else
+          Text(
+            'Recados entre terminais da loja',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+      ],
     );
   }
 }

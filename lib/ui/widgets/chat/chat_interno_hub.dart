@@ -40,6 +40,7 @@ class ChatInternoHub extends ChangeNotifier {
   List<MensagemInterna> _mensagens = [];
   List<ChatInternoPendente> _pendentes = [];
   bool _ouvindoWs = false;
+  bool _ouvindoLan = false;
   bool _ouvindoServidorLocal = false;
   bool _leituraCarregada = false;
   bool _flushing = false;
@@ -58,6 +59,24 @@ class ChatInternoHub extends ChangeNotifier {
   bool get painelAberto => _painelAberto;
   int get ultimoIdVisto => _ultimoIdVisto;
   bool get temPendentes => _pendentes.isNotEmpty;
+  int get contagemPendentesOutbox => _pendentes.length;
+
+  /// Terminal leve / API remota: depende do servidor LAN. PC1 servidor: local.
+  bool get redeConectada {
+    if (_apiRepo != null) return LanApiEventHub.instance.online;
+    if (_localRepo != null && LanApiEventHub.instance.modoTerminal) {
+      return LanApiEventHub.instance.online;
+    }
+    return true;
+  }
+
+  bool envioFalhou(MensagemInterna m) {
+    if (!m.pendenteLocal || m.clientId.isEmpty) return false;
+    for (final p in _pendentes) {
+      if (p.clientId == m.clientId) return p.falhouEnvio;
+    }
+    return false;
+  }
 
   void configurar({
     MensagemInternaRepository? localRepo,
@@ -83,6 +102,7 @@ class ChatInternoHub extends ChangeNotifier {
     AutorizacaoPdvChatHub.instance.garantirOuvintes();
     unawaited(_atualizarRotuloRemetente());
     _garantirOuvinteWs();
+    _garantirOuvinteLan();
     if (localRepo != null) {
       _garantirOuvinteServidorLocal();
     }
@@ -100,6 +120,10 @@ class ChatInternoHub extends ChangeNotifier {
     if (_ouvindoWs) {
       LanApiEventHub.instance.removeListener(_onWs);
       _ouvindoWs = false;
+    }
+    if (_ouvindoLan) {
+      LanApiEventHub.instance.removeListener(_onConexaoLan);
+      _ouvindoLan = false;
     }
     if (_ouvindoServidorLocal) {
       LanApiServerHub.instance.removeEventoListener(_onEventoServidorLocal);
@@ -121,7 +145,22 @@ class ChatInternoHub extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// Nome do terminal exibido no mural (ex.: hostname / Android).
+  /// Nome do operador logado (campo [MensagemInterna.vendedor] ao enviar).
+  String remetenteOperador() {
+    if (_autorPadrao.trim().isNotEmpty) return _autorPadrao.trim();
+    final u = _usuarioLogado;
+    if (u != null && u.nome.trim().isNotEmpty) return u.nome.trim();
+    if (_loginUsuario.trim().isNotEmpty) return _loginUsuario.trim();
+    return 'Operador';
+  }
+
+  /// Rotulo do terminal (hostname / estacao) — subtitulo na UI.
+  String get rotuloTerminal {
+    if (_rotuloRemetente.trim().isNotEmpty) return _rotuloRemetente.trim();
+    return '';
+  }
+
+  /// Nome do terminal (legado / fallback).
   String remetenteMural() {
     if (_rotuloRemetente.trim().isNotEmpty) return _rotuloRemetente.trim();
     if (_autorPadrao.trim().isNotEmpty) return _autorPadrao.trim();
@@ -131,10 +170,12 @@ class ChatInternoHub extends ChangeNotifier {
   /// Mensagem enviada por este terminal (balao a direita).
   bool ehMensagemDesteTerminal(MensagemInterna m) {
     if (m.pendenteLocal) return true;
-    final rotulo = remetenteMural();
-    final autor = _autorPadrao.trim();
+    final operador = remetenteOperador();
     final v = m.vendedor.trim();
     if (v.isEmpty) return false;
+    if (v == operador) return true;
+    final rotulo = remetenteMural();
+    final autor = _autorPadrao.trim();
     if (v == rotulo) return true;
     if (autor.isNotEmpty && v == autor) return true;
     return false;
@@ -186,6 +227,16 @@ class ChatInternoHub extends ChangeNotifier {
     _ouvindoWs = true;
     _onlineAntes = LanApiEventHub.instance.online;
     LanApiEventHub.instance.addListener(_onWs);
+  }
+
+  void _garantirOuvinteLan() {
+    if (_ouvindoLan) return;
+    _ouvindoLan = true;
+    LanApiEventHub.instance.addListener(_onConexaoLan);
+  }
+
+  void _onConexaoLan() {
+    notifyListeners();
   }
 
   void _garantirOuvinteServidorLocal() {
@@ -297,6 +348,22 @@ class ChatInternoHub extends ChangeNotifier {
       tipo: p.tipo.isEmpty ? kMensagemInternaTipoTexto : p.tipo,
       payload: p.payload,
     );
+  }
+
+  Future<void> _marcarFalhaOutbox(String clientId, bool falhou) async {
+    if (clientId.isEmpty) return;
+    final idx = _pendentes.indexWhere((p) => p.clientId == clientId);
+    if (idx < 0) return;
+    final atual = _pendentes[idx].copyWith(falhouEnvio: falhou);
+    _pendentes = [..._pendentes]..[idx] = atual;
+    await ChatInternoOutbox.salvar(_pendentes);
+    notifyListeners();
+  }
+
+  Future<void> _limparFalhasOutbox() async {
+    if (_pendentes.every((p) => !p.falhouEnvio)) return;
+    _pendentes = _pendentes.map((p) => p.copyWith(falhouEnvio: false)).toList();
+    await ChatInternoOutbox.salvar(_pendentes);
   }
 
   int _maiorIdConfirmado(List<MensagemInterna> lista) {
@@ -419,7 +486,7 @@ class ChatInternoHub extends ChangeNotifier {
   }
 
   Future<void> enviar(String texto) async {
-    final autor = remetenteMural();
+    final autor = remetenteOperador();
     final msg = texto.trim();
     if (msg.isEmpty) return;
     final pendente = ChatInternoPendente(
@@ -438,8 +505,8 @@ class ChatInternoHub extends ChangeNotifier {
     if (!configurado) {
       throw StateError('Chat interno nao configurado.');
     }
-    final autorPadrao = _autorPadrao.trim();
-    final autor = autorPadrao.isEmpty ? payload.operadorNome : remetenteMural();
+    final operador = remetenteOperador();
+    final autor = operador == 'Operador' ? payload.operadorNome : operador;
     final pendente = ChatInternoPendente(
       clientId: payload.solicitacaoId.isEmpty
           ? _novoClientId()
@@ -544,6 +611,7 @@ class ChatInternoHub extends ChangeNotifier {
       if (_pendentes.isEmpty) return;
     }
     _flushing = true;
+    await _limparFalhasOutbox();
     try {
       final fila = List<ChatInternoPendente>.from(_pendentes);
       for (final p in fila) {
@@ -553,11 +621,12 @@ class ChatInternoHub extends ChangeNotifier {
           await ChatInternoOutbox.salvar(_pendentes);
           _aplicarMensagem(criada, tocarSom: false);
         } catch (_) {
-          // Mantem na fila; tenta de novo no timer / volta da rede.
+          await _marcarFalhaOutbox(p.clientId, true);
         }
       }
     } finally {
       _flushing = false;
+      notifyListeners();
     }
   }
 

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../model/cliente.dart';
 import '../../../model/venda.dart';
+import '../../../services/cupom_pdf_gerado.dart';
 import '../../../services/orcamento_pdf_service.dart';
 import '../../../services/orcamento_whatsapp_launcher.dart';
 import '../../widgets/mascaras_cadastro_input.dart';
@@ -10,13 +12,18 @@ import 'selecionar_cliente_dialog.dart';
 const EdgeInsets _acaoBotaoPadding = EdgeInsets.symmetric(vertical: 12);
 const Size _acaoBotaoMinSize = Size(double.infinity, 48);
 
-/// Abre o dialogo para enviar resumo do orcamento via WhatsApp (wa.me).
+typedef GerarPdfOrcamentoWhatsapp = Future<CupomPdfGerado> Function(
+  Venda venda,
+);
+
+/// Abre o dialogo para enviar PDF do orcamento via WhatsApp.
 Future<void> mostrarEnviarWhatsappDialog(
   BuildContext context, {
   required Venda venda,
   Cliente? cliente,
   required double valorTotal,
   required String nomeLoja,
+  required GerarPdfOrcamentoWhatsapp gerarPdfOrcamento,
 }) {
   return showDialog<void>(
     context: context,
@@ -25,6 +32,7 @@ Future<void> mostrarEnviarWhatsappDialog(
       cliente: cliente,
       valorTotal: valorTotal,
       nomeLoja: nomeLoja,
+      gerarPdfOrcamento: gerarPdfOrcamento,
     ),
   );
 }
@@ -37,6 +45,7 @@ class EnviarWhatsappDialog extends StatefulWidget {
     this.cliente,
     required this.valorTotal,
     required this.nomeLoja,
+    required this.gerarPdfOrcamento,
   });
 
   /// Venda/orcamento salvo no PDV ([Venda] com status orcamento).
@@ -44,6 +53,7 @@ class EnviarWhatsappDialog extends StatefulWidget {
   final Cliente? cliente;
   final double valorTotal;
   final String nomeLoja;
+  final GerarPdfOrcamentoWhatsapp gerarPdfOrcamento;
 
   @override
   State<EnviarWhatsappDialog> createState() => _EnviarWhatsappDialogState();
@@ -113,7 +123,7 @@ class _EnviarWhatsappDialogState extends State<EnviarWhatsappDialog> {
     required String nomeLoja,
   }) {
     final saudacao = clienteGenerico ? 'Olá!' : 'Olá *$nomeCliente*!';
-    return '$saudacao Esse é o resumo do seu orçamento nº '
+    return '$saudacao Segue em anexo o PDF do seu orçamento nº '
         '*$numeroOrcamento* no valor de *$valorFormatado* na *$nomeLoja*.\n\n'
         'Ficamos à disposição para qualquer dúvida ou para confirmar o pedido!';
   }
@@ -151,45 +161,62 @@ class _EnviarWhatsappDialogState extends State<EnviarWhatsappDialog> {
     try {
       final telefone = _telefoneController.text;
       final mensagem = _mensagemController.text;
-      final uri = OrcamentoWhatsappLauncher.montarUriWaMe(
-        telefone: telefone,
-        mensagem: mensagem,
-      );
-      if (uri == null) {
+
+      CupomPdfGerado pdf;
+      try {
+        pdf = await widget.gerarPdfOrcamento(widget.venda);
+      } catch (_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
+            content: Text('Não foi possível gerar o PDF do orçamento.'),
+          ),
+        );
+        return;
+      }
+
+      final resultado = await OrcamentoWhatsappLauncher.enviarOrcamentoComPdf(
+        pdfBytes: pdf.bytes,
+        nomeArquivo: 'orcamento_$_numeroOrcamento.pdf',
+        telefone: telefone,
+        mensagem: mensagem,
+      );
+      if (!mounted) return;
+
+      if (!resultado.sucesso) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
             content: Text(
-              'Informe um WhatsApp válido (DDD + número, com código do país).',
+              resultado.mensagemErro ??
+                  'Não foi possível enviar o orçamento pelo WhatsApp.',
             ),
           ),
         );
         return;
       }
 
-      final abriu = await OrcamentoWhatsappLauncher.abrirConversa(
-        telefone: telefone,
-        mensagem: mensagem,
-      );
-      if (!mounted) return;
-      if (!abriu) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Não foi possível abrir o WhatsApp. Verifique se o aplicativo '
-              'está instalado ou tente novamente.',
-            ),
-          ),
-        );
-        return;
+      final pdfPath = resultado.pdfPath;
+      if (pdfPath != null && pdfPath.isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: pdfPath));
       }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            pdfPath == null || pdfPath.isEmpty
+                ? 'WhatsApp aberto no número informado. Anexe o PDF e envie.'
+                : 'Chat aberto no cliente. Anexe o PDF (ícone 📎) — arquivo '
+                    'selecionado em Downloads; caminho copiado.',
+          ),
+          duration: const Duration(seconds: 9),
+        ),
+      );
       Navigator.pop(context);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Não foi possível abrir o WhatsApp. Tente novamente.',
+            'Não foi possível enviar o orçamento. Tente novamente.',
           ),
         ),
       );
@@ -232,6 +259,14 @@ class _EnviarWhatsappDialogState extends State<EnviarWhatsappDialog> {
                   }
                   return null;
                 },
+              ),
+              Text(
+                'Abre o WhatsApp já no número informado, com a mensagem pronta. '
+                'O PDF completo fica em Downloads para você anexar (📎) e enviar.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.35,
+                ),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -277,7 +312,7 @@ class _EnviarWhatsappDialogState extends State<EnviarWhatsappDialog> {
                     ),
                   )
                 : const Icon(Icons.chat),
-            label: const Text('Enviar'),
+            label: const Text('Enviar PDF no WhatsApp'),
           ),
         ),
         const SizedBox(height: 8),
