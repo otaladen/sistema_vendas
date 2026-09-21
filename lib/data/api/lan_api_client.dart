@@ -2495,6 +2495,28 @@ class LanApiClient {
     throw LanApiException('Resposta invalida ao enviar recado do chat.');
   }
 
+  Future<void> chatApagar({
+    required int id,
+    required String login,
+    required String nomeOperador,
+  }) async {
+    await _postJson('/api/chat/apagar', {
+      'id': id,
+      'login': login,
+      'nomeOperador': nomeOperador,
+    });
+  }
+
+  Future<List<int>> chatLimparMural({required String login}) async {
+    final m = await _postJson('/api/chat/limpar-mural', {'login': login});
+    final raw = m['ids'];
+    if (raw is! List) return const [];
+    return raw
+        .map((e) => e is num ? e.toInt() : int.tryParse('$e'))
+        .whereType<int>()
+        .toList();
+  }
+
   Future<MensagemInterna> chatAutorizacaoResponder({
     required String solicitacaoId,
     required String acao,

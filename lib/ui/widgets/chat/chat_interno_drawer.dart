@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../data/sync/entregas_foco_hub.dart';
+import '../../../domain/chat_interno_lista_ui.dart';
 import '../../../domain/chat_interno_parser.dart';
+import 'chat_interno_campo_mensagem.dart';
+import 'chat_interno_texto_rich.dart';
 import '../../../domain/main_menu_destino.dart';
 import '../../../domain/usuario_permissao_helper.dart';
 import '../../../model/mensagem_interna.dart';
@@ -184,7 +187,8 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
       _scrollInicialFeito = true;
-      final idx = ChatInternoHub.instance.indicePrimeiraNaoLida();
+      final itens = ChatInternoListaUi.montar(ChatInternoHub.instance.mensagens);
+      final idx = ChatInternoHub.instance.indicePrimeiraNaoLidaItens(itens);
       if (idx <= 0) {
         _irParaFim();
         return;
@@ -272,7 +276,7 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
   }
 
   Future<void> _mostrarFrasesRapidas() async {
-    final escolha = await showModalBottomSheet<String>(
+    await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -292,57 +296,114 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
               ),
               for (final frase in ChatInternoParser.frasesRapidas)
                 ListTile(
-                  leading: const Icon(Icons.chat_bubble_outline, size: 20),
+                  leading: const Icon(Icons.bolt, size: 20),
                   title: Text(frase),
-                  onTap: () => Navigator.pop(ctx, frase),
+                  trailing: IconButton(
+                    tooltip: 'Enviar agora',
+                    icon: const Icon(Icons.send_outlined, size: 20),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      unawaited(_enviarTextoDireto(frase));
+                    },
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (!mounted) return;
+                    _ctrl.text = frase;
+                    _ctrl.selection =
+                        TextSelection.collapsed(offset: _ctrl.text.length);
+                  },
                 ),
             ],
           ),
         );
       },
     );
-    if (escolha == null || !mounted) return;
-    _ctrl.text = escolha;
-    _ctrl.selection = TextSelection.collapsed(offset: _ctrl.text.length);
   }
 
-  Widget _textoComPedidos(String texto, ThemeData theme) {
-    final re = ChatInternoParser.pedidoNumeroPattern;
-    final partes = <InlineSpan>[];
-    var last = 0;
-    for (final m in re.allMatches(texto)) {
-      if (m.start > last) {
-        partes.add(TextSpan(text: texto.substring(last, m.start)));
-      }
-      final n = int.tryParse(m.group(1) ?? '') ?? 0;
-      partes.add(
-        WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: ActionChip(
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              label: Text('#$n', style: const TextStyle(fontSize: 12)),
-              onPressed: n > 0 ? () => unawaited(_abrirPedido(n)) : null,
-            ),
+  Future<void> _enviarTextoDireto(String texto) async {
+    if (_enviando) return;
+    setState(() {
+      _enviando = true;
+      _erro = null;
+    });
+    try {
+      await ChatInternoHub.instance.enviar(texto);
+      _grudadoNoFim = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _irParaFim();
+        unawaited(ChatInternoHub.instance.marcarLidasAteFim());
+      });
+    } catch (e) {
+      if (mounted) setState(() => _erro = '$e');
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
+
+  Future<void> _confirmarApagar(MensagemInterna m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Apagar mensagem?'),
+        content: const Text('Esta acao nao pode ser desfeita.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
           ),
-        ),
-      );
-      last = m.end;
-    }
-    if (last < texto.length) {
-      partes.add(TextSpan(text: texto.substring(last)));
-    }
-    if (partes.isEmpty) {
-      return Text(texto, style: theme.textTheme.bodyMedium);
-    }
-    return Text.rich(
-      TextSpan(
-        style: theme.textTheme.bodyMedium,
-        children: partes,
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Apagar'),
+          ),
+        ],
       ),
     );
+    if (ok != true || !mounted) return;
+    try {
+      await ChatInternoHub.instance.apagarMensagem(m);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
+  Future<void> _confirmarLimparMural() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Limpar mural?'),
+        content: const Text(
+          'Todas as mensagens normais serao apagadas. '
+          'Autorizacoes de PDV serao mantidas.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Limpar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final n = await ChatInternoHub.instance.limparMural();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$n mensagens removidas do mural.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
   }
 
   @override
@@ -367,10 +428,29 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                   return _CabecalhoStatusChat(theme: theme);
                 },
               ),
-              trailing: IconButton(
-                tooltip: 'Fechar',
-                onPressed: () => Navigator.of(context).maybePop(),
-                icon: const Icon(Icons.close),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (ChatInternoHub.instance.podeLimparMural)
+                    PopupMenuButton<String>(
+                      tooltip: 'Opcoes do mural',
+                      icon: const Icon(Icons.more_vert),
+                      onSelected: (v) {
+                        if (v == 'limpar') unawaited(_confirmarLimparMural());
+                      },
+                      itemBuilder: (ctx) => const [
+                        PopupMenuItem(
+                          value: 'limpar',
+                          child: Text('Limpar mural'),
+                        ),
+                      ],
+                    ),
+                  IconButton(
+                    tooltip: 'Fechar',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
               ),
             ),
           ),
@@ -379,6 +459,7 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
               listenable: ChatInternoHub.instance,
               builder: (context, _) {
                 final msgs = ChatInternoHub.instance.mensagens;
+                final itens = ChatInternoListaUi.montar(msgs);
                 if (msgs.isEmpty) {
                   return Center(
                     child: Text(
@@ -399,8 +480,17 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                 return ListView.builder(
                   controller: _scroll,
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                  itemCount: msgs.length,
-                  itemBuilder: (context, i) => _bolha(msgs[i], theme),
+                  itemCount: itens.length,
+                  itemBuilder: (context, i) {
+                    final item = itens[i];
+                    if (item is ChatInternoSeparadorData) {
+                      return _separadorData(item.rotulo, theme);
+                    }
+                    if (item is ChatInternoLinhaMensagem) {
+                      return _bolha(item.mensagem, theme);
+                    }
+                    return const SizedBox.shrink();
+                  },
                 );
               },
             ),
@@ -456,17 +546,10 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                       icon: const Icon(Icons.bolt_outlined),
                     ),
                     Expanded(
-                      child: TextField(
+                      child: ChatInternoCampoMensagem(
                         controller: _ctrl,
-                        minLines: 1,
-                        maxLines: 3,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => unawaited(_enviar()),
-                        decoration: const InputDecoration(
-                          hintText: '@caixa #1234 recado rapido...',
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                        ),
+                        enviando: _enviando,
+                        onEnviar: () => unawaited(_enviar()),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -494,13 +577,38 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
     await ChatInternoHub.instance.flushOutbox();
   }
 
+  Widget _separadorData(String rotulo, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: theme.dividerColor)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              rotulo,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(child: Divider(color: theme.dividerColor)),
+        ],
+      ),
+    );
+  }
+
   Widget _bolha(MensagemInterna m, ThemeData theme) {
     final hub = ChatInternoHub.instance;
     final hora = _fmt.format(m.dataHora.toLocal());
-    final paraMim = ChatInternoParser.mencionadaPara(
-      hub.perfilUsuario,
-      m.mencoes,
+    final paraMim = ChatInternoParser.mencionadaParaOperador(
+      perfilId: hub.perfilUsuario,
+      loginUsuario: hub.loginUsuario,
+      podeEstoque: hub.usuarioLogado?.podeEstoque ?? false,
+      mencoes: m.mencoes,
     );
+    final podeApagar = hub.podeApagarMensagem(m);
     final minha = hub.ehMensagemDesteTerminal(m);
     final falhou = hub.envioFalhou(m);
     final pendente = m.pendenteLocal;
@@ -526,7 +634,11 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
         alignment: minha ? Alignment.centerRight : Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxLargura),
-          child: DecoratedBox(
+          child: GestureDetector(
+            onLongPress: podeApagar
+                ? () => unawaited(_confirmarApagar(m))
+                : null,
+            child: DecoratedBox(
             decoration: BoxDecoration(
               color: fundo,
               borderRadius: BorderRadius.only(
@@ -607,6 +719,24 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                           fontSize: 10,
                         ),
                       ),
+                      if (podeApagar) ...[
+                        const SizedBox(width: 2),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 28,
+                            minHeight: 28,
+                          ),
+                          tooltip: 'Apagar mensagem',
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 16,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                          onPressed: () => unawaited(_confirmarApagar(m)),
+                        ),
+                      ],
                     ],
                   ),
                   if (pendente && falhou) ...[
@@ -636,7 +766,11 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
                       usuarioLogado: widget.usuarioLogado,
                     )
                   else
-                    _textoComPedidos(m.texto, theme),
+                    ChatInternoTextoRich(
+                      texto: m.texto,
+                      theme: theme,
+                      onPedido: (n) => unawaited(_abrirPedido(n)),
+                    ),
                   if (!m.ehAutorizacaoPdv && m.mencoes.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Wrap(
@@ -664,6 +798,7 @@ class _ChatInternoPainelState extends State<_ChatInternoPainel> {
           ),
         ),
       ),
+    ),
     );
     if (pendente && !falhou) {
       return Opacity(opacity: 0.72, child: bolha);

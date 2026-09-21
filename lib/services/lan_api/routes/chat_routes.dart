@@ -4,6 +4,8 @@ import 'package:shelf_router/shelf_router.dart';
 import '../../../data/mensagem_interna_repository.dart';
 import '../../../domain/autorizacao_pdv_chat.dart';
 import '../../../domain/autorizacao_pdv_chat_servico.dart';
+import '../../../domain/chat_interno_eventos.dart';
+import '../../../domain/chat_interno_exclusao_servico.dart';
 import '../lan_api_deps.dart';
 import '../lan_api_json.dart';
 
@@ -75,6 +77,55 @@ void registerChatRoutes(Router router, LanApiDeps d) {
       final item = criada.toMap();
       _broadcastChat(d, item: item, id: criada.id);
       return lanApiJson({'ok': true, 'id': criada.id, 'item': item});
+    } catch (e) {
+      return lanApiJson({'error': '$e'}, status: 400);
+    }
+  });
+
+  router.post('/api/chat/apagar', (Request r) async {
+    final body = await lanApiReadJsonMap(r);
+    if (body == null) {
+      return lanApiJson({'error': 'JSON invalido'}, status: 400);
+    }
+    try {
+      final idRaw = body['id'];
+      final id = idRaw is num ? idRaw.toInt() : int.tryParse('$idRaw') ?? 0;
+      final login = (body['login'] ?? '').toString();
+      final nome = (body['nomeOperador'] ?? '').toString();
+      await ChatInternoExclusaoServico.apagar(
+        repo: repo,
+        usuarios: d.usuarioRepository,
+        id: id,
+        login: login,
+        nomeOperadorLogado: nome,
+      );
+      d.notificarEvento(kEventoChatInternoRemovido, {
+        'ids': [id],
+      });
+      d.notificar('chat_interno', ids: [id]);
+      return lanApiJson({'ok': true, 'id': id});
+    } catch (e) {
+      return lanApiJson({'error': '$e'}, status: 400);
+    }
+  });
+
+  router.post('/api/chat/limpar-mural', (Request r) async {
+    final body = await lanApiReadJsonMap(r);
+    if (body == null) {
+      return lanApiJson({'error': 'JSON invalido'}, status: 400);
+    }
+    try {
+      final login = (body['login'] ?? '').toString();
+      final removidos = await ChatInternoExclusaoServico.limparMuralNormais(
+        repo: repo,
+        usuarios: d.usuarioRepository,
+        login: login,
+      );
+      d.notificarEvento(kEventoChatInternoLimpo, {
+        'ids': removidos,
+      });
+      d.notificar('chat_interno', ids: removidos);
+      return lanApiJson({'ok': true, 'removidos': removidos.length, 'ids': removidos});
     } catch (e) {
       return lanApiJson({'error': '$e'}, status: 400);
     }

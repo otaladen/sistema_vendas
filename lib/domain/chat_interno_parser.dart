@@ -18,13 +18,26 @@ abstract final class ChatInternoParser {
 
   static final pedidoNumeroPattern = RegExp(r'#(\d{1,9})');
   static final _pedidoRe = pedidoNumeroPattern;
-  static final _mencaoRe = RegExp(r'(?:^|[^\w@])@([A-Za-zÀ-ÿ]{2,20})');
+  static final _mencaoRe =
+      RegExp(r'(?:^|[^\w@])@([A-Za-zÀ-ÿ0-9._-]{2,30})');
+  static final mencaoNoTextoPattern = RegExp(
+    r'@([A-Za-zÀ-ÿ0-9._-]{2,30})',
+  );
 
   /// Frases prontas para o mural (menu rapido ao lado do campo).
   static const frasesRapidas = <String>[
-    'Cliente aguardando retirada no pátio',
-    'Solicitação de autorização de desconto',
-    'Separação de piso concluída',
+    'Cliente aguardando no balcão',
+    'Conferir item no estoque',
+    'Autorização solicitada no caixa',
+    'Carga liberada para o motorista',
+  ];
+
+  static const sugestoesPapelMencao = <({String token, String rotulo})>[
+    (token: 'caixa', rotulo: 'Caixa'),
+    (token: 'gerente', rotulo: 'Gerente'),
+    (token: 'vendedor', rotulo: 'Vendedor'),
+    (token: 'motorista', rotulo: 'Motorista'),
+    (token: 'estoque', rotulo: 'Estoque'),
   ];
 
   /// Todos os `#1234` citados no texto (ordem de aparicao, sem repetir).
@@ -54,6 +67,7 @@ abstract final class ChatInternoParser {
     'todos': 'todos',
     'equipe': 'todos',
     'loja': 'todos',
+    'estoque': 'estoque',
   };
 
   static const atalhosUi = <({String token, String rotulo})>[
@@ -62,6 +76,7 @@ abstract final class ChatInternoParser {
     (token: '@motorista', rotulo: 'Motorista'),
     (token: '@vendedor', rotulo: 'Vendedor'),
     (token: '@gerente', rotulo: 'Gerente'),
+    (token: '@estoque', rotulo: 'Estoque'),
   ];
 
   static String rotuloMencao(String id) {
@@ -80,9 +95,12 @@ abstract final class ChatInternoParser {
         return 'Comprador';
       case 'separador':
         return 'Patio';
+      case 'estoque':
+        return 'Estoque';
       case 'todos':
         return 'Todos';
       default:
+        if (id.startsWith('login:')) return id.substring(6);
         return id;
     }
   }
@@ -114,9 +132,14 @@ abstract final class ChatInternoParser {
   static ChatInternoParse parse(String texto) {
     final mencoes = <String>{};
     for (final m in _mencaoRe.allMatches(texto)) {
-      final token = normalizarToken(m.group(1) ?? '');
+      final bruto = (m.group(1) ?? '').trim();
+      final token = normalizarToken(bruto);
       final id = aliases[token];
-      if (id != null) mencoes.add(id);
+      if (id != null) {
+        mencoes.add(id);
+      } else if (bruto.isNotEmpty) {
+        mencoes.add('login:${bruto.toLowerCase()}');
+      }
     }
     int? pedido;
     final pm = _pedidoRe.firstMatch(texto);
@@ -129,12 +152,37 @@ abstract final class ChatInternoParser {
 
   /// Mensagem dirigida a este perfil (mural geral nao conta).
   static bool mencionadaPara(String perfilId, Iterable<String> mencoes) {
+    return mencionadaParaOperador(
+      perfilId: perfilId,
+      loginUsuario: '',
+      podeEstoque: false,
+      mencoes: mencoes,
+    );
+  }
+
+  static bool mencionadaParaOperador({
+    required String perfilId,
+    required String loginUsuario,
+    required bool podeEstoque,
+    required Iterable<String> mencoes,
+  }) {
     final set = mencoes.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
     if (set.isEmpty || set.contains('todos')) return false;
     final p = perfilId.trim();
-    if (p.isEmpty) return false;
-    if (set.contains(p)) return true;
+    if (p.isNotEmpty && set.contains(p)) return true;
     if (p == 'separador' && set.contains('separador')) return true;
+    if (set.contains('estoque') && (podeEstoque || p == 'comprador')) {
+      return true;
+    }
+    final login = loginUsuario.trim().toLowerCase();
+    if (login.isNotEmpty) {
+      if (set.contains(login)) return true;
+      if (set.contains('login:$login')) return true;
+    }
     return false;
   }
+
+  static String tokenInserirMencaoPapel(String token) => '@$token';
+
+  static String tokenInserirMencaoUsuario(String login) => '@${login.trim()}';
 }

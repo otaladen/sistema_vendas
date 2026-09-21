@@ -201,6 +201,37 @@ class MensagemInternaRepository {
   }
 
   /// Atualiza status/payload de uma solicitacao de autorizacao PDV.
+  Future<bool> apagarPorId(int id) {
+    return _serial(() async {
+      await _garantirCarregado(forcarDisco: true);
+      final idx = _cache.indexWhere((m) => m.id == id);
+      if (idx < 0) return false;
+      if (_cache[idx].preservarNaRetencao) {
+        throw StateError('Mensagem protegida nao pode ser apagada.');
+      }
+      _cache.removeAt(idx);
+      await _persistir();
+      return true;
+    });
+  }
+
+  /// Remove todas as mensagens normais; mantem autorizacoes PDV.
+  Future<List<int>> limparMuralNormais() {
+    return _serial(() async {
+      await _garantirCarregado(forcarDisco: true);
+      final removidos = <int>[];
+      _cache.removeWhere((m) {
+        if (m.preservarNaRetencao) return false;
+        removidos.add(m.id);
+        return true;
+      });
+      if (removidos.isNotEmpty) {
+        await _persistir();
+      }
+      return removidos;
+    });
+  }
+
   Future<MensagemInterna> atualizarAutorizacaoPdv({
     required String solicitacaoId,
     required AutorizacaoPdvChatPayload payload,

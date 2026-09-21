@@ -15,6 +15,10 @@ import '../../../data/mensagem_interna_repository.dart';
 import '../../../data/usuario_repository.dart';
 import '../../../domain/autorizacao_pdv_chat.dart';
 import '../../../domain/autorizacao_pdv_chat_servico.dart';
+import '../../../domain/chat_interno_eventos.dart';
+import '../../../domain/chat_interno_lista_ui.dart';
+import '../../../domain/chat_interno_exclusao.dart';
+import '../../../domain/chat_interno_exclusao_servico.dart';
 import '../../../domain/chat_interno_parser.dart';
 import '../../../model/mensagem_interna.dart';
 import '../../../model/usuario_sistema.dart';
@@ -246,6 +250,14 @@ class ChatInternoHub extends ChangeNotifier {
   }
 
   void _onEventoServidorLocal(String type, Map<String, dynamic> payload) {
+    if (type == kEventoChatInternoRemovido) {
+      _aplicarRemocaoIds(_idsDoPayload(payload));
+      return;
+    }
+    if (type == kEventoChatInternoLimpo) {
+      _aplicarLimpezaRemota();
+      return;
+    }
     if (type == kEventoAutorizacaoPdvResposta || type == 'novo_recado_chat') {
       final itemRaw = payload['item'];
       if (itemRaw is Map) {
@@ -269,6 +281,16 @@ class ChatInternoHub extends ChangeNotifier {
     _onlineAntes = online;
 
     final tipo = LanApiEventHub.instance.ultimoEventoTipo;
+    if (tipo == kEventoChatInternoRemovido) {
+      _aplicarRemocaoIds(
+        _idsDoPayload(LanApiEventHub.instance.ultimoEventoPayload),
+      );
+      return;
+    }
+    if (tipo == kEventoChatInternoLimpo) {
+      _aplicarLimpezaRemota();
+      return;
+    }
     if (tipo == 'novo_recado_chat' || tipo == kEventoAutorizacaoPdvResposta) {
       final payload = LanApiEventHub.instance.ultimoEventoPayload;
       final itemRaw = payload?['item'];
@@ -441,7 +463,182 @@ class ChatInternoHub extends ChangeNotifier {
 
   bool _ehMencaoNaoLida(MensagemInterna m) {
     if (m.pendenteLocal || m.id <= _ultimoIdVisto) return false;
-    return ChatInternoParser.mencionadaPara(_perfilUsuario, m.mencoes);
+    return ChatInternoParser.mencionadaParaOperador(
+      perfilId: _perfilUsuario,
+      loginUsuario: _loginUsuario,
+      podeEstoque: _usuarioLogado?.podeEstoque ?? false,
+      mencoes: m.mencoes,
+    );
+  }
+
+  bool podeApagarMensagem(MensagemInterna m) {
+    return ChatInternoExclusaoPolitica.podeApagar(
+      operador: _usuarioLogado,
+      nomeOperadorLogado: remetenteOperador(),
+      loginOperador: _loginUsuario,
+      mensagem: m,
+    );
+  }
+
+  bool get podeLimparMural =>
+      ChatInternoExclusaoPolitica.ehGerenteOuAdmin(_usuarioLogado);
+
+  Future<List<({String token, String rotulo, String? subtitulo})>>
+      listarSugestoesMencao(String filtro) async {
+    final q = ChatInternoParser.normalizarToken(filtro);
+    final out = <({String token, String rotulo, String? subtitulo})>[];
+    for (final p in ChatInternoParser.sugestoesPapelMencao) {
+      if (q.isEmpty ||
+          ChatInternoParser.normalizarToken(p.token).contains(q) ||
+          ChatInternoParser.normalizarToken(p.rotulo).contains(q)) {
+        out.add((token: p.token, rotulo: p.rotulo, subtitulo: 'Funcao'));
+      }
+    }
+    final repo = _usuarioRepo;
+    if (repo != null) {
+      final todos = await repo.listarTodos();
+      for (final u in todos) {
+        if (!u.ativo) continue;
+        final login = u.login.trim();
+        if (login.isEmpty) continue;
+        if (_loginUsuario.isNotEmpty &&
+            login.toLowerCase() == _loginUsuario.toLowerCase()) {
+          continue;
+        }
+        final nome = u.nome.trim().isNotEmpty ? u.nome.trim() : login;
+        final chaveNome = ChatInternoParser.normalizarToken(nome);
+        final chaveLogin = ChatInternoParser.normalizarToken(login);
+        if (q.isNotEmpty && !chaveNome.contains(q) && !chaveLogin.contains(q)) {
+          continue;
+        }
+        out.add((token: login, rotulo: nome, subtitulo: '@$login'));
+      }
+    }
+    return out;
+  }
+
+  Future<void> apagarMensagem(MensagemInterna m) async {
+    if (!podeApagarMensagem(m)) {
+      throw StateError('Voce nao pode apagar esta mensagem.');
+    }
+    if (m.pendenteLocal) {
+      _pendentes =
+          _pendentes.where((p) => p.clientId != m.clientId).toList();
+      await ChatInternoOutbox.salvar(_pendentes);
+      notifyListeners();
+      return;
+    }
+    if (m.id <= 0) return;
+    final login = _loginUsuario.trim();
+    if (login.isEmpty) {
+      throw StateError('Login do operador nao configurado.');
+    }
+    final api = _apiRepo;
+    final local = _localRepo;
+    if (local != null && !LanApiEventHub.instance.modoTerminal) {
+      await ChatInternoExclusaoServico.apagar(
+        repo: local,
+        usuarios: _exigirUsuarioRepo(),
+        id: m.id,
+        login: login,
+        nomeOperadorLogado: remetenteOperador(),
+      );
+      _notificarRemocao([m.id]);
+    } else if (api != null) {
+      await api.apagarMensagem(
+        id: m.id,
+        login: login,
+        nomeOperador: remetenteOperador(),
+      );
+    } else if (local != null) {
+      await ChatInternoExclusaoServico.apagar(
+        repo: local,
+        usuarios: _exigirUsuarioRepo(),
+        id: m.id,
+        login: login,
+        nomeOperadorLogado: remetenteOperador(),
+      );
+      _notificarRemocao([m.id]);
+    } else {
+      throw StateError('Chat interno nao configurado.');
+    }
+    _aplicarRemocaoIds([m.id]);
+  }
+
+  Future<int> limparMural() async {
+    if (!podeLimparMural) {
+      throw StateError('Somente gerente ou administrador pode limpar o mural.');
+    }
+    final login = _loginUsuario.trim();
+    if (login.isEmpty) {
+      throw StateError('Login do operador nao configurado.');
+    }
+    final api = _apiRepo;
+    final local = _localRepo;
+    List<int> removidos;
+    if (local != null && !LanApiEventHub.instance.modoTerminal) {
+      removidos = await ChatInternoExclusaoServico.limparMuralNormais(
+        repo: local,
+        usuarios: _exigirUsuarioRepo(),
+        login: login,
+      );
+      LanApiServerHub.instance.notificarEvento(kEventoChatInternoLimpo, {
+        'ids': removidos,
+      });
+      LanApiServerHub.instance.notificar('chat_interno', ids: removidos);
+    } else if (api != null) {
+      removidos = await api.limparMural(login: login);
+    } else if (local != null) {
+      removidos = await ChatInternoExclusaoServico.limparMuralNormais(
+        repo: local,
+        usuarios: _exigirUsuarioRepo(),
+        login: login,
+      );
+      LanApiServerHub.instance.notificarEvento(kEventoChatInternoLimpo, {
+        'ids': removidos,
+      });
+      LanApiServerHub.instance.notificar('chat_interno', ids: removidos);
+    } else {
+      throw StateError('Chat interno nao configurado.');
+    }
+    _mensagens = _mensagens.where((m) => m.preservarNaRetencao).toList();
+    _recalcularNaoLidos();
+    notifyListeners();
+    return removidos.length;
+  }
+
+  void _notificarRemocao(List<int> ids) {
+    if (ids.isEmpty) return;
+    LanApiServerHub.instance.notificarEvento(kEventoChatInternoRemovido, {
+      'ids': ids,
+    });
+    LanApiServerHub.instance.notificar('chat_interno', ids: ids);
+  }
+
+  void _aplicarRemocaoIds(List<int> ids) {
+    if (ids.isEmpty) return;
+    final set = ids.toSet();
+    _mensagens = _mensagens.where((m) => !set.contains(m.id)).toList();
+    _apiRepo?.removerIds(set);
+    _recalcularNaoLidos();
+    notifyListeners();
+  }
+
+  void _aplicarLimpezaRemota() {
+    _mensagens = _mensagens.where((m) => m.preservarNaRetencao).toList();
+    _apiRepo?.aplicarLimpezaNormais();
+    _recalcularNaoLidos();
+    notifyListeners();
+  }
+
+  List<int> _idsDoPayload(Map<String, dynamic>? payload) {
+    if (payload == null) return const [];
+    final raw = payload['ids'];
+    if (raw is! List) return const [];
+    return raw
+        .map((e) => e is num ? e.toInt() : int.tryParse('$e'))
+        .whereType<int>()
+        .toList();
   }
 
   void _bipe() {
@@ -474,6 +671,16 @@ class ChatInternoHub extends ChangeNotifier {
     final lista = mensagens;
     for (var i = 0; i < lista.length; i++) {
       final m = lista[i];
+      if (!m.pendenteLocal && m.id > _ultimoIdVisto) return i;
+    }
+    return -1;
+  }
+
+  int indicePrimeiraNaoLidaItens(List<ChatInternoItemLista> itens) {
+    for (var i = 0; i < itens.length; i++) {
+      final item = itens[i];
+      if (item is! ChatInternoLinhaMensagem) continue;
+      final m = item.mensagem;
       if (!m.pendenteLocal && m.id > _ultimoIdVisto) return i;
     }
     return -1;

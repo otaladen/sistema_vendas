@@ -61,4 +61,33 @@ class ChatApiRepository {
       _lista = [..._lista, msg];
     }
   }
+
+  void removerIds(Iterable<int> ids) {
+    final set = ids.toSet();
+    if (set.isEmpty) return;
+    _lista = _lista.where((m) => !set.contains(m.id)).toList();
+  }
+
+  void aplicarLimpezaNormais() {
+    _lista = _lista.where((m) => m.preservarNaRetencao).toList();
+  }
+
+  Future<void> apagarMensagem({
+    required int id,
+    required String login,
+    required String nomeOperador,
+  }) async {
+    await _client.chatApagar(
+      id: id,
+      login: login,
+      nomeOperador: nomeOperador,
+    );
+    removerIds([id]);
+  }
+
+  Future<List<int>> limparMural({required String login}) async {
+    final ids = await _client.chatLimparMural(login: login);
+    aplicarLimpezaNormais();
+    return ids;
+  }
 }
