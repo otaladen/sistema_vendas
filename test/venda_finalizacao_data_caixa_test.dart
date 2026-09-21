@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/domain/listagem_vendas_periodo.dart';
 import 'package:sistema_vendas/domain/venda_finalizacao_caixa_helper.dart';
 import 'package:sistema_vendas/model/venda.dart';
+import 'package:sistema_vendas/ui/relatorios/relatorio_periodo.dart';
 
 void main() {
   test('apos checkout data e finalizadaEm refletem o pagamento no caixa', () {
@@ -27,13 +28,12 @@ void main() {
   });
 
   test('orcamento antigo pago hoje entra no filtro Hoje pela data de checkout', () {
-    final hoje = DateTime.now();
-    final dia = DateTime(hoje.year, hoje.month, hoje.day);
-    final fim = DateTime.utc(dia.year, dia.month, dia.day, 23, 59, 59, 999);
+    final limites = calcularLimitesPeriodo(preset: 'hoje');
     final checkout = DateTime.now().toUtc();
+    final criacaoOrcamento = checkout.subtract(const Duration(days: 30));
 
     final v = Venda(
-      data: checkout,
+      data: criacaoOrcamento,
       status: 'finalizada',
       finalizadaEm: checkout,
       total: 80,
@@ -42,8 +42,8 @@ void main() {
     expect(
       ListagemVendasPeriodo.noIntervaloUtc(
         v,
-        inicioUtc: dia.toUtc(),
-        fimUtc: fim,
+        inicioUtc: limites.$1.toUtc(),
+        fimUtc: limites.$2.toUtc(),
       ),
       isTrue,
     );
