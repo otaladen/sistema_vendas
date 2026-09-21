@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../model/cliente.dart';
+import '../../../model/venda.dart';
 import '../../theme/app_semantic_colors.dart';
+import 'enviar_whatsapp_dialog.dart';
 
 const EdgeInsets _acaoBotaoPadding = EdgeInsets.symmetric(vertical: 12);
 const Size _acaoBotaoMinSize = Size(double.infinity, 48);
@@ -11,6 +16,11 @@ Future<String?> mostrarDialogOrcamentoSalvo(
   BuildContext context, {
   required int numOrcamento,
   required bool modoEscPos,
+  required Venda venda,
+  Cliente? cliente,
+  required double valorTotal,
+  required String nomeLoja,
+  void Function(bool aberto)? onDialogoFilhoComDigitacao,
 }) {
   return showDialog<String>(
     context: context,
@@ -18,6 +28,11 @@ Future<String?> mostrarDialogOrcamentoSalvo(
     builder: (dialogContext) => _OrcamentoSalvoDialog(
       numOrcamento: numOrcamento,
       modoEscPos: modoEscPos,
+      venda: venda,
+      cliente: cliente,
+      valorTotal: valorTotal,
+      nomeLoja: nomeLoja,
+      onDialogoFilhoComDigitacao: onDialogoFilhoComDigitacao,
     ),
   );
 }
@@ -57,19 +72,53 @@ KeyEventResult atalhoDialogoOrcamentoSalvo(
   return KeyEventResult.ignored;
 }
 
-class _OrcamentoSalvoDialog extends StatelessWidget {
+class _OrcamentoSalvoDialog extends StatefulWidget {
   const _OrcamentoSalvoDialog({
     required this.numOrcamento,
     required this.modoEscPos,
+    required this.venda,
+    this.cliente,
+    required this.valorTotal,
+    required this.nomeLoja,
+    this.onDialogoFilhoComDigitacao,
   });
 
   final int numOrcamento;
   final bool modoEscPos;
+  final Venda venda;
+  final Cliente? cliente;
+  final double valorTotal;
+  final String nomeLoja;
+  final void Function(bool aberto)? onDialogoFilhoComDigitacao;
 
-  String get _acaoImprimir => modoEscPos ? 'escpos' : 'imprimir';
+  @override
+  State<_OrcamentoSalvoDialog> createState() => _OrcamentoSalvoDialogState();
+}
+
+class _OrcamentoSalvoDialogState extends State<_OrcamentoSalvoDialog> {
+  bool _dialogoFilhoAberto = false;
+
+  String get _acaoImprimir => widget.modoEscPos ? 'escpos' : 'imprimir';
+
+  Future<void> _abrirWhatsapp(BuildContext context) async {
+    setState(() => _dialogoFilhoAberto = true);
+    widget.onDialogoFilhoComDigitacao?.call(true);
+    try {
+      await mostrarEnviarWhatsappDialog(
+        context,
+        venda: widget.venda,
+        cliente: widget.cliente,
+        valorTotal: widget.valorTotal,
+        nomeLoja: widget.nomeLoja,
+      );
+    } finally {
+      widget.onDialogoFilhoComDigitacao?.call(false);
+      if (mounted) setState(() => _dialogoFilhoAberto = false);
+    }
+  }
 
   Future<void> _copiarNumero(BuildContext context) async {
-    await Clipboard.setData(ClipboardData(text: '$numOrcamento'));
+    await Clipboard.setData(ClipboardData(text: '${widget.numOrcamento}'));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Número do orçamento copiado.')),
@@ -88,9 +137,17 @@ class _OrcamentoSalvoDialog extends StatelessWidget {
     }
 
     return Focus(
-      autofocus: true,
-      onKeyEvent: (node, event) =>
-          atalhoDialogoOrcamentoSalvo(event, fechar),
+      autofocus: !_dialogoFilhoAberto,
+      canRequestFocus: !_dialogoFilhoAberto,
+      onKeyEvent: (node, event) {
+        if (_dialogoFilhoAberto) return KeyEventResult.ignored;
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.keyW) {
+          unawaited(_abrirWhatsapp(context));
+          return KeyEventResult.handled;
+        }
+        return atalhoDialogoOrcamentoSalvo(event, fechar);
+      },
       child: AlertDialog(
         contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
         content: Column(
@@ -144,7 +201,7 @@ class _OrcamentoSalvoDialog extends StatelessWidget {
                       children: [
                         Flexible(
                           child: Text(
-                            '$numOrcamento',
+                            '${widget.numOrcamento}',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.displaySmall?.copyWith(
                               fontSize: 36,
@@ -209,6 +266,21 @@ class _OrcamentoSalvoDialog extends StatelessWidget {
                 onPressed: () => fechar('pdf'),
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 label: const Text('Gerar PDF (2)'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF25D366),
+                  foregroundColor: Colors.white,
+                  padding: _acaoBotaoPadding,
+                  minimumSize: _acaoBotaoMinSize,
+                ),
+                onPressed: () => unawaited(_abrirWhatsapp(context)),
+                icon: const Icon(Icons.chat),
+                label: const Text('Enviar WhatsApp (W)'),
               ),
             ),
             const SizedBox(height: 8),

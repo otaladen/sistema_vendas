@@ -232,6 +232,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Dialogo "Orcamento salvo" (imprimir/PDF) — bloqueia F10 do PDV.
   bool _dialogoOrcamentoSalvoAberto = false;
 
+  /// WhatsApp (ou outro filho) aberto sobre o dialogo de orcamento — libera digitacao.
+  bool _dialogoWhatsappSobreOrcamentoSalvo = false;
+
   /// Evita envio duplo (F10 + clique) e corrida com fechamento do dialogo.
   /// Permanece true tambem durante imprimir/PDF pos-save.
   bool _salvandoOrcamento = false;
@@ -1850,6 +1853,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return chain.indexWhere((n) => n.hasFocus);
   }
 
+  bool _pdvFocoEmCampoDeTexto() {
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx == null) return false;
+    if (ctx.widget is EditableText) return true;
+    return ctx.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
   /// Teclas globais do PDV (F7 checkout; seta baixo na busca entra no carrinho).
   bool _handlerTeclasHardwarePdv(KeyEvent event) {
     if (!mounted) return false;
@@ -1860,6 +1870,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
 
     if (_dialogoOrcamentoSalvoAberto && event is KeyDownEvent) {
+      if (_dialogoWhatsappSobreOrcamentoSalvo || _pdvFocoEmCampoDeTexto()) {
+        return false;
+      }
       return true;
     }
 
@@ -7834,13 +7847,27 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _dialogoOrcamentoSalvoAberto = true;
     String? acao;
     try {
+      final nomeLoja = config.nomeLoja.trim().isEmpty
+          ? 'LOJA DE MATERIAIS'
+          : config.nomeLoja.trim();
       acao = await mostrarDialogOrcamentoSalvo(
         context,
         numOrcamento: numOrcamento,
         modoEscPos: modoEscPos,
+        venda: venda,
+        cliente: _clienteDaVenda(venda),
+        valorTotal: venda.total,
+        nomeLoja: nomeLoja,
+        onDialogoFilhoComDigitacao: (aberto) {
+          if (!mounted) return;
+          setState(() => _dialogoWhatsappSobreOrcamentoSalvo = aberto);
+        },
       );
     } finally {
       _dialogoOrcamentoSalvoAberto = false;
+      if (mounted) {
+        setState(() => _dialogoWhatsappSobreOrcamentoSalvo = false);
+      }
       if (mounted) _voltarFocoParaPesquisa();
     }
     if (!mounted || acao == null || acao == 'fechar') return;
