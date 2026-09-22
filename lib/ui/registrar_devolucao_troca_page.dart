@@ -7,7 +7,9 @@ import '../data/devolucao_fiscal_store.dart';
 import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
 import '../domain/permissao_usuario.dart';
+import '../domain/produto_limite_desconto_pdv.dart';
 import '../domain/troca_com_nota_pdv_intent.dart';
+import '../domain/troca_conferencia_valores.dart';
 import '../domain/troca_diferenca_caixa.dart';
 import '../domain/usuario_permissao_helper.dart';
 import '../model/cliente.dart';
@@ -23,6 +25,8 @@ import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
 import 'shell/main_menu_deps.dart';
 import 'troca_com_nota_pdv_navigation.dart';
 import 'vales/vale_credito_comprovante_dialog.dart';
+import 'pdv_desconto_autorizacao.dart';
+import 'pdv_preco_unitario_autorizacao.dart';
 import 'widgets/lan_api_feedback.dart';
 import 'widgets/produto_busca_input.dart';
 
@@ -62,16 +66,56 @@ class _LinhaTrocaEdit {
   _LinhaTrocaEdit({
     required this.produto,
     int quantidadeInicial = 1,
+    required double precoUnitarioInicial,
   })  : qtdController = TextEditingController(text: '$quantidadeInicial'),
-        precoTipo = 'preco1';
+        unitController = TextEditingController(
+          text: _formatarPrecoEntrada(precoUnitarioInicial),
+        ),
+        precoTipo = 'preco1',
+        _precoUnitarioConfirmado = precoUnitarioInicial;
 
   final Produto produto;
   final TextEditingController qtdController;
+  final TextEditingController unitController;
   String precoTipo;
+  double _precoUnitarioConfirmado;
+  bool descontoAcimaTetoAutorizado = false;
+
+  static String _formatarPrecoEntrada(double v) =>
+      v.toStringAsFixed(2).replaceAll('.', ',');
+
+  static double? parsePrecoUnitarioTexto(String texto) {
+    final t = texto.trim().replaceAll('.', '').replaceAll(',', '.');
+    if (t.isEmpty) return null;
+    final v = double.tryParse(t);
+    if (v == null || v < 0) return null;
+    return v;
+  }
 
   int get quantidade => int.tryParse(qtdController.text.trim()) ?? 0;
 
-  void dispose() => qtdController.dispose();
+  double get precoUnitarioConfirmado => _precoUnitarioConfirmado;
+
+  double precoUnitarioPraticado(double precoTabelaFallback) {
+    return parsePrecoUnitarioTexto(unitController.text) ??
+        _precoUnitarioConfirmado;
+  }
+
+  void aplicarPrecoTabela(double precoTabela) {
+    _precoUnitarioConfirmado = precoTabela;
+    unitController.text = _formatarPrecoEntrada(precoTabela);
+    descontoAcimaTetoAutorizado = false;
+  }
+
+  void confirmarPrecoUnitario(double valor) {
+    _precoUnitarioConfirmado = valor;
+    unitController.text = _formatarPrecoEntrada(valor);
+  }
+
+  void dispose() {
+    qtdController.dispose();
+    unitController.dispose();
+  }
 }
 
 class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPage> {
@@ -90,6 +134,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   String? _erroCarregamento;
   bool _gerarVale = false;
   bool _vinculandoCliente = false;
+  double _maxDescontoPercentualPdv = 15;
 
   @override
   void initState() {
@@ -102,8 +147,14 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   Future<void> _carregarTudo() async {
     final config = await ConfiguracoesService.global.carregarEfetiva();
     if (!mounted) return;
+    var tetoDesconto = config.maxDescontoPercentualPdv;
+    final u = widget.usuarioLogado;
+    if (u != null) {
+      tetoDesconto = u.tetoDescontoPercentualPdv(tetoDesconto);
+    }
     setState(() {
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
+      _maxDescontoPercentualPdv = tetoDesconto;
     });
     await _recarregarVenda();
   }
@@ -249,19 +300,162 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     );
   }
 
-  /// Valor dos produtos que o cliente leva na troca (tabela escolhida no PDV).
-  double _valorTotalSaidaTroca() {
-    var total = 0.0;
-    for (final linha in _linhasTroca) {
-      final q = linha.quantidade;
-      if (q <= 0) continue;
-      total += q * _precoProdutoTipo(linha.produto, linha.precoTipo);
-    }
-    return total;
+  List<TrocaSaidaLinhaConferencia> _linhasSaidaConferencia() {
+    return [
+      for (final linha in _linhasTroca)
+        TrocaSaidaLinhaConferencia(
+          quantidade: linha.quantidade,
+          precoUnitarioPraticado: linha.precoUnitarioPraticado(
+            _precoProdutoTipo(linha.produto, linha.precoTipo),
+          ),
+        ),
+    ];
   }
 
+  /// Valor dos produtos que o cliente leva na troca (preco praticado na linha).
+  double _valorTotalSaidaTroca() =>
+      TrocaConferenciaValores.subtotalSaida(_linhasSaidaConferencia());
+
   /// Positivo = cliente deve pagar; negativo = loja devolve ao cliente.
-  double _diferencaTroca() => _valorTotalSaidaTroca() - _valorTotalDevolvido();
+  double _diferencaTroca() => TrocaConferenciaValores.diferenca(
+        linhasSaida: _linhasSaidaConferencia(),
+        valorDevolvido: _valorTotalDevolvido(),
+      );
+
+  String _rotuloPrecoTipo(String tipo) {
+    switch (tipo) {
+      case 'preco2':
+        return 'Preco 2';
+      case 'preco3':
+        return 'Preco 3';
+      case 'preco1':
+      default:
+        return 'Preco 1';
+    }
+  }
+
+  Future<bool> _validarPrecoUnitarioTroca(
+    _LinhaTrocaEdit linha, {
+    required double novoPreco,
+    required double precoAnterior,
+  }) async {
+    final precoTabela = _precoProdutoTipo(linha.produto, linha.precoTipo);
+    if (novoPreco >= precoTabela - 1e-6) {
+      return true;
+    }
+    final descontoExtra = ProdutoLimiteDescontoPdv.descontoUnitarioAcimaDoTeto(
+      novoPrecoUnitario: novoPreco,
+      precoTabelaReferencia: precoTabela,
+      produto: linha.produto,
+      precoTipo: linha.precoTipo,
+      tetoEmpresaOuUsuario: _maxDescontoPercentualPdv,
+    );
+    if (descontoExtra <= 1e-6) {
+      linha.descontoAcimaTetoAutorizado = false;
+      return true;
+    }
+    if (linha.descontoAcimaTetoAutorizado &&
+        (novoPreco - precoAnterior).abs() < 1e-6) {
+      return true;
+    }
+    final qtd = (linha.quantidade > 0 ? linha.quantidade : 1).toDouble();
+    final maximoPermitido = ProdutoLimiteDescontoPdv.descontoMaximoReaisNaLinha(
+      precoTabelaReferencia: precoTabela,
+      quantidade: qtd,
+      produto: linha.produto,
+      precoTipo: linha.precoTipo,
+      tetoEmpresaOuUsuario: _maxDescontoPercentualPdv,
+    );
+    final descontoSolicitado = (precoTabela - novoPreco) * qtd;
+    final u = widget.usuarioLogado;
+    if (u == null) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Desconto acima do permitido. Informe um usuario logado ou '
+            'aumente o preco.',
+          ),
+        ),
+      );
+      return false;
+    }
+    final auth = await solicitarAutorizacaoDescontoAcimaTetoPdv(
+      context,
+      _usuarioRepository,
+      usuarioLogado: u,
+      maximoPermitidoReais: maximoPermitido,
+      descontoSolicitadoReais: descontoSolicitado,
+      formatarMoeda: (v) => _formatarMoeda(v),
+    );
+    if (!mounted) return false;
+    if (auth == null) {
+      linha.confirmarPrecoUnitario(precoAnterior);
+      return false;
+    }
+    linha.descontoAcimaTetoAutorizado = true;
+    return true;
+  }
+
+  Future<void> _onPrecoUnitarioTrocaEditado(_LinhaTrocaEdit linha) async {
+    final precoTabela = _precoProdutoTipo(linha.produto, linha.precoTipo);
+    final anterior = linha.precoUnitarioPraticado(precoTabela);
+    final parsed = _LinhaTrocaEdit.parsePrecoUnitarioTexto(linha.unitController.text);
+    if (parsed == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Preco unitario invalido.')),
+      );
+      linha.confirmarPrecoUnitario(anterior);
+      setState(() {});
+      return;
+    }
+    final ok = await _validarPrecoUnitarioTroca(
+      linha,
+      novoPreco: parsed,
+      precoAnterior: anterior,
+    );
+    if (!ok) {
+      setState(() {});
+      return;
+    }
+    linha.confirmarPrecoUnitario(parsed);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _abrirAjustePrecoUnitarioTroca(_LinhaTrocaEdit linha) async {
+    final u = widget.usuarioLogado;
+    if (u == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Para ajuste assistido de preco, abra a tela com usuario logado.',
+          ),
+        ),
+      );
+      return;
+    }
+    final precoTabela = _precoProdutoTipo(linha.produto, linha.precoTipo);
+    final atual = linha.precoUnitarioPraticado(precoTabela);
+    final result = await solicitarAlteracaoPrecoUnitarioPdv(
+      context,
+      _usuarioRepository,
+      usuarioLogado: u,
+      produto: linha.produto,
+      precoTipo: linha.precoTipo,
+      tetoDescontoPercentualEmpresa: _maxDescontoPercentualPdv,
+      quantidadeLinha: linha.quantidade > 0 ? linha.quantidade.toDouble() : 1,
+      nomeProduto: linha.produto.nome,
+      precoAtual: atual,
+      precoTabela: precoTabela,
+      rotuloTabela: _rotuloPrecoTipo(linha.precoTipo),
+      formatarMoeda: (v) => _formatarMoeda(v),
+    );
+    if (!mounted || result == null) return;
+    linha.confirmarPrecoUnitario(result.novoPreco);
+    linha.descontoAcimaTetoAutorizado = true;
+    setState(() {});
+  }
 
   static const double _epsValorTroca = 0.009;
 
@@ -963,7 +1157,26 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
     if (_modoTroca) {
       for (final linha in _linhasTroca) {
         if (linha.quantidade <= 0) continue;
-        final pu = _precoProdutoTipo(linha.produto, linha.precoTipo);
+        final precoTabela = _precoProdutoTipo(linha.produto, linha.precoTipo);
+        final pu = linha.precoUnitarioPraticado(precoTabela);
+        if (pu <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Preco unitario invalido para "${linha.produto.nome}".',
+              ),
+            ),
+          );
+          return;
+        }
+        final okPreco = await _validarPrecoUnitarioTroca(
+          linha,
+          novoPreco: pu,
+          precoAnterior: linha.precoUnitarioConfirmado,
+        );
+        if (!okPreco) {
+          return;
+        }
         final custo = linha.produto.precoCusto;
         saidas.add(
           LinhaTrocaSaidaInput(
@@ -1249,7 +1462,13 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                               Navigator.pop(ctx);
                               setState(() {
                                 _linhasTroca.add(
-                                  _LinhaTrocaEdit(produto: p),
+                                  _LinhaTrocaEdit(
+                                    produto: p,
+                                    precoUnitarioInicial: _precoProdutoTipo(
+                                      p,
+                                      'preco1',
+                                    ),
+                                  ),
                                 );
                               });
                             },
@@ -1479,9 +1698,13 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
               ..._linhasTroca.asMap().entries.map((e) {
                 final i = e.key;
                 final linha = e.value;
-                final unit = _precoProdutoTipo(linha.produto, linha.precoTipo);
+                final precoTabela =
+                    _precoProdutoTipo(linha.produto, linha.precoTipo);
+                final unit = linha.precoUnitarioPraticado(precoTabela);
                 final qSaida = linha.quantidade;
                 final subSaida = qSaida * unit;
+                final precoAcimaTabela = unit > precoTabela + 1e-6;
+                final precoAbaixoTabela = unit < precoTabela - 1e-6;
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
@@ -1521,10 +1744,44 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
                           ],
                           onChanged: (nv) {
                             if (nv == null) return;
-                            setState(() => linha.precoTipo = nv);
+                            setState(() {
+                              linha.precoTipo = nv;
+                              linha.aplicarPrecoTabela(
+                                _precoProdutoTipo(linha.produto, nv),
+                              );
+                            });
                           },
                         ),
-                        Text('Unit. ${_formatarMoeda(unit)}'),
+                        SizedBox(
+                          width: 108,
+                          child: TextField(
+                            decoration: InputDecoration(
+                              labelText: 'Unit. R\$',
+                              isDense: true,
+                              helperText: precoAcimaTabela
+                                  ? 'Acima tabela'
+                                  : precoAbaixoTabela
+                                      ? 'Tabela ${_formatarMoeda(precoTabela)}'
+                                      : null,
+                              helperMaxLines: 2,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            controller: linha.unitController,
+                            onChanged: (_) => setState(() {}),
+                            onEditingComplete: () =>
+                                _onPrecoUnitarioTrocaEditado(linha),
+                            onSubmitted: (_) =>
+                                _onPrecoUnitarioTrocaEditado(linha),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Ajustar preco (desconto/autorizacao)',
+                          icon: const Icon(Icons.price_change_outlined),
+                          onPressed: () =>
+                              _abrirAjustePrecoUnitarioTroca(linha),
+                        ),
                         if (qSaida > 0)
                           Text(
                             'Subtotal: ${_formatarMoeda(subSaida)}',
