@@ -23,6 +23,7 @@ import '../../domain/entrega_nao_entregue.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../model/item_venda.dart';
+import '../../model/produto.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/venda.dart';
 import '../../services/entrega_baixa_sync_service.dart';
