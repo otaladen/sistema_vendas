@@ -154,14 +154,15 @@ class ItemVenda {
   }
 
   /// Quantidade a mostrar na tela de entregas (carga / caminhao).
-  int quantidadeParaExibicaoEntrega(
-    bool vendaUsaDestaqueCarreto, {
-    bool carretoReservaNativoAntesSaida = false,
-  }) {
+  ///
+  /// Carreto: vendido liquido menos ja retirado na loja ([quantidadeJaRetirada]).
+  /// Migracao retirada futura > carreto: [quantidadeNoCarreto].
+  int quantidadeParaExibicaoEntrega(bool vendaUsaDestaqueCarreto) {
     if (vendaUsaDestaqueCarreto) {
       return quantidadeNoCarreto;
     }
-    if (carretoReservaNativoAntesSaida) {
+    if (EntregaVendaHelper.tipoEfetivoItem(this) ==
+        EntregaVendaHelper.tipoEntregaLoja) {
       return quantidadeAindaNoCarretoAntesSaida;
     }
     return quantidade;

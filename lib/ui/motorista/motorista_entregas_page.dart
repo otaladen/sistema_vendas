@@ -10,6 +10,7 @@ import '../../data/api/lan_api_event_hub.dart';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/sync/entrega_local_refresh_hub.dart';
 import '../../services/entrega_pod_finalizacao.dart';
+import '../../domain/entrega_venda_helper.dart';
 import '../../domain/entrega_baixa_motorista_visao.dart';
 import '../../domain/entrega_baixa_pendente.dart';
 import '../../domain/entrega_filtro_util.dart';
@@ -500,9 +501,22 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
     }
   }
 
-  int _qtdItem(ItemVenda item) {
-    if (item.quantidadeNoCarreto > 0) return item.quantidadeNoCarreto;
-    return item.quantidade;
+  Produto? Function(int id)? get _obterProdutoEntrega =>
+      _usaVendaApi
+          ? (widget.vendaRepository as VendaApiRepository).resolverProduto
+          : null;
+
+  String _linhaItemRomaneio(
+    Venda venda,
+    ItemVenda item,
+    List<ItemVenda> itens,
+  ) {
+    return EntregaVendaHelper.textoLinhaItemRomaneioCarga(
+      venda,
+      item,
+      itens: itens,
+      obterProduto: _obterProdutoEntrega,
+    );
   }
 
   Future<int?> _perguntarQtdBuscarNaLoja(Venda venda, ItemVenda item) async {
@@ -670,7 +684,11 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
     }
   }
 
-  Widget _linhaItemCarga(Venda venda, ItemVenda item) {
+  Widget _linhaItemCarga(
+    Venda venda,
+    ItemVenda item,
+    List<ItemVenda> itensPedido,
+  ) {
     final solicitado = BuscarNaLoja.ehSolicitado(item.buscarNaLojaStatus);
     final separado = BuscarNaLoja.ehSeparado(item.buscarNaLojaStatus);
     final podePedir = BuscarNaLoja.podeSolicitarItem(venda, item);
@@ -683,20 +701,15 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(
-                width: 36,
-                child: Text(
-                  '${_qtdItem(item)}x',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.nomeProduto,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      _linhaItemRomaneio(venda, item, itensPedido),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                     if (solicitado)
                       Text(
@@ -919,9 +932,11 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                     final obs = EntregaObservacaoMotorista.visivel(
                       v.observacaoEntrega,
                     );
-                    final itens = _itensDaVenda(v)
-                        .where((i) => _qtdItem(i) > 0)
-                        .toList();
+                    final itensBrutos = _itensDaVenda(v);
+                    final itens = EntregaVendaHelper.itensCargaMotorista(
+                      v,
+                      itensBrutos,
+                    );
                     final podeAgir = !pendenteOuSync &&
                         prog >= 3 &&
                         (v.statusEntrega == 'saiu_entrega' ||
@@ -1048,7 +1063,7 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                                 ),
                                 children: [
                                   for (final item in itens)
-                                    _linhaItemCarga(v, item),
+                                    _linhaItemCarga(v, item, itensBrutos),
                                 ],
                               ),
                             Wrap(

@@ -133,13 +133,8 @@ abstract final class BuscarNaLoja {
     return out;
   }
 
-  static int _qtd(Venda venda, ItemVenda item) {
-    return item.quantidadeParaExibicaoEntrega(
-      EntregaVendaHelper.vendaTemItensMigradosRetiradaParaCarreto(venda),
-      carretoReservaNativoAntesSaida:
-          venda.carretoReservaAteSaida && !venda.cargaSaiu,
-    );
-  }
+  static int _qtd(Venda venda, ItemVenda item) =>
+      EntregaVendaHelper.quantidadeRomaneioCarga(venda, item);
 
   static Iterable<ItemVenda> _itens(Venda venda) {
     try {

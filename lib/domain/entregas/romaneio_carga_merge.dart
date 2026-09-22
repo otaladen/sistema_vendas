@@ -111,13 +111,10 @@ abstract final class RomaneioCargaMerge {
           item,
           obterProduto: obterProduto,
         );
-        // Nao ler produto.target em entidade detached (terminal leve).
-        Produto? p;
-        try {
-          p = item.produto.target;
-        } catch (_) {
-          p = null;
-        }
+        var p = EntregaVendaHelper.produtoItemEntrega(
+          item,
+          obterProduto: obterProduto,
+        );
         if (orfao) {
           p = null;
         }
@@ -138,7 +135,11 @@ abstract final class RomaneioCargaMerge {
         final rotuloLote = _rotuloLoteItem(item);
         final escala = orfao
             ? false
-            : EntregaVendaHelper.quantidadeRomaneioUsaEscalaFracionada(item);
+            : EntregaVendaHelper.quantidadeRomaneioUsaEscalaFracionada(
+                item,
+                obterProduto: obterProduto,
+                quantidadeArmazenada: q,
+              );
         final prev = acumulado[chave];
         if (prev == null) {
           acumulado[chave] = RomaneioCargaLinha(

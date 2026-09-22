@@ -1,5 +1,6 @@
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
+import '../model/produto.dart';
 import '../model/venda.dart';
 import 'produto_embalagem.dart';
 import 'quantidade_venda_util.dart';
@@ -314,13 +315,84 @@ class EntregaVendaHelper {
     if (vendaTemItensMigradosRetiradaParaCarreto(venda, itens: itens)) {
       return item.quantidadeParaExibicaoEntrega(true);
     }
-    if (vendaCarretoReservaNativaSemMigracao(venda, itens: itens)) {
-      return item.quantidadeParaExibicaoEntrega(
-        false,
-        carretoReservaNativoAntesSaida: true,
-      );
-    }
     return item.quantidadeParaExibicaoEntrega(false);
+  }
+
+  /// Produto da linha (ToOne ou [obterProduto] no terminal leve / motorista).
+  static Produto? produtoItemEntrega(
+    ItemVenda item, {
+    Produto? Function(int id)? obterProduto,
+  }) {
+    final vinculado = item.produtoOuNull;
+    if (vinculado != null) return vinculado;
+    if (obterProduto == null) return null;
+    try {
+      final id = item.produto.targetId;
+      if (id > 0) return obterProduto(id);
+    } catch (_) {}
+    return null;
+  }
+
+  /// Itens que o motorista deve carregar/entregar (carreto liquido > 0).
+  static List<ItemVenda> itensCargaMotorista(
+    Venda venda,
+    Iterable<ItemVenda> itens,
+  ) {
+    final lista = itens.toList();
+    return [
+      for (final item in lista)
+        if (itemEntraNaCargaEntrega(venda, item) &&
+            quantidadeRomaneioCarga(venda, item, itens: lista) > 0)
+          item,
+    ];
+  }
+
+  /// Quantidade romaneio com unidade de venda (regra unica Entregas + motorista).
+  ///
+  /// Ex.: `30 UN`, `18,9 M2`. Use [obterProduto] no terminal leve quando o ToOne
+  /// do item vier vazio.
+  static String textoQuantidadeRomaneioComUnidade(
+    Venda venda,
+    ItemVenda item, {
+    List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
+  }) {
+    final raw = quantidadeRomaneioCarga(venda, item, itens: itens);
+    if (raw <= 0) return '0';
+    return ProdutoEmbalagem.formatarQuantidadeItemImpressaoComUnidade(
+      produto: produtoItemEntrega(item, obterProduto: obterProduto),
+      quantidadeArmazenada: raw,
+    );
+  }
+
+  /// Alias historico (modo motorista).
+  static String textoQuantidadeCargaMotoristaComUnidade(
+    Venda venda,
+    ItemVenda item, {
+    List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
+  }) =>
+      textoQuantidadeRomaneioComUnidade(
+        venda,
+        item,
+        itens: itens,
+        obterProduto: obterProduto,
+      );
+
+  /// Linha padrao de item na carga: `30 UN — Trelica H8`.
+  static String textoLinhaItemRomaneioCarga(
+    Venda venda,
+    ItemVenda item, {
+    List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
+  }) {
+    final q = textoQuantidadeRomaneioComUnidade(
+      venda,
+      item,
+      itens: itens,
+      obterProduto: obterProduto,
+    );
+    return '$q — ${item.nomeProduto.trim()}';
   }
 
   /// Quantidade do romaneio na unidade de venda (2; 18,9; 0,5) — nao milésimos.
@@ -328,44 +400,55 @@ class EntregaVendaHelper {
     Venda venda,
     ItemVenda item, {
     List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
   }) {
     final raw = quantidadeRomaneioCarga(venda, item, itens: itens);
     if (raw <= 0) return 0;
     return ProdutoEmbalagem.quantidadeVendaEfetivaItem(
-      produto: item.produtoOuNull,
+      produto: produtoItemEntrega(item, obterProduto: obterProduto),
       quantidadeArmazenada: raw,
     );
   }
 
-  /// Texto da quantidade para Entregas / "Itens do pedido" (igual listagem).
+  /// Texto da quantidade para Entregas / romaneio (com unidade quando possivel).
   static String textoQuantidadeRomaneioCarga(
     Venda venda,
     ItemVenda item, {
     List<ItemVenda>? itens,
-  }) {
-    final raw = quantidadeRomaneioCarga(venda, item, itens: itens);
-    if (raw <= 0) return '0';
-    return ProdutoEmbalagem.textoQuantidadeArmazenada(
-      produto: item.produtoOuNull,
-      quantidadeArmazenada: raw,
-    );
-  }
+    Produto? Function(int id)? obterProduto,
+  }) =>
+      textoQuantidadeRomaneioComUnidade(
+        venda,
+        item,
+        itens: itens,
+        obterProduto: obterProduto,
+      );
 
   /// Subtotal da linha na carga (qtd de exibicao × preco unitario).
   static double subtotalRomaneioCarga(
     Venda venda,
     ItemVenda item, {
     List<ItemVenda>? itens,
+    Produto? Function(int id)? obterProduto,
   }) {
-    return quantidadeRomaneioCargaExibicao(venda, item, itens: itens) *
+    return quantidadeRomaneioCargaExibicao(
+          venda,
+          item,
+          itens: itens,
+          obterProduto: obterProduto,
+        ) *
         item.precoUnitario;
   }
 
   /// True se [quantidadeArmazenada] desta linha usa escala milésimos.
-  static bool quantidadeRomaneioUsaEscalaFracionada(ItemVenda item) {
-    final p = item.produtoOuNull;
+  static bool quantidadeRomaneioUsaEscalaFracionada(
+    ItemVenda item, {
+    Produto? Function(int id)? obterProduto,
+    int? quantidadeArmazenada,
+  }) {
+    final p = produtoItemEntrega(item, obterProduto: obterProduto);
     if (p == null) return false;
-    final raw = item.quantidade;
+    final raw = quantidadeArmazenada ?? item.quantidade;
     if (raw <= 0) return false;
     return ProdutoEmbalagem.leituraUsaEscalaFracionada(p, raw) ||
         ProdutoEmbalagem.estoqueUsaEscalaFracionada(p);
