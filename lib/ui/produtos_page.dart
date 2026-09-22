@@ -33,6 +33,7 @@ import '../data/sync/safe_sync_refresh_mixin.dart';
 import '../domain/fiscal/grupo_tributario_produto.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/fiscal/ncm_cest_sugestao.dart';
+import '../domain/fiscal/produto_ncm_consulta.dart';
 import '../domain/fiscal/produto_fiscal_catalog.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_nome_titulo_normalizer.dart';
@@ -231,12 +232,11 @@ class _ProdutosPageState extends State<ProdutosPage>
   final _produtoImagemBuscaService = ProdutoImagemBuscaService();
   bool _consultandoGtin = false;
   bool _buscandoFoto = false;
-  bool _consultandoNcm = false;
   bool _consultandoGemini = false;
+  final _ncmConsulta = ProdutoNcmConsultaState();
   List<ImagemProdutoEncontrada> _opcoesBuscaFoto = const [];
   String _termoUltimaBuscaFoto = '';
   int _indiceOpcaoBuscaFotoAtual = -1;
-  String _infoNcmBrasilApi = '';
   String _unidadeSelecionada = 'UN';
   String _grupoTributarioSelecionado = GrupoTributarioProduto.tributado.codigo;
   String _icmsOrigemSelecionado = kFiscalValorAutomatico;
@@ -376,6 +376,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     _subAbaCadastroController.addListener(_onSubAbaCadastroChanged);
     _nomeController.addListener(_sincronizarNomeImpressaoSeVinculado);
     _nomeImpressaoController.addListener(_atualizarVinculoNomeImpressao);
+    _ncmFocus.addListener(_onNcmFocusChanged);
     HardwareKeyboard.instance.addHandler(_handlerTeclasHardwareCadastroProduto);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -544,6 +545,11 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
     if (!mounted) return;
     _solicitarFocoCampo(_nomeFocus);
+  }
+
+  void _onNcmFocusChanged() {
+    if (_ncmFocus.hasFocus) return;
+    unawaited(_consultarNcmBrasilApi(aoPerderFoco: true));
   }
 
   void _onNomeSubmitted(String _) {
@@ -719,6 +725,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     _skuFocus.dispose();
     _marcaFocus.dispose();
     _localizacaoFocus.dispose();
+    _ncmFocus.removeListener(_onNcmFocusChanged);
     _ncmFocus.dispose();
     _cadastroKeyboardFocusNode.dispose();
     super.dispose();
@@ -1875,24 +1882,25 @@ class _ProdutosPageState extends State<ProdutosPage>
                   keyboardType: TextInputType.number,
                   inputFormatters: [_fmtNcm],
                   validator: _validarNcm,
-                  onChanged: (_) {
+                  onChanged: (valor) {
                     setState(() {
-                      if (_infoNcmBrasilApi.isNotEmpty) {
-                        _infoNcmBrasilApi = '';
-                      }
-                      _aplicarCestSugeridoDoNcmSeVazio(_ncmController.text);
+                      _ncmConsulta.aoEditarCampo(valor);
+                      _aplicarCestSugeridoDoNcmSeVazio(valor);
                     });
                     _formFiscalKey.currentState?.validate();
+                    if (_ncmConsulta.deveConsultarAutomaticamente(valor)) {
+                      unawaited(_consultarNcmBrasilApi(automatico: true));
+                    }
                   },
                   decoration: _erpInputDecoration(
                     context,
                     helper: 'Formato 9999.99.99 — obrigatorio p/ NFC-e',
                     suffixIcon: _suffixConsultaBrasilApi(
-                      carregando: _consultandoNcm,
+                      carregando: _ncmConsulta.consultando,
                       tooltip: 'Conferir descricao oficial do NCM',
-                      onPressed: _consultandoNcm
+                      onPressed: _ncmConsulta.consultando
                           ? null
-                          : _consultarNcmBrasilApi,
+                          : () => unawaited(_consultarNcmBrasilApi()),
                     ),
                   ),
                 ),
@@ -1919,11 +1927,11 @@ class _ProdutosPageState extends State<ProdutosPage>
                   : FontWeight.w400,
             ),
           ),
-          if (_infoNcmBrasilApi.isNotEmpty)
+          if (_ncmConsulta.infoExibicao.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                _infoNcmBrasilApi,
+                _ncmConsulta.infoExibicao,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.primary,
                   fontWeight: FontWeight.w500,
@@ -1950,7 +1958,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       case NcmSelecaoDaLista(:final item):
         setState(() {
           _ncmController.text = _formatarNcmExibicao(item.codigo);
-          _infoNcmBrasilApi = 'Tabela local: ${item.descricao}';
+          _ncmConsulta.aplicarTabelaLocal(item.codigo, item.descricao);
           _aplicarCestSugeridoDoNcmSeVazio(item.codigo);
         });
     }
@@ -2135,10 +2143,9 @@ class _ProdutosPageState extends State<ProdutosPage>
       _termoUltimaBuscaFoto = '';
       _indiceOpcaoBuscaFotoAtual = -1;
       _consultandoGtin = false;
-      _consultandoNcm = false;
       _consultandoGemini = false;
       _buscandoFoto = false;
-      _infoNcmBrasilApi = '';
+      _ncmConsulta.limpar();
       _subAbaCadastroController.index = 0;
       _baseCalculoPreco = _BaseCalculoPrecoProduto.custoDigitado;
       _embalagemMultiplica = true;
@@ -3958,24 +3965,12 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   Future<void> _enriquecerNcmAposGemini(String ncm8) async {
     if (ncm8.length != 8) return;
-    try {
-      final dados = await _brasilApiService.consultarNcm(ncm8);
-      if (!mounted || dados == null) return;
-      setState(() {
-        _ncmController.text = _formatarNcmExibicao(dados.codigoDigitos);
-        _infoNcmBrasilApi = dados.descricao.trim().isEmpty
-            ? 'NCM valido: ${_formatarNcmExibicao(ncm8)}'
-            : 'NCM valido: ${dados.descricao.trim()}';
-        if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
-          _cestController.text = _formatarCestExibicao(dados.cest);
-        }
-        _aplicarCestSugeridoDoNcmSeVazio(ncm8);
-      });
-    } catch (_) {
-      // Falha na Brasil API nao invalida sugestao da IA.
-      if (mounted) {
-        setState(() => _aplicarCestSugeridoDoNcmSeVazio(ncm8));
-      }
+    await _consultarNcmBrasilApi(
+      digitosFixos: ncm8,
+      silencioso: true,
+    );
+    if (mounted) {
+      setState(() => _aplicarCestSugeridoDoNcmSeVazio(ncm8));
     }
   }
 
@@ -4208,48 +4203,69 @@ class _ProdutosPageState extends State<ProdutosPage>
     }
   }
 
-  Future<void> _consultarNcmBrasilApi() async {
-    final digitos = _ncmController.text.replaceAll(RegExp(r'\D'), '');
+  Future<void> _consultarNcmBrasilApi({
+    bool aoPerderFoco = false,
+    bool automatico = false,
+    bool silencioso = false,
+    String? digitosFixos,
+  }) async {
+    final ncmCampo = _ncmController.text;
+    final digitos = digitosFixos ??
+        ProdutoNcmConsultaState.normalizarDigitos(ncmCampo);
     if (digitos.length != 8) {
-      _snackbarBrasilApi(
-        'Informe um NCM com 8 digitos antes de consultar.',
-        erro: true,
-      );
+      if (!aoPerderFoco && !automatico && !silencioso) {
+        _snackbarBrasilApi(
+          'Informe um NCM com 8 digitos antes de consultar.',
+          erro: true,
+        );
+      }
+      return;
+    }
+    if ((automatico || aoPerderFoco) &&
+        !_ncmConsulta.deveConsultarAutomaticamente(ncmCampo)) {
       return;
     }
 
-    setState(() {
-      _consultandoNcm = true;
-      _infoNcmBrasilApi = '';
-    });
+    final token = _ncmConsulta.iniciarConsulta();
+    if (mounted) setState(() {});
 
     try {
       final dados = await _brasilApiService.consultarNcm(digitos);
       if (!mounted) return;
 
+      final campoAtual = _ncmController.text;
       if (dados == null) {
-        setState(() => _infoNcmBrasilApi = '');
-        _snackbarBrasilApi('NCM nao encontrado na tabela oficial.', erro: true);
+        setState(() {
+          _ncmConsulta.aplicarNaoEncontrado(token, campoAtual, digitos);
+        });
+        if (!silencioso && !automatico && !aoPerderFoco) {
+          _snackbarBrasilApi('NCM nao encontrado na tabela oficial.', erro: true);
+        }
         return;
       }
 
       final descricaoOficial = dados.descricao.trim();
-      final codigoFmt = _formatarNcmExibicao(
-        dados.codigoDigitos.isNotEmpty ? dados.codigoDigitos : digitos,
-      );
+      final digitosOficiais = dados.codigoDigitos.isNotEmpty
+          ? dados.codigoDigitos
+          : digitos;
+      final codigoFmt = _formatarNcmExibicao(digitosOficiais);
 
       setState(() {
         _ncmController.text = codigoFmt;
-        _infoNcmBrasilApi = descricaoOficial.isEmpty
-            ? 'NCM valido: $codigoFmt'
-            : 'NCM valido: $descricaoOficial';
+        _ncmConsulta.aplicarResultadoOficial(
+          token,
+          _ncmController.text,
+          digitosConsultados: digitosOficiais,
+          descricaoOficial: descricaoOficial,
+          codigoFormatado: codigoFmt,
+        );
         if (dados.cest.length == 7 && _cestController.text.trim().isEmpty) {
           _cestController.text = _formatarCestExibicao(dados.cest);
         }
-        _aplicarCestSugeridoDoNcmSeVazio(
-          dados.codigoDigitos.isNotEmpty ? dados.codigoDigitos : digitos,
-        );
+        _aplicarCestSugeridoDoNcmSeVazio(digitosOficiais);
       });
+
+      if (silencioso || automatico || aoPerderFoco) return;
 
       final cestFmt = NcmCestSugestao.normalizarCest(_cestController.text);
       if (cestFmt.length == 7) {
@@ -4260,13 +4276,35 @@ class _ProdutosPageState extends State<ProdutosPage>
         );
       }
     } on BrasilApiException catch (e) {
-      if (mounted) setState(() => _infoNcmBrasilApi = '');
-      _snackbarBrasilApi(e.message, erro: true);
+      if (mounted) {
+        setState(() {
+          _ncmConsulta.aplicarNaoEncontrado(
+            token,
+            _ncmController.text,
+            digitos,
+          );
+        });
+      }
+      if (!silencioso && !automatico && !aoPerderFoco) {
+        _snackbarBrasilApi(e.message, erro: true);
+      }
     } catch (e) {
-      if (mounted) setState(() => _infoNcmBrasilApi = '');
-      _snackbarBrasilApi('Erro ao consultar NCM: $e', erro: true);
+      if (mounted) {
+        setState(() {
+          _ncmConsulta.aplicarNaoEncontrado(
+            token,
+            _ncmController.text,
+            digitos,
+          );
+        });
+      }
+      if (!silencioso && !automatico && !aoPerderFoco) {
+        _snackbarBrasilApi('Erro ao consultar NCM: $e', erro: true);
+      }
     } finally {
-      if (mounted) setState(() => _consultandoNcm = false);
+      if (mounted) {
+        setState(() => _ncmConsulta.finalizarConsulta(token));
+      }
     }
   }
 
@@ -5139,8 +5177,10 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   void _editarProdutoNoCabecalho(Produto produto) {
+    final produtoId = produto.id;
     setState(() {
       _historicoVersao++;
+      _ncmConsulta.limpar();
       _produtoEmEdicaoId = produto.id;
       _codigoInternoController.text = produto.codigoInterno;
       _nomeController.text = produto.nome;
@@ -5262,6 +5302,10 @@ class _ProdutosPageState extends State<ProdutosPage>
       _status = '';
       _statusEhErro = false;
       _gerarSkuAutomatico = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _produtoEmEdicaoId != produtoId) return;
+      unawaited(_consultarNcmBrasilApi(automatico: true));
     });
     if (_terminalLeveApi && produto.id > 0) {
       unawaited(_carregarApoioRemotoProduto(produto.id));
