@@ -32,6 +32,7 @@ import '../shell/main_menu_deps.dart';
 import '../shell/app_shell_aba_visibilidade.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/cliente_busca_util.dart';
+import '../../domain/caixa/caixa_divergencia_autorizacao.dart';
 import '../../domain/caixa_troco_dinheiro_helper.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
@@ -868,7 +869,8 @@ class _CaixaPageState extends State<CaixaPage>
     final config = await widget.configuracoesService.carregarEfetiva();
     if (!mounted) return;
     setState(() {
-      _limiteDivergenciaSemSupervisor = config.limiteDivergenciaCaixa;
+      _limiteDivergenciaSemSupervisor =
+          CaixaDivergenciaAutorizacao.limiteSemSupervisor(config);
       _exigirAutorizacaoSegundaViaCupom =
           config.exigirAutorizacaoSegundaViaCupom;
       _permitirVendaSemEstoque = config.permitirVendaSemEstoque;
@@ -2111,7 +2113,18 @@ class _CaixaPageState extends State<CaixaPage>
   }
 
   Future<bool> _autorizarSupervisorSeNecessario(double diferencaTotal) async {
-    if (diferencaTotal.abs() <= _limiteDivergenciaSemSupervisor) {
+    final config = await widget.configuracoesService.carregarEfetiva();
+    final limiteAtual =
+        CaixaDivergenciaAutorizacao.limiteSemSupervisor(config);
+    if (mounted) {
+      setState(() {
+        _limiteDivergenciaSemSupervisor = limiteAtual;
+      });
+    }
+    if (CaixaDivergenciaAutorizacao.liberadoSemSupervisor(
+      divergenciaTotal: diferencaTotal,
+      limiteSemSupervisor: limiteAtual,
+    )) {
       return true;
     }
     final loginController = TextEditingController();
@@ -2128,7 +2141,7 @@ class _CaixaPageState extends State<CaixaPage>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Divergencia acima de ${_formatarMoeda(_limiteDivergenciaSemSupervisor)}. '
+                    'Divergencia acima de ${_formatarMoeda(limiteAtual)}. '
                     'Informe credenciais de supervisor/administrador.',
                   ),
                   const SizedBox(height: 10),
@@ -3516,11 +3529,16 @@ class _CaixaPageState extends State<CaixaPage>
     creditoController.dispose();
     obsController.dispose();
     if (confirmar != true) return;
-    final difDinheiro = declaradoDinheiro - (esperados['dinheiro'] ?? 0);
-    final difPix = declaradoPix - (esperados['pix'] ?? 0);
-    final difDebito = declaradoDebito - (esperados['debito'] ?? 0);
-    final difCredito = declaradoCredito - (esperados['credito'] ?? 0);
-    final difTotal = difDinheiro + difPix + difDebito + difCredito;
+    final difTotal = CaixaDivergenciaAutorizacao.divergenciaTotalConferencia(
+      declaradoDinheiro: declaradoDinheiro,
+      esperadoDinheiro: esperados['dinheiro'] ?? 0,
+      declaradoPix: declaradoPix,
+      esperadoPix: esperados['pix'] ?? 0,
+      declaradoDebito: declaradoDebito,
+      esperadoDebito: esperados['debito'] ?? 0,
+      declaradoCredito: declaradoCredito,
+      esperadoCredito: esperados['credito'] ?? 0,
+    );
     final autorizado = await _autorizarSupervisorSeNecessario(difTotal);
     if (!autorizado) {
       await _registrarAuditoriaCaixa(
