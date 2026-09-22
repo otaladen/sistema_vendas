@@ -8,6 +8,7 @@ import '../../../data/sync/sync_entity_codec_extras.dart';
 import '../../../data/sync/sync_entity_codec_operacional.dart';
 import '../../../data/venda_repository.dart';
 import '../../../domain/financeiro_resumo.dart';
+import '../../../domain/main_menu_dashboard_vendas.dart';
 import '../../../domain/loja_ao_vivo_service.dart';
 import '../../../model/usuario_sistema.dart';
 import '../../../model/venda.dart';
@@ -83,6 +84,13 @@ void registerRelatoriosRoutes(Router router, LanApiDeps d) {
     for (final v in lista) {
       faturamento += v.total;
     }
+    final filtroMes = MainMenuDashboardVendasKpi.filtroVendasMesCorrente(
+      agora: ref,
+      vendedorId: vendedorId,
+    );
+    final resumoMes = MainMenuDashboardVendasKpi.resumoDe(
+      d.vendaRepository.listarListagemVendasCompleto(filtroMes),
+    );
     final contagem = d.vendaRepository.contarEntregasPainelResumo();
     var caixaAberto = false;
     var abertosCount = 0;
@@ -98,6 +106,8 @@ void registerRelatoriosRoutes(Router router, LanApiDeps d) {
     return lanApiJson({
       'vendasHoje': lista.length,
       'faturamentoHoje': faturamento,
+      'vendasMes': resumoMes.quantidade,
+      'faturamentoMes': resumoMes.faturamento,
       'caixaAberto': caixaAberto,
       'caixaAbertosCount': abertosCount,
       'entregasEmAberto': contagem.emAberto,

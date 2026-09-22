@@ -21,12 +21,14 @@ import '../../data/titulo_receber_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../domain/dashboard_alertas.dart';
+import '../../domain/main_menu_dashboard_vendas.dart';
 import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
 import '../../domain/main_menu_sub_destino.dart';
 import '../../domain/permissao_usuario.dart';
 import '../../domain/usuario_permissao_helper.dart';
 import '../../model/caixa_sessao.dart';
+import '../../model/usuario_sistema.dart';
 import '../../model/recado_loja.dart';
 import '../../model/venda.dart';
 import '../../services/lan_api_server.dart';
@@ -54,6 +56,8 @@ class _MainMenuResumo {
   const _MainMenuResumo({
     required this.vendasHoje,
     required this.faturamentoHoje,
+    this.vendasMes = 0,
+    this.faturamentoMes = 0,
     required this.caixaAberto,
     required this.entregasEmAberto,
     required this.entregasAtrasadas,
@@ -66,6 +70,8 @@ class _MainMenuResumo {
 
   final int vendasHoje;
   final double faturamentoHoje;
+  final int vendasMes;
+  final double faturamentoMes;
   final bool caixaAberto;
   final int entregasEmAberto;
   final int entregasAtrasadas;
@@ -74,6 +80,36 @@ class _MainMenuResumo {
   final double? totalFiadoVencido;
   final int fiscalPendencias;
   final bool backupAlerta;
+
+  _MainMenuResumo copyWith({
+    int? vendasHoje,
+    double? faturamentoHoje,
+    int? vendasMes,
+    double? faturamentoMes,
+    bool? caixaAberto,
+    int? entregasEmAberto,
+    int? entregasAtrasadas,
+    List<DashboardAlerta>? alertas,
+    double? totalAReceber,
+    double? totalFiadoVencido,
+    int? fiscalPendencias,
+    bool? backupAlerta,
+  }) {
+    return _MainMenuResumo(
+      vendasHoje: vendasHoje ?? this.vendasHoje,
+      faturamentoHoje: faturamentoHoje ?? this.faturamentoHoje,
+      vendasMes: vendasMes ?? this.vendasMes,
+      faturamentoMes: faturamentoMes ?? this.faturamentoMes,
+      caixaAberto: caixaAberto ?? this.caixaAberto,
+      entregasEmAberto: entregasEmAberto ?? this.entregasEmAberto,
+      entregasAtrasadas: entregasAtrasadas ?? this.entregasAtrasadas,
+      alertas: alertas ?? this.alertas,
+      totalAReceber: totalAReceber ?? this.totalAReceber,
+      totalFiadoVencido: totalFiadoVencido ?? this.totalFiadoVencido,
+      fiscalPendencias: fiscalPendencias ?? this.fiscalPendencias,
+      backupAlerta: backupAlerta ?? this.backupAlerta,
+    );
+  }
 }
 
 /// Painel inicial (KPIs + modulos). Usado no mobile e no shell desktop.
@@ -182,18 +218,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       if (atual == null) return;
       if (atual.caixaAberto == aberto) return;
       setState(() {
-        _resumo = _MainMenuResumo(
-          vendasHoje: atual.vendasHoje,
-          faturamentoHoje: atual.faturamentoHoje,
-          caixaAberto: aberto,
-          entregasEmAberto: atual.entregasEmAberto,
-          entregasAtrasadas: atual.entregasAtrasadas,
-          alertas: atual.alertas,
-          totalAReceber: atual.totalAReceber,
-          totalFiadoVencido: atual.totalFiadoVencido,
-          fiscalPendencias: atual.fiscalPendencias,
-          backupAlerta: atual.backupAlerta,
-        );
+        _resumo = atual.copyWith(caixaAberto: aberto);
       });
     };
     CaixaStatusHub.instance.addListener(_caixaStatusListener!);
@@ -375,18 +400,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     setState(() {
       final r = _resumo;
       if (r == null) return;
-      _resumo = _MainMenuResumo(
-        vendasHoje: r.vendasHoje,
-        faturamentoHoje: r.faturamentoHoje,
-        caixaAberto: r.caixaAberto,
-        entregasEmAberto: r.entregasEmAberto,
-        entregasAtrasadas: r.entregasAtrasadas,
-        alertas: r.alertas,
-        totalAReceber: r.totalAReceber,
-        totalFiadoVencido: r.totalFiadoVencido,
-        fiscalPendencias: total,
-        backupAlerta: r.backupAlerta,
-      );
+      _resumo = r.copyWith(fiscalPendencias: total);
     });
   }
 
@@ -450,6 +464,9 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
               vendasHoje: (m['vendasHoje'] as num?)?.toInt() ?? 0,
               faturamentoHoje:
                   (m['faturamentoHoje'] as num?)?.toDouble() ?? 0,
+              vendasMes: (m['vendasMes'] as num?)?.toInt() ?? 0,
+              faturamentoMes:
+                  (m['faturamentoMes'] as num?)?.toDouble() ?? 0,
               caixaAberto: CaixaSessao.boolFrom(m['caixaAberto']) ||
                   ((m['caixaAbertosCount'] as num?)?.toInt() ?? 0) > 0 ||
                   CaixaStatusHub.instance.lojaAberta,
@@ -484,18 +501,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                       terminalId: snap.aberta!.terminalId,
                     );
                   }
-                  resumo = _MainMenuResumo(
-                    vendasHoje: resumo.vendasHoje,
-                    faturamentoHoje: resumo.faturamentoHoje,
-                    caixaAberto: true,
-                    entregasEmAberto: resumo.entregasEmAberto,
-                    entregasAtrasadas: resumo.entregasAtrasadas,
-                    alertas: resumo.alertas,
-                    totalAReceber: resumo.totalAReceber,
-                    totalFiadoVencido: resumo.totalFiadoVencido,
-                    fiscalPendencias: resumo.fiscalPendencias,
-                    backupAlerta: resumo.backupAlerta,
-                  );
+                  resumo = resumo.copyWith(caixaAberto: true);
                 }
               } catch (e) {
                 debugPrint('MainMenuDashboard.sessaoAtivaCaixa: $e');
@@ -611,6 +617,11 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
       }
       final faturamento =
           listaVendas.fold<double>(0.0, (s, v) => s + v.total);
+      final resumoMes = MainMenuDashboardVendasKpi.calcularResumoMesNoRepositorio(
+        vendaRepository: deps.vendaRepository,
+        agora: agora,
+        usuario: u,
+      );
 
       // Celular: so KPI do dia + caixa. Nada de entregas/financeiro/alertas/fiscal.
       if (celular) {
@@ -631,6 +642,8 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
           _resumo = _MainMenuResumo(
             vendasHoje: listaVendas.length,
             faturamentoHoje: faturamento,
+            vendasMes: resumoMes.quantidade,
+            faturamentoMes: resumoMes.faturamento,
             caixaAberto: caixaAbertoLoja,
             entregasEmAberto: 0,
             entregasAtrasadas: 0,
@@ -652,6 +665,8 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
           _resumo = _MainMenuResumo(
             vendasHoje: listaVendas.length,
             faturamentoHoje: faturamento,
+            vendasMes: resumoMes.quantidade,
+            faturamentoMes: resumoMes.faturamento,
             caixaAberto: caixaAbertoLoja,
             entregasEmAberto: atual?.entregasEmAberto ?? 0,
             entregasAtrasadas: atual?.entregasAtrasadas ?? 0,
@@ -764,6 +779,8 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
         _resumo = _MainMenuResumo(
           vendasHoje: listaVendas.length,
           faturamentoHoje: faturamento,
+          vendasMes: resumoMes.quantidade,
+          faturamentoMes: resumoMes.faturamento,
           caixaAberto: caixaAbertoLoja,
           entregasEmAberto: emAberto,
           entregasAtrasadas: atrasadas,
@@ -1042,6 +1059,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
             ],
             _faixaKpis(
               resumo: resumo,
+              usuario: u,
               podeVendas: podeVerMinhasVendas,
               rotuloVendas: podeVerTotalLoja
                   ? 'Vendas hoje'
@@ -1199,6 +1217,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
 
   Widget _faixaKpis({
     required _MainMenuResumo? resumo,
+    required UsuarioSistema usuario,
     required bool podeVendas,
     required String rotuloVendas,
     required bool podeCaixa,
@@ -1206,11 +1225,19 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     required bool podeFinanceiro,
   }) {
     final fmt = _moeda.format(resumo?.faturamentoHoje ?? 0);
+    final fmtMes = _moeda.format(resumo?.faturamentoMes ?? 0);
+    final periodoMes =
+        MainMenuDashboardVendasKpi.rotuloPeriodoMesDiscreto(DateTime.now());
     final vendasDet = resumo == null
         ? null
         : (resumo.vendasHoje <= 0
             ? 'Nenhuma finalizada hoje — toque para ver'
             : '${resumo.vendasHoje} venda${resumo.vendasHoje == 1 ? '' : 's'} finalizada${resumo.vendasHoje == 1 ? '' : 's'}');
+    final vendasMesDet = resumo == null
+        ? null
+        : (resumo.vendasMes <= 0
+            ? 'Nenhuma venda no período — toque para ver'
+            : '${resumo.vendasMes} venda${resumo.vendasMes == 1 ? '' : 's'} realizada${resumo.vendasMes == 1 ? '' : 's'} no mês');
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1229,6 +1256,30 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
                 final u = MainMenuDeps.of(context).usuarioLogado;
                 if (MainMenuSubDestino.vendasListagem.podeAcessar(u)) {
                   ListagemVendasAbertura.agendarPeriodo('hoje');
+                  HubNavigation.abrirSub(
+                    context,
+                    MainMenuSubDestino.vendasListagem,
+                  );
+                  return;
+                }
+                _ir(MainMenuDestino.vendas);
+              },
+            ),
+          if (podeVendas &&
+              MainMenuDashboardVendasKpi.deveCarregarVendasMes(usuario))
+            MainMenuKpiCard(
+              icone: Icons.calendar_month_outlined,
+              rotulo: MainMenuDashboardVendasKpi.rotuloCardVendasMes(usuario),
+              valor: 'R\$ $fmtMes',
+              detalhe: vendasMesDet,
+              periodoHint: periodoMes,
+              destaque: true,
+              cor: HubNavColors.menuVendas(context),
+              carregando: _carregandoResumo,
+              onTap: () {
+                final u = MainMenuDeps.of(context).usuarioLogado;
+                if (MainMenuSubDestino.vendasListagem.podeAcessar(u)) {
+                  ListagemVendasAbertura.agendarPeriodo('mes_atual');
                   HubNavigation.abrirSub(
                     context,
                     MainMenuSubDestino.vendasListagem,

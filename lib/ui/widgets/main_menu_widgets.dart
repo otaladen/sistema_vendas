@@ -64,17 +64,21 @@ class MainMenuKpiCard extends StatelessWidget {
     required this.valor,
     required this.cor,
     this.detalhe,
+    this.periodoHint,
     this.onTap,
     this.carregando = false,
+    this.destaque = false,
   });
 
   final IconData icone;
   final String rotulo;
   final String valor;
   final String? detalhe;
+  final String? periodoHint;
   final Color cor;
   final VoidCallback? onTap;
   final bool carregando;
+  final bool destaque;
 
   @override
   Widget build(BuildContext context) {
@@ -112,7 +116,10 @@ class MainMenuKpiCard extends StatelessWidget {
                 else ...[
                   Text(
                     valor,
-                    style: tema.textTheme.titleSmall?.copyWith(
+                    style: (destaque
+                            ? tema.textTheme.titleMedium
+                            : tema.textTheme.titleSmall)
+                        ?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                     maxLines: 1,
@@ -127,6 +134,15 @@ class MainMenuKpiCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                  if (periodoHint != null && periodoHint!.trim().isNotEmpty)
+                    Text(
+                      periodoHint!,
+                      style: tema.textTheme.labelSmall?.copyWith(
+                        color: tema.colorScheme.onSurface.withValues(alpha: 0.45),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                 ],
               ],
             ),
@@ -136,8 +152,15 @@ class MainMenuKpiCard extends StatelessWidget {
     );
 
     return Material(
-      color: tema.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-      borderRadius: BorderRadius.circular(12),
+      color: destaque
+          ? cor.withValues(alpha: 0.08)
+          : tema.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: destaque
+            ? BorderSide(color: cor.withValues(alpha: 0.35))
+            : BorderSide.none,
+      ),
       clipBehavior: Clip.antiAlias,
       child: onTap == null
           ? filho
