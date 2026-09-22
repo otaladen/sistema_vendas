@@ -303,6 +303,31 @@ abstract final class VendaDocumentoRotuloHelper {
     return venda.id == numero;
   }
 
+  /// Igualdade ou prefixo numerico (ex.: `71` encontra controle `712`).
+  static bool vendaAtendeBuscaNumeroEntregaPrefixo(
+    Venda venda,
+    String digitos,
+  ) {
+    final d = digitos.trim();
+    if (d.isEmpty || !RegExp(r'^\d+$').hasMatch(d)) return false;
+    final n = int.tryParse(d);
+    if (n != null && n > 0 && vendaAtendeBuscaNumeroEntrega(venda, n)) {
+      return true;
+    }
+    for (final rotulo in _rotulosNumericosBuscaEntrega(venda)) {
+      if (rotulo.startsWith(d)) return true;
+    }
+    return false;
+  }
+
+  static Iterable<String> _rotulosNumericosBuscaEntrega(Venda venda) sync* {
+    if (venda.numeroControle > 0) yield '${venda.numeroControle}';
+    final interno = numeroControleInterno(venda);
+    if (interno > 0) yield '$interno';
+    if (venda.numeroOrcamento > 0) yield '${venda.numeroOrcamento}';
+    if (venda.id > 0) yield '${venda.id}';
+  }
+
   /// Subtitulo com nota fiscal quando existir (ultimas vendas do caixa).
   static String subtituloListaComDocumentos(Venda venda) {
     final partes = <String>[];

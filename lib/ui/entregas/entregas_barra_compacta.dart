@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import 'entregas_campo_busca_global.dart';
 import 'planejamento_entrega_dia.dart';
 
 /// Faixa compacta: resumo + planejamento + filtros + relatorios.
 class EntregasBarraCompacta extends StatelessWidget {
   const EntregasBarraCompacta({
     super.key,
+    required this.buscaController,
+    required this.onBuscaChanged,
     required this.atrasadas,
     required this.pendentesHoje,
     required this.filtroAtrasadasAtivo,
@@ -45,6 +48,8 @@ class EntregasBarraCompacta extends StatelessWidget {
     'entregue',
   ];
 
+  final TextEditingController buscaController;
+  final VoidCallback onBuscaChanged;
   final int atrasadas;
   final int pendentesHoje;
   final bool filtroAtrasadasAtivo;
@@ -93,6 +98,11 @@ class EntregasBarraCompacta extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            EntregasCampoBuscaGlobal(
+              controller: buscaController,
+              onChanged: onBuscaChanged,
+              compacto: compacto,
+            ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

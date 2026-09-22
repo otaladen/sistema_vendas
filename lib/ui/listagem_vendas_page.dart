@@ -55,6 +55,7 @@ import 'fiscal/emitir_nfce_venda_flow.dart';
 import 'fiscal/widgets/devolucao_fiscal_historico_panel.dart';
 import 'pdv_vendedor_bloqueio.dart';
 import 'registrar_devolucao_troca_page.dart';
+import 'widgets/quantidade_pdv_input_formatter.dart';
 
 /// Lista vendas já finalizadas no Caixa (`status == finalizada`), com filtros e busca.
 class ListagemVendasPage extends StatefulWidget {
@@ -2600,6 +2601,9 @@ class _LinhaRetiradaCliente {
   final int pendente;
   final String rotulo;
   final bool carretoNaLoja;
+
+  /// Chave unica quando o mesmo item tem retirada futura e carreto na loja.
+  String get chaveController => carretoNaLoja ? 'c${item.id}' : 'f${item.id}';
 }
 
 class _DialogRegistrarRetiradaCliente extends StatefulWidget {
@@ -2624,7 +2628,7 @@ class _DialogRegistrarRetiradaCliente extends StatefulWidget {
 
 class _DialogRegistrarRetiradaClienteState
     extends State<_DialogRegistrarRetiradaCliente> {
-  late final Map<int, TextEditingController> _controllers;
+  late final Map<String, TextEditingController> _controllers;
   late final TextEditingController _quemRetirouController;
 
   List<_LinhaRetiradaCliente> get _linhasPendentes {
@@ -2670,7 +2674,7 @@ class _DialogRegistrarRetiradaClienteState
     _quemRetirouController = TextEditingController();
     _controllers = {
       for (final linha in _linhasPendentes)
-        linha.item.id: TextEditingController(text: ''),
+        linha.chaveController: TextEditingController(text: ''),
     };
   }
 
@@ -2685,9 +2689,12 @@ class _DialogRegistrarRetiradaClienteState
 
   void _preencherTudo() {
     for (final linha in _linhasPendentes) {
-      final c = _controllers[linha.item.id];
+      final c = _controllers[linha.chaveController];
       if (c != null) {
-        c.text = '${linha.pendente}';
+        c.text = EntregaVendaHelper.textoEntradaQuantidadeRetirada(
+          linha.item,
+          quantidadeArmazenada: linha.pendente,
+        );
       }
     }
     setState(() {});
@@ -2696,16 +2703,36 @@ class _DialogRegistrarRetiradaClienteState
   Future<void> _confirmar() async {
     final mapFutura = <int, int>{};
     final mapCarretoLoja = <int, int>{};
+    var entradaInvalida = false;
     for (final linha in _linhasPendentes) {
-      final c = _controllers[linha.item.id];
+      final c = _controllers[linha.chaveController];
       if (c == null) continue;
-      final q = int.tryParse(c.text.trim()) ?? 0;
-      if (q <= 0) continue;
+      if (c.text.trim().isEmpty) continue;
+      final q = EntregaVendaHelper.parseQuantidadeRetiradaEntrada(
+        linha.item,
+        texto: c.text,
+        pendenteArmazenado: linha.pendente,
+      );
+      if (q == null) {
+        entradaInvalida = true;
+        continue;
+      }
       if (linha.carretoNaLoja) {
         mapCarretoLoja[linha.item.id] = q;
       } else {
         mapFutura[linha.item.id] = q;
       }
+    }
+    if (entradaInvalida) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Quantidade invalida ou acima do pendente '
+            '(use a unidade do produto, ex.: 10,72).',
+          ),
+        ),
+      );
+      return;
     }
     if (mapFutura.isEmpty && mapCarretoLoja.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2810,7 +2837,11 @@ class _DialogRegistrarRetiradaClienteState
                               ),
                             ),
                             Text(
-                              '${linha.rotulo} · pendente ${linha.pendente} un.',
+                              '${linha.rotulo} · pendente '
+                              '${EntregaVendaHelper.textoQuantidadeRetiradaComUnidade(
+                                linha.item,
+                                quantidadeArmazenada: linha.pendente,
+                              )}',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -2821,9 +2852,20 @@ class _DialogRegistrarRetiradaClienteState
                       SizedBox(
                         width: 88,
                         child: TextField(
-                          controller: _controllers[linha.item.id],
+                          controller: _controllers[linha.chaveController],
                           enabled: linha.pendente > 0,
-                          keyboardType: TextInputType.number,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            QuantidadePdvInputFormatter(
+                              fracionada: EntregaVendaHelper
+                                  .retiradaEntradaFracionada(
+                                linha.item,
+                                quantidadeArmazenadaReferencia: linha.pendente,
+                              ),
+                            ),
+                          ],
                           textAlign: TextAlign.right,
                           decoration: const InputDecoration(
                             labelText: 'Qtd',

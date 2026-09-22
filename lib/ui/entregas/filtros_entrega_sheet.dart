@@ -108,9 +108,6 @@ Future<void> showFiltrosEntregaSheet({
   required ValueChanged<String> onAgrupamento,
   required String filtroDataMarcada,
   required ValueChanged<String> onDataMarcada,
-  required TextEditingController numeroNotaController,
-  required TextEditingController bairroController,
-  required VoidCallback onAplicarTexto,
   required VoidCallback onLimparTudo,
   required VoidCallback onPeriodoHoje,
   required VoidCallback onPeriodoPersonalizado,
@@ -312,23 +309,6 @@ Future<void> showFiltrosEntregaSheet({
                       onChanged: onExibirEntregasConcluidas,
                     ),
                   ],
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: numeroNotaController,
-                    decoration: _dec('Controle / # pedido'),
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: bairroController,
-                    decoration: _dec('Cliente / bairro / endereco'),
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) {
-                      onAplicarTexto();
-                      Navigator.pop(ctx);
-                    },
-                  ),
                   const SizedBox(height: 12),
                   Text(
                     'Periodo da venda (repositorio)',
@@ -372,12 +352,9 @@ Future<void> showFiltrosEntregaSheet({
                       label: const Text('Limpar tudo'),
                     ),
                     const Spacer(),
-                    OutlinedButton(
-                      onPressed: () {
-                        onAplicarTexto();
-                        Navigator.pop(ctx);
-                      },
-                      child: const Text('Aplicar busca'),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Fechar'),
                     ),
                   ],
                 ),

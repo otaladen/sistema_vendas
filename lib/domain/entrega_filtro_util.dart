@@ -1,3 +1,4 @@
+import 'entrega_busca_texto.dart';
 import 'filtro_listagem_entregas.dart';
 import 'venda_documento_rotulo_helper.dart';
 import 'venda_relacao_safe.dart';
@@ -105,6 +106,13 @@ abstract final class EntregaFiltroUtil {
     }
   }
 
+  /// Busca por controle, pedido ou texto: ignora recorte de data marcada / periodo.
+  static bool buscaGlobalAtiva(FiltroListagemEntregas filtro) {
+    if (filtro.bairroTermo.trim().isNotEmpty) return true;
+    if (filtro.numeroNota.trim().isNotEmpty) return true;
+    return false;
+  }
+
   static List<Venda> filtrarPorNumeroNota(List<Venda> entregas, String numeroNotaRaw) {
     var raw = numeroNotaRaw.trim();
     if (raw.isEmpty) return entregas;
@@ -125,9 +133,11 @@ abstract final class EntregaFiltroUtil {
     dynamic vendedorRepository,
     dynamic clienteRepository,
   }) {
-    final termo = filtro.bairroTermo.trim().toLowerCase();
+    final termoBruto = filtro.bairroTermo.trim();
+    final termo = EntregaBuscaTexto.normalizar(termoBruto);
     final motorista = filtro.filtroMotorista.trim().toLowerCase();
     final vendedor = filtro.filtroVendedor.trim().toLowerCase();
+    final buscaGlobal = buscaGlobalAtiva(filtro);
 
     var out = candidatas.where((venda) {
       if (!atendeStatusFiltro(venda.statusEntrega, filtro.statusEntrega)) {
@@ -138,47 +148,52 @@ abstract final class EntregaFiltroUtil {
           ehConcluidaNaAgenda(venda.statusEntrega)) {
         return false;
       }
-      final iniMarcada = filtro.dataMarcadaInicio;
-      final fimMarcada = filtro.dataMarcadaFim;
-      if (iniMarcada != null || fimMarcada != null) {
-        final marcada = venda.dataEntregaMarcada?.toLocal();
-        if (marcada == null) return false;
-        final d = DateTime(marcada.year, marcada.month, marcada.day);
-        if (iniMarcada != null) {
-          final i = DateTime(
-            iniMarcada.year,
-            iniMarcada.month,
-            iniMarcada.day,
-          );
-          if (d.isBefore(i)) return false;
+      if (!buscaGlobal) {
+        final iniMarcada = filtro.dataMarcadaInicio;
+        final fimMarcada = filtro.dataMarcadaFim;
+        if (iniMarcada != null || fimMarcada != null) {
+          final marcada = venda.dataEntregaMarcada?.toLocal();
+          if (marcada == null) return false;
+          final d = DateTime(marcada.year, marcada.month, marcada.day);
+          if (iniMarcada != null) {
+            final i = DateTime(
+              iniMarcada.year,
+              iniMarcada.month,
+              iniMarcada.day,
+            );
+            if (d.isBefore(i)) return false;
+          }
+          if (fimMarcada != null) {
+            final f = DateTime(
+              fimMarcada.year,
+              fimMarcada.month,
+              fimMarcada.day,
+            );
+            if (d.isAfter(f)) return false;
+          }
+        } else if (!filtro.dataMarcadaFiltradaNoBanco &&
+            !atendeFiltroDataMarcada(venda, filtro.filtroDataMarcada)) {
+          return false;
         }
-        if (fimMarcada != null) {
-          final f = DateTime(
-            fimMarcada.year,
-            fimMarcada.month,
-            fimMarcada.day,
-          );
-          if (d.isAfter(f)) return false;
-        }
-      } else if (!filtro.dataMarcadaFiltradaNoBanco &&
-          !atendeFiltroDataMarcada(venda, filtro.filtroDataMarcada)) {
-        return false;
       }
       if (termo.isNotEmpty) {
         final enderecoOk =
-            venda.enderecoEntrega.toLowerCase().contains(termo);
-        final clienteOk = VendaRelacaoSafe.nomeCliente(
-          venda,
-          clienteRepository: clienteRepository,
-          fallback: '',
-        ).trim().toLowerCase().contains(termo);
-        var numeroOk = false;
-        final termoNumero = termo.startsWith('#') ? termo.substring(1) : termo;
-        final parsed = int.tryParse(termoNumero);
-        if (parsed != null) {
-          numeroOk = VendaDocumentoRotuloHelper.vendaAtendeBuscaNumeroEntrega(
+            EntregaBuscaTexto.contem(venda.enderecoEntrega, termo);
+        final clienteOk = EntregaBuscaTexto.contem(
+          VendaRelacaoSafe.nomeCliente(
             venda,
-            parsed,
+            clienteRepository: clienteRepository,
+            fallback: '',
+          ),
+          termo,
+        );
+        var numeroOk = false;
+        final digitos = EntregaBuscaTexto.digitosControleOuPedido(termoBruto);
+        if (digitos != null) {
+          numeroOk =
+              VendaDocumentoRotuloHelper.vendaAtendeBuscaNumeroEntregaPrefixo(
+            venda,
+            digitos,
           );
         }
         if (!enderecoOk && !clienteOk && !numeroOk) return false;
@@ -195,11 +210,13 @@ abstract final class EntregaFiltroUtil {
         ).trim().toLowerCase();
         if (nomeExib != vendedor) return false;
       }
-      if (filtro.apenasAtrasadas && !ehAtrasada(venda)) {
-        return false;
-      }
-      if (filtro.apenasPendentesHoje && !ehAgendaHoje(venda)) {
-        return false;
+      if (!buscaGlobal) {
+        if (filtro.apenasAtrasadas && !ehAtrasada(venda)) {
+          return false;
+        }
+        if (filtro.apenasPendentesHoje && !ehAgendaHoje(venda)) {
+          return false;
+        }
       }
       return true;
     }).toList();

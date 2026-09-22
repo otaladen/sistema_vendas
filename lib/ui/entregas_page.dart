@@ -33,6 +33,7 @@ import '../model/produto.dart';
 import '../model/venda.dart';
 import 'entregas/entrega_card_lista.dart';
 import 'entregas/entregas_barra_compacta.dart';
+import 'entregas/entregas_campo_busca_global.dart';
 import 'entregas/entregas_visao_simples.dart';
 import 'entregas/filtros_entrega_sheet.dart';
 import 'entregas/logistica_entregas.dart';
@@ -64,6 +65,7 @@ import 'pdv_vendedor_bloqueio.dart';
 import 'registrar_devolucao_troca_page.dart';
 import 'shell/main_menu_deps.dart';
 import 'widgets/lan_api_feedback.dart';
+import 'widgets/quantidade_pdv_input_formatter.dart';
 
 /// Filtro rapido pelos contadores de resumo (atrasadas / pendentes hoje).
 enum _FiltroResumoEntregas { nenhum, atrasadas, pendentesHoje, buscarNaLoja }
@@ -185,8 +187,8 @@ class _EntregasPageState extends State<EntregasPage>
   bool _visaoSimples = true;
 
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
-  final _bairroController = TextEditingController();
-  final _numeroNotaController = TextEditingController();
+  final _buscaEntregasController = TextEditingController();
+  Timer? _buscaEntregasDebounce;
   final _statuses = const [
     'todos',
     'pendente',
@@ -291,7 +293,20 @@ class _EntregasPageState extends State<EntregasPage>
     if (_statusSelecionado == 'entregue' || _statusSelecionado == 'cancelada') {
       return true;
     }
-    return _numeroNotaController.text.trim().isNotEmpty;
+    if (_buscaEntregasController.text.trim().isNotEmpty) return true;
+    return false;
+  }
+
+  void _onBuscaEntregasAlterada() {
+    final vazio = _buscaEntregasController.text.trim().isEmpty;
+    _buscaEntregasDebounce?.cancel();
+    if (vazio) {
+      _carregarEntregas();
+      return;
+    }
+    _buscaEntregasDebounce = Timer(const Duration(milliseconds: 320), () {
+      if (mounted) _carregarEntregas();
+    });
   }
 
   void _definirExibirEntregasConcluidas(bool ligar) {
@@ -306,8 +321,8 @@ class _EntregasPageState extends State<EntregasPage>
       vendedor: _filtroVendedor,
       agrupamento: _agrupamento,
       dataMarcada: _filtroDataMarcada,
-      bairro: _bairroController.text,
-      numeroNota: _numeroNotaController.text,
+      bairro: '',
+      numeroNota: '',
       inicio: _inicio,
       fim: _fim,
       exibirEntregasConcluidas: _exibirEntregasConcluidas,
@@ -343,8 +358,8 @@ class _EntregasPageState extends State<EntregasPage>
       nomeVendedorExibicao: _nomeVendedorFiltroExibicao(),
       agrupamento: _agrupamento,
       dataMarcada: _filtroDataMarcada,
-      bairro: _bairroController.text,
-      numeroNota: _numeroNotaController.text,
+      bairro: '',
+      numeroNota: '',
       rotuloPeriodo: _rotuloPeriodoSelecionado(),
       exibirEntregasConcluidas: _exibirEntregasConcluidas,
     );
@@ -384,9 +399,6 @@ class _EntregasPageState extends State<EntregasPage>
         });
         _carregarEntregas();
       },
-      numeroNotaController: _numeroNotaController,
-      bairroController: _bairroController,
-      onAplicarTexto: _carregarEntregas,
       onLimparTudo: _redefinirFiltrosPadrao,
       onPeriodoHoje: _aplicarPeriodoMarcadasParaHoje,
       onPeriodoPersonalizado: _selecionarPeriodoPersonalizado,
@@ -453,9 +465,7 @@ class _EntregasPageState extends State<EntregasPage>
     EntregasFocoHub.instance.consumir();
     if (!mounted) return;
     setState(() {
-      _numeroNotaController.text = '$n';
-      _filtroDataMarcada = 'todos';
-      _chaveDiaPlanejamentoSelecionado = null;
+      _buscaEntregasController.text = '$n';
       _statusSelecionado = 'todos';
       _filtroResumoLista = _FiltroResumoEntregas.nenhum;
       _filtroApenasSemMotorista = false;
@@ -751,8 +761,8 @@ class _EntregasPageState extends State<EntregasPage>
     EntregaLocalRefreshHub.instance.removeListener(_onEntregaLocalRefresh);
     EntregasFocoHub.instance.removeListener(_onEntregasFocoPedido);
     _kanbanHScrollController.dispose();
-    _bairroController.dispose();
-    _numeroNotaController.dispose();
+    _buscaEntregasDebounce?.cancel();
+    _buscaEntregasController.dispose();
     super.dispose();
   }
 
@@ -1114,11 +1124,16 @@ class _EntregasPageState extends State<EntregasPage>
     required bool usarPeriodoVendaNaLista,
     bool paraContagemResumo = false,
   }) {
-    final usarPeriodo = paraContagemResumo
-        ? false
-        : (_filtroResumoLista == _FiltroResumoEntregas.nenhum &&
-              usarPeriodoVendaNaLista);
-    final dataMarcada = paraContagemResumo
+    final termoBusca = _buscaEntregasController.text;
+    final buscaGlobal = EntregaFiltroUtil.buscaGlobalAtiva(
+      FiltroListagemEntregas(bairroTermo: termoBusca),
+    );
+    final usarPeriodo = !buscaGlobal &&
+        (paraContagemResumo
+            ? false
+            : (_filtroResumoLista == _FiltroResumoEntregas.nenhum &&
+                  usarPeriodoVendaNaLista));
+    final dataMarcada = buscaGlobal || paraContagemResumo
         ? (
             inicio: null,
             fim: null,
@@ -1128,7 +1143,7 @@ class _EntregasPageState extends State<EntregasPage>
         : _parametrosDataMarcadaFiltro();
     return FiltroListagemEntregas(
       statusEntrega: _statusSelecionado,
-      bairroTermo: _bairroController.text,
+      bairroTermo: termoBusca,
       inicio: usarPeriodo ? _inicio : null,
       fim: usarPeriodo ? _fim : null,
       filtroDataMarcada: dataMarcada.filtroMemoria,
@@ -1137,15 +1152,18 @@ class _EntregasPageState extends State<EntregasPage>
       dataMarcadaFiltradaNoBanco: dataMarcada.filtradoNoBanco,
       filtroMotorista: _filtroMotorista,
       filtroVendedor: _filtroVendedor,
-      numeroNota: _numeroNotaController.text,
-      apenasAtrasadas:
-          !paraContagemResumo &&
-          _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
-      apenasPendentesHoje:
-          !paraContagemResumo &&
-          _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
-      incluirEntregasConcluidas:
-          paraContagemResumo ? false : _incluirConcluidasNaConsulta,
+      numeroNota: '',
+      apenasAtrasadas: buscaGlobal
+          ? false
+          : !paraContagemResumo &&
+                _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
+      apenasPendentesHoje: buscaGlobal
+          ? false
+          : !paraContagemResumo &&
+                _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
+      incluirEntregasConcluidas: paraContagemResumo
+          ? false
+          : buscaGlobal || _incluirConcluidasNaConsulta,
     );
   }
 
@@ -2576,8 +2594,7 @@ class _EntregasPageState extends State<EntregasPage>
       _filtroDataMarcada = 'hoje';
       _filtroApenasSemMotorista = false;
       _exibirEntregasConcluidas = false;
-      _bairroController.clear();
-      _numeroNotaController.clear();
+      _buscaEntregasController.clear();
       _modoAgruparMesmoCarro = false;
       _idsEntregasSelecionadas.clear();
       _inicio = null;
@@ -5038,7 +5055,16 @@ class _EntregasPageState extends State<EntregasPage>
             10,
             MediaQuery.sizeOf(context).height < 800 ? 6 : 10,
           ),
-          child: EntregasVisaoSimples(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              EntregasCampoBuscaGlobal(
+                controller: _buscaEntregasController,
+                onChanged: () => setState(_onBuscaEntregasAlterada),
+                compacto: MediaQuery.sizeOf(context).height < 800,
+              ),
+              Expanded(
+                child: EntregasVisaoSimples(
             entregas: listaExibicao,
             nomesMotoristas: motoristas,
             atrasadas: atrasadas,
@@ -5058,6 +5084,9 @@ class _EntregasPageState extends State<EntregasPage>
             podeGerenciar: widget.podeGerenciarStatusEntrega,
             exibirEntregasConcluidas: _exibirEntregasConcluidas,
             onExibirEntregasConcluidas: _definirExibirEntregasConcluidas,
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -5097,6 +5126,8 @@ class _EntregasPageState extends State<EntregasPage>
             Builder(
               builder: (context) {
                 return EntregasBarraCompacta(
+                  buscaController: _buscaEntregasController,
+                  onBuscaChanged: () => setState(_onBuscaEntregasAlterada),
                   atrasadas: atrasadas,
                   pendentesHoje: pendentesHoje,
                   filtroAtrasadasAtivo:
@@ -5465,7 +5496,11 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
     for (final it in _itensCarretoPendentes) {
       final c = _controllers[it.id];
       if (c != null) {
-        c.text = '${it.quantidadeAindaNoCarretoAntesSaida}';
+        final pend = it.quantidadeAindaNoCarretoAntesSaida;
+        c.text = EntregaVendaHelper.textoEntradaQuantidadeRetirada(
+          it,
+          quantidadeArmazenada: pend,
+        );
       }
     }
     setState(() {});
@@ -5473,13 +5508,33 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
 
   Future<void> _confirmar() async {
     final map = <int, int>{};
+    var entradaInvalida = false;
     for (final it in _itensCarretoPendentes) {
       final c = _controllers[it.id];
       if (c == null) continue;
-      final q = int.tryParse(c.text.trim()) ?? 0;
-      if (q > 0) {
-        map[it.id] = q;
+      if (c.text.trim().isEmpty) continue;
+      final pend = it.quantidadeAindaNoCarretoAntesSaida;
+      final q = EntregaVendaHelper.parseQuantidadeRetiradaEntrada(
+        it,
+        texto: c.text,
+        pendenteArmazenado: pend,
+      );
+      if (q == null) {
+        entradaInvalida = true;
+        continue;
       }
+      map[it.id] = q;
+    }
+    if (entradaInvalida) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Quantidade invalida ou acima do pendente '
+            '(use a unidade do produto, ex.: 10,72).',
+          ),
+        ),
+      );
+      return;
     }
     if (map.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -5572,7 +5627,11 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
                             ),
                             Text(
                               'Ainda para o carro: '
-                              '${it.quantidadeAindaNoCarretoAntesSaida} un.',
+                              '${EntregaVendaHelper.textoQuantidadeRetiradaComUnidade(
+                                it,
+                                quantidadeArmazenada:
+                                    it.quantidadeAindaNoCarretoAntesSaida,
+                              )}',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -5585,7 +5644,19 @@ class _DialogRetiradaLojaCarretoAntesSaidaState
                         child: TextField(
                           controller: _controllers[it.id],
                           enabled: it.quantidadeAindaNoCarretoAntesSaida > 0,
-                          keyboardType: TextInputType.number,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            QuantidadePdvInputFormatter(
+                              fracionada: EntregaVendaHelper
+                                  .retiradaEntradaFracionada(
+                                it,
+                                quantidadeArmazenadaReferencia:
+                                    it.quantidadeAindaNoCarretoAntesSaida,
+                              ),
+                            ),
+                          ],
                           textAlign: TextAlign.right,
                           decoration: const InputDecoration(
                             labelText: 'Qtd',

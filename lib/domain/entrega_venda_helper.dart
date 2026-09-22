@@ -454,6 +454,81 @@ class EntregaVendaHelper {
         ProdutoEmbalagem.estoqueUsaEscalaFracionada(p);
   }
 
+  /// Saldo pendente / quantidade retirada com unidade (modal Registrar retirada).
+  static String textoQuantidadeRetiradaComUnidade(
+    ItemVenda item, {
+    required int quantidadeArmazenada,
+    Produto? Function(int id)? obterProduto,
+  }) {
+    return ProdutoEmbalagem.formatarQuantidadeItemImpressaoComUnidade(
+      produto: produtoItemEntrega(item, obterProduto: obterProduto),
+      quantidadeArmazenada: quantidadeArmazenada,
+    );
+  }
+
+  /// Valor sugerido no campo Qtd (unidade de venda, ex.: `10,72`).
+  static String textoEntradaQuantidadeRetirada(
+    ItemVenda item, {
+    required int quantidadeArmazenada,
+    Produto? Function(int id)? obterProduto,
+  }) {
+    return ProdutoEmbalagem.formatarQuantidadeItemImpressao(
+      produto: produtoItemEntrega(item, obterProduto: obterProduto),
+      quantidadeArmazenada: quantidadeArmazenada,
+    );
+  }
+
+  /// Campo Qtd aceita decimais quando o saldo usa milésimos (M², etc.).
+  static bool retiradaEntradaFracionada(
+    ItemVenda item, {
+    required int quantidadeArmazenadaReferencia,
+    Produto? Function(int id)? obterProduto,
+  }) {
+    final p = produtoItemEntrega(item, obterProduto: obterProduto);
+    if (p == null) return false;
+    if (ProdutoEmbalagem.leituraUsaEscalaFracionada(
+      p,
+      quantidadeArmazenadaReferencia,
+    )) {
+      return true;
+    }
+    return ProdutoEmbalagem.estoqueUsaEscalaFracionada(p);
+  }
+
+  /// Converte texto do campo Qtd para valor persistido ([ItemVenda.quantidade]).
+  /// Retorna `null` se vazio, invalido ou acima de [pendenteArmazenado].
+  static int? parseQuantidadeRetiradaEntrada(
+    ItemVenda item, {
+    required String texto,
+    required int pendenteArmazenado,
+    Produto? Function(int id)? obterProduto,
+  }) {
+    final t = texto.trim();
+    if (t.isEmpty) return null;
+    if (pendenteArmazenado <= 0) return null;
+
+    final p = produtoItemEntrega(item, obterProduto: obterProduto);
+    if (p == null) {
+      final q = int.tryParse(t);
+      if (q == null || q <= 0 || q > pendenteArmazenado) return null;
+      return q;
+    }
+
+    final fracionada = retiradaEntradaFracionada(
+      item,
+      quantidadeArmazenadaReferencia: pendenteArmazenado,
+      obterProduto: obterProduto,
+    );
+    final v = QuantidadeVendaUtil.parseEntradaPdv(t, fracionada: fracionada);
+    if (v == null || v <= 0) return null;
+
+    final armazenado = fracionada
+        ? QuantidadeVendaUtil.paraArmazenamento(v, fracionada: true)
+        : v.round();
+    if (armazenado <= 0 || armazenado > pendenteArmazenado) return null;
+    return armazenado;
+  }
+
   /// Formata soma persistida do romaneio consolidado para exibicao.
   static String formatarQuantidadeRomaneioConsolidada(
     int quantidadeArmazenadaTotal, {
