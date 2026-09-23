@@ -521,15 +521,18 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
   }
 
   Future<int?> _perguntarQtdBuscarNaLoja(Venda venda, ItemVenda item) async {
-    final total = BuscarNaLoja.qtdCarga(venda, item);
-    if (total <= 0) return null;
-    if (total == 1) return 1;
-    var escolhido = BuscarNaLoja.clampQuantidade(
+    final obterProduto = _obterProdutoEntrega;
+    final opcoes = BuscarNaLoja.opcoesQuantidadeModal(
       venda,
       item,
-      item.quantidadeBuscarNaLoja > 0
-          ? item.quantidadeBuscarNaLoja
-          : total,
+      obterProduto: obterProduto,
+    );
+    if (opcoes.isEmpty) return null;
+    if (opcoes.length == 1) return opcoes.first.armazenado;
+    var escolhido = BuscarNaLoja.armazenadoInicialModal(
+      venda,
+      item,
+      obterProduto: obterProduto,
     );
     return showDialog<int>(
       context: context,
@@ -543,20 +546,21 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'A outra loja não tem a quantidade toda. '
-                    'De $total, quantos buscar nesta loja?',
+                    BuscarNaLoja.textoIntroducaoModal(
+                      venda,
+                      item,
+                      obterProduto: obterProduto,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   DropdownButton<int>(
                     isExpanded: true,
                     value: escolhido,
                     items: [
-                      for (var n = 1; n <= total; n++)
+                      for (final o in opcoes)
                         DropdownMenuItem(
-                          value: n,
-                          child: Text(
-                            n >= total ? 'Todos ($total)' : '$n de $total',
-                          ),
+                          value: o.armazenado,
+                          child: Text(o.rotulo),
                         ),
                     ],
                     onChanged: (v) {
@@ -669,7 +673,12 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
       final total = BuscarNaLoja.qtdCarga(venda, item);
       final rotuloQtd = quantidade == null || quantidade >= total
           ? item.nomeProduto
-          : '$quantidade de $total ${item.nomeProduto}';
+          : '${BuscarNaLoja.rotuloQuantidade(
+              venda,
+              item,
+              quantidadeArmazenada: quantidade,
+              obterProduto: _obterProdutoEntrega,
+            )} ${item.nomeProduto}';
       final msg = acao == BuscarNaLoja.solicitar
           ? 'Pátio avisado: buscar $rotuloQtd nesta loja.'
           : eraSeparado
@@ -715,7 +724,7 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                     if (solicitado)
                       Text(
                         'Aguardando o pátio: buscar '
-                        '${BuscarNaLoja.rotuloQuantidade(venda, item)} nesta loja',
+                        '${BuscarNaLoja.rotuloQuantidade(venda, item, obterProduto: _obterProdutoEntrega)} nesta loja',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Colors.orange.shade800,
                               fontWeight: FontWeight.w700,
@@ -725,7 +734,7 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                       Text(
                         BuscarNaLoja.quantidadeEfetiva(venda, item) <
                                 BuscarNaLoja.qtdCarga(venda, item)
-                            ? 'Pátio separa ${BuscarNaLoja.rotuloQuantidade(venda, item)} nesta loja'
+                            ? 'Pátio separa ${BuscarNaLoja.rotuloQuantidade(venda, item, obterProduto: _obterProdutoEntrega)} nesta loja'
                             : 'Pátio vai separar / já separado nesta loja',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Colors.green.shade800,
