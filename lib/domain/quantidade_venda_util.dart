@@ -53,8 +53,12 @@ class QuantidadeVendaUtil {
   }) {
     if (armazenado <= 0) return false;
     if (armazenado >= escalaFracionada) {
-      if (armazenado % escalaFracionada != 0) return true;
-      return legadoCadastroFracionado;
+      // Multiplos exatos de 1000 podem ser inteiros comerciais em milésimos (ex.: 10 SC → 10000).
+      // Valores como 1400 UN literais ou 5750 (= 5,75) são decididos em [ProdutoEmbalagem.leituraUsaEscalaFracionada].
+      if (armazenado % escalaFracionada == 0) {
+        return legadoCadastroFracionado;
+      }
+      return false;
     }
     if (armazenado >= passoFracionadoArmazenado &&
         armazenado % passoFracionadoArmazenado == 0) {
@@ -116,6 +120,13 @@ class QuantidadeVendaUtil {
   static double? parseEntradaPdv(String texto, {required bool fracionada}) {
     return parseEntradaCarrinho(texto, aceitaDecimal: fracionada);
   }
+
+  /// Alias explícito: entrada manual do operador em unidades reais (antes da escala ObjectBox).
+  static double? parseQuantidadeEntradaPdv(
+    String texto, {
+    required bool aceitaDecimal,
+  }) =>
+      parseEntradaCarrinho(texto, aceitaDecimal: aceitaDecimal);
 
   static String formatarExibicao(
     double quantidade, {

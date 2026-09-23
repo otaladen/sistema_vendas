@@ -100,7 +100,19 @@ void main() {
       4500,
     );
     expect(
-      QuantidadeVendaUtil.armazenadoEmMilesimos(4500),
+      ProdutoEmbalagem.leituraUsaEscalaFracionada(
+        Produto(
+          id: 11,
+          codigoInterno: 'PISO',
+          nome: 'Piso',
+          unidade: 'M2',
+          quantidadeMinima: 0,
+          precoCusto: 0,
+          precoVenda: 0,
+          permiteQuantidadeFracionada: true,
+        ),
+        4500,
+      ),
       isTrue,
     );
     expect(

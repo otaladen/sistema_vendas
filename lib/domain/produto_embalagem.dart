@@ -304,6 +304,13 @@ class ProdutoEmbalagem {
     return u.isEmpty ? qTxt : '$qTxt $u';
   }
 
+  /// Produtos UN/SC etc.: [ItemVenda.quantidade] grande e persistido como inteiro literal.
+  static bool produtoLeQuantidadeArmazenadaComoInteiroLiteral(Produto produto) {
+    if (vendaPodeUsarUnidadeCompra(produto)) return false;
+    if (produto.permiteQuantidadeFracionada) return false;
+    return true;
+  }
+
   /// Mesma regra de escala usada ao gravar [ItemVenda.quantidade] no PDV.
   static bool leituraUsaEscalaFracionada(
     Produto produto,
@@ -317,6 +324,18 @@ class ProdutoEmbalagem {
       return true;
     }
     if (quantidadeArmazenada >= QuantidadeVendaUtil.escalaFracionada) {
+      if (quantidadeArmazenada %
+              QuantidadeVendaUtil.escalaFracionada !=
+          0) {
+        if (produtoLeQuantidadeArmazenadaComoInteiroLiteral(produto)) {
+          return false;
+        }
+        final emUnidadeVenda = QuantidadeVendaUtil.valorExibicao(
+          quantidadeArmazenada,
+          fracionada: true,
+        );
+        return exigeQuantidadeDecimalUnidadeVenda(produto, emUnidadeVenda);
+      }
       if (quantidadeArmazenada >=
               10 * QuantidadeVendaUtil.escalaFracionada &&
           quantidadeArmazenada % QuantidadeVendaUtil.escalaFracionada == 0) {
