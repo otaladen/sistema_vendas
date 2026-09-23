@@ -8,6 +8,7 @@ import '../data/vale_credito_service.dart';
 import '../data/venda_repository.dart';
 import '../domain/permissao_usuario.dart';
 import '../domain/produto_limite_desconto_pdv.dart';
+import '../domain/devolucao_troca_modo_fluxo.dart';
 import '../domain/troca_com_nota_pdv_intent.dart';
 import '../domain/troca_conferencia_valores.dart';
 import '../domain/troca_diferenca_caixa.dart';
@@ -135,6 +136,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   bool _gerarVale = false;
   bool _vinculandoCliente = false;
   double _maxDescontoPercentualPdv = 15;
+  DevolucaoTrocaModoFluxo _modoFluxo = DevolucaoTrocaModoFluxo.estoqueCaixa;
 
   @override
   void initState() {
@@ -458,6 +460,41 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   }
 
   static const double _epsValorTroca = 0.009;
+
+  Widget _buildSeletorModoFluxo(BuildContext context) {
+    final tema = Theme.of(context);
+    final fiscal = _modoFluxo == DevolucaoTrocaModoFluxo.nfDevolucaoSefaz;
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: tema.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SwitchListTile(
+              value: fiscal,
+              onChanged: (x) => setState(() {
+                _modoFluxo = x
+                    ? DevolucaoTrocaModoFluxo.nfDevolucaoSefaz
+                    : DevolucaoTrocaModoFluxo.estoqueCaixa;
+              }),
+              title: const Text('Emitir NF-e de Devolucao na SEFAZ (Fiscal)'),
+              subtitle: Text(
+                fiscal
+                    ? 'Valida cadastro do cliente (CEP/endereco) e emite NF-e '
+                        'de devolucao (finalidade 4) quando a venda tem nota.'
+                    : 'Apenas ajuste de Estoque/Caixa (Troca Rapida de Balcao). '
+                        'Entrada no estoque, saida na troca e caixa — sem SEFAZ.',
+                style: tema.textTheme.bodySmall?.copyWith(height: 1.35),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   /// Sem vale, o credito da devolucao so existe se o cliente comprar agora.
   Widget _buildOpcaoVale(BuildContext context) {
@@ -1208,6 +1245,25 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       return;
     }
 
+    final repositorioRemoto = widget.vendaRepository is VendaApiRepository;
+    if (DevolucaoTrocaModoPolitica.bloqueiaRegistroTerminalLevePorFiscal(
+      modo: _modoFluxo,
+      nfceAutorizadaAtiva: v.nfceAutorizadaAtiva,
+      nfe55Autorizada: v.nfe55Autorizada,
+      repositorioRemoto: repositorioRemoto,
+    )) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Emissao de NF-e de devolucao na SEFAZ exige o PC servidor. '
+            'Use "Apenas ajuste de Estoque/Caixa" neste terminal ou abra no servidor.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final VendaFiscalService? fiscalSvc;
     if (widget.vendaRepository is VendaRepository) {
       fiscalSvc = VendaFiscalService(
@@ -1216,24 +1272,16 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       );
     } else {
       fiscalSvc = null;
-      final exigeFiscal =
-          v.nfceAutorizadaAtiva || v.nfe55Autorizada;
-      if (exigeFiscal) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Devolucao com NFC-e/NF-e autorizada ainda exige o PC servidor '
-              '(SEFAZ). Vendas sem documento fiscal podem ser devolvidas neste terminal.',
-            ),
-          ),
-        );
-        return;
-      }
     }
 
     VendaFiscalOperacaoResultado? fiscalRes;
-    if (fiscalSvc != null && fiscalSvc.vendaExigeNfeDevolucao(v)) {
+    final emitirNfeDevolucao = fiscalSvc != null &&
+        DevolucaoTrocaModoPolitica.deveEmitirNfeDevolucaoSefaz(
+          modo: _modoFluxo,
+          nfceAutorizadaAtiva: v.nfceAutorizadaAtiva,
+          nfe55Autorizada: v.nfe55Autorizada,
+        );
+    if (emitirNfeDevolucao) {
       final confirmaFiscal = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -1536,7 +1584,14 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 12),
-          DevolucaoFiscalAvisoBanner(venda: v),
+          _buildSeletorModoFluxo(context),
+          const SizedBox(height: 12),
+          if (DevolucaoTrocaModoPolitica.exibirAvisoFiscalObrigatorio(
+            modo: _modoFluxo,
+            nfceAutorizadaAtiva: v.nfceAutorizadaAtiva,
+            nfe55Autorizada: v.nfe55Autorizada,
+          ))
+            DevolucaoFiscalAvisoBanner(venda: v),
           if (registros.isNotEmpty) ...[
             const SizedBox(height: 12),
             DevolucaoFiscalHistoricoPanel(
