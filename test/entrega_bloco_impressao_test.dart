@@ -49,9 +49,44 @@ void main() {
       cliente: cliente,
     );
     expect(linhas.any((l) => l.contains('Construtora ABC')), isTrue);
-    expect(linhas.any((l) => l.contains('999998888')), isTrue);
+    expect(linhas.any((l) => l.contains('(21) 99999-8888')), isTrue);
     expect(linhas.any((l) => l.contains('Av. Brasil')), isTrue);
     expect(linhas.any((l) => l.contains('Descarregar na obra')), isTrue);
+  });
+
+  test('bloco de entrega destaca bairro e obs/referencia', () {
+    final venda = Venda(
+      tipoEntrega: 'entrega_loja',
+      enderecoEntrega: 'Av. Brasil, 500 | Meier | Rio - RJ',
+      observacaoEntrega: 'Portao azul',
+    );
+    final linhas = EntregaVendaHelper.linhasBlocoEntregaImpressaoDetalhadas(
+      venda: venda,
+    );
+    final destaques =
+        linhas.where((l) => l.destaque).map((l) => l.texto).toList();
+    expect(destaques, contains('BAIRRO: MEIER'));
+    expect(destaques, contains('OBS/REFERENCIA: Portao azul'));
+    expect(
+      linhas.map((l) => l.texto),
+      containsAll(['Endereco: Av. Brasil, 500', 'Cidade: Rio - RJ']),
+    );
+  });
+
+  test('formatarTelefoneImpressao aplica mascara', () {
+    expect(
+      EntregaVendaHelper.formatarTelefoneImpressao('71982250887'),
+      '(71) 98225-0887',
+    );
+    expect(
+      EntregaVendaHelper.formatarTelefoneImpressao('+55 71 98225-0887'),
+      '(71) 98225-0887',
+    );
+    expect(
+      EntregaVendaHelper.formatarTelefoneImpressao('7132221234'),
+      '(71) 3222-1234',
+    );
+    expect(EntregaVendaHelper.formatarTelefoneImpressao('ramal 12'), 'ramal 12');
   });
 
   test('linhasBlocoEntregaImpressao detecta carreto por item misto', () {

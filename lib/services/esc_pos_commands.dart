@@ -152,6 +152,8 @@ abstract final class EscPosCommands {
     0x00DA: 0xE9, // Ú
     0x00DB: 0xEA, // Û
     0x00D9: 0xEB, // Ù
+    0x00B3: 0xFC, // ³
+    0x00B2: 0xFD, // ²
   };
 
   static List<int> _encodeCp850(String s) {

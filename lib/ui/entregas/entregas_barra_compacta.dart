@@ -41,6 +41,10 @@ class EntregasBarraCompacta extends StatelessWidget {
     this.compacto = false,
   });
 
+  static const chaveChipAtrasadas = ValueKey('entregas_chip_atrasadas');
+  static const chaveChipPendentesHoje = ValueKey('entregas_chip_pendentes_hoje');
+  static const chaveChipConcluidas = ValueKey('entregas_chip_concluidas');
+
   static const statusRapidos = [
     'todos',
     'pendente',
@@ -113,41 +117,78 @@ class EntregasBarraCompacta extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       FilterChip(
+                        key: chaveChipAtrasadas,
                         visualDensity: VisualDensity.compact,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        showCheckmark: false,
+                        tooltip: filtroAtrasadasAtivo
+                            ? 'Mostrando so atrasadas. Toque para voltar ao calendario.'
+                            : 'Mostrar so entregas atrasadas',
+                        selectedColor: Colors.red.shade100,
+                        side: BorderSide(
+                          color: filtroAtrasadasAtivo
+                              ? Colors.red.shade700
+                              : theme.colorScheme.outlineVariant,
+                          width: filtroAtrasadasAtivo ? 1.5 : 1,
+                        ),
                         avatar: Icon(
-                          Icons.warning_amber_outlined,
+                          filtroAtrasadasAtivo
+                              ? Icons.warning_amber_rounded
+                              : Icons.warning_amber_outlined,
                           size: 16,
-                          color: atrasadas > 0
+                          color: atrasadas > 0 || filtroAtrasadasAtivo
                               ? Colors.red.shade700
                               : Colors.grey,
                         ),
                         label: Text(
                           estreita ? '$atrasadas' : 'Atr. $atrasadas',
-                          style: const TextStyle(fontSize: 12),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: filtroAtrasadasAtivo
+                                ? FontWeight.w700
+                                : null,
+                            color: filtroAtrasadasAtivo
+                                ? Colors.red.shade900
+                                : null,
+                          ),
                         ),
                         selected: filtroAtrasadasAtivo,
                         onSelected: onFiltroAtrasadas,
                       ),
                       FilterChip(
+                        key: chaveChipPendentesHoje,
                         visualDensity: VisualDensity.compact,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        showCheckmark: false,
+                        selectedColor: theme.colorScheme.primaryContainer,
+                        side: BorderSide(
+                          color: filtroPendentesHojeAtivo
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.outlineVariant,
+                          width: filtroPendentesHojeAtivo ? 1.5 : 1,
+                        ),
                         avatar: Icon(
                           Icons.today_outlined,
                           size: 16,
-                          color: pendentesHoje > 0
+                          color: pendentesHoje > 0 || filtroPendentesHojeAtivo
                               ? theme.colorScheme.primary
                               : Colors.grey,
                         ),
                         label: Text(
                           estreita ? 'Hj $pendentesHoje' : 'Pend. hoje $pendentesHoje',
-                          style: const TextStyle(fontSize: 12),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: filtroPendentesHojeAtivo
+                                ? FontWeight.w700
+                                : null,
+                          ),
                         ),
                         selected: filtroPendentesHojeAtivo,
                         onSelected: onFiltroPendentesHoje,
                       ),
                       if (onExibirEntregasConcluidas != null)
                         FilterChip(
+                          key: chaveChipConcluidas,
                           visualDensity: VisualDensity.compact,
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,

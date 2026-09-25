@@ -106,6 +106,23 @@ class ProdutoEmbalagem {
         uInt == 'LT';
   }
 
+  /// Unidades de medida em que a venda decimal e o caso normal (4,2 M2; 1,5 M3).
+  static bool unidadeVendaTipicamenteFracionada(String? unidade) {
+    const fracionadas = {
+      'M',
+      'MT',
+      'ML',
+      'M2',
+      'M3',
+      'KG',
+      'G',
+      'TON',
+      'LT',
+      'L',
+    };
+    return fracionadas.contains(normalizarUnidade(unidade));
+  }
+
   /// Quantidade da nota convertida para valor armazenado em [Produto.estoqueReal].
   static int quantidadeNotaParaEstoque({
     required double quantidadeComercial,
@@ -276,10 +293,12 @@ class ProdutoEmbalagem {
   static String formatarQuantidadeItemImpressao({
     required Produto? produto,
     required int quantidadeArmazenada,
+    bool? emMilesimos,
   }) {
     final qtdEfetiva = quantidadeVendaEfetivaItem(
       produto: produto,
       quantidadeArmazenada: quantidadeArmazenada,
+      emMilesimos: emMilesimos,
     );
     if (produto != null) {
       return formatarQuantidadeUnidadeVenda(produto, qtdEfetiva);
@@ -294,10 +313,12 @@ class ProdutoEmbalagem {
   static String formatarQuantidadeItemImpressaoComUnidade({
     required Produto? produto,
     required int quantidadeArmazenada,
+    bool? emMilesimos,
   }) {
     final qTxt = formatarQuantidadeItemImpressao(
       produto: produto,
       quantidadeArmazenada: quantidadeArmazenada,
+      emMilesimos: emMilesimos,
     );
     if (produto == null) return qTxt;
     final u = normalizarUnidade(produto.unidade);
@@ -308,7 +329,26 @@ class ProdutoEmbalagem {
   static bool produtoLeQuantidadeArmazenadaComoInteiroLiteral(Produto produto) {
     if (vendaPodeUsarUnidadeCompra(produto)) return false;
     if (produto.permiteQuantidadeFracionada) return false;
+    if (unidadeVendaTipicamenteFracionada(produto.unidade)) return false;
     return true;
+  }
+
+  /// Escala de [ItemVenda.quantidade]: usa a gravada ([emMilesimos]) e so
+  /// recorre a heuristica em itens legados.
+  static bool leituraArmazenadaEmMilesimos({
+    required Produto? produto,
+    required int quantidadeArmazenada,
+    bool? emMilesimos,
+  }) {
+    if (emMilesimos != null) return emMilesimos;
+    if (produto != null) {
+      return leituraUsaEscalaFracionada(produto, quantidadeArmazenada);
+    }
+    if (QuantidadeVendaUtil.armazenadoEmMilesimos(quantidadeArmazenada)) {
+      return true;
+    }
+    return quantidadeArmazenada >= 10 * QuantidadeVendaUtil.escalaFracionada &&
+        quantidadeArmazenada % QuantidadeVendaUtil.escalaFracionada == 0;
   }
 
   /// Mesma regra de escala usada ao gravar [ItemVenda.quantidade] no PDV.
@@ -352,6 +392,10 @@ class ProdutoEmbalagem {
   }
 
   /// Converte [ItemVenda.quantidade] persistido para quantidade do carrinho PDV.
+  ///
+  /// O valor persistido ja esta na unidade de venda ([quantidadeArmazenadaItemVenda]
+  /// converte CX → UN/M2 ao gravar); a embalagem de compra e exclusiva de
+  /// estoque/compras e nunca volta para o carrinho.
   static ({int quantidadeDigitada, bool emUnidadeCompra})
       quantidadeCarrinhoDeItemPersistido({
     required Produto produto,
@@ -359,33 +403,6 @@ class ProdutoEmbalagem {
   }) {
     if (quantidadeArmazenada <= 0) {
       return (quantidadeDigitada: 0, emUnidadeCompra: false);
-    }
-    if (vendaPodeUsarUnidadeCompra(produto)) {
-      if (quantidadeArmazenada < QuantidadeVendaUtil.escalaFracionada &&
-          !produto.permiteQuantidadeFracionada) {
-        return (
-          quantidadeDigitada: quantidadeArmazenada,
-          emUnidadeCompra: true,
-        );
-      }
-      final m2 = quantidadeVendaEfetivaItem(
-        produto: produto,
-        quantidadeArmazenada: quantidadeArmazenada,
-      );
-      var comercial = produto.embalagemMultiplica
-          ? m2 / produto.quantidadePorEmbalagem
-          : m2 * produto.quantidadePorEmbalagem;
-      if (!comercial.isFinite || comercial <= 0) {
-        comercial = quantidadeArmazenada.toDouble();
-      }
-      final digitada = comercial.round().clamp(1, 1 << 30);
-      return (quantidadeDigitada: digitada, emUnidadeCompra: true);
-    }
-    if (leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
-      return (
-        quantidadeDigitada: quantidadeArmazenada,
-        emUnidadeCompra: false,
-      );
     }
     return (
       quantidadeDigitada: quantidadeArmazenada,
@@ -397,16 +414,15 @@ class ProdutoEmbalagem {
   static double quantidadeVendaEfetivaItem({
     required Produto? produto,
     required int quantidadeArmazenada,
+    bool? emMilesimos,
   }) {
-    if (produto == null) {
-      return QuantidadeVendaUtil.valorExibicao(
-        quantidadeArmazenada,
-        fracionada: false,
-      );
-    }
     return QuantidadeVendaUtil.valorExibicao(
       quantidadeArmazenada,
-      fracionada: leituraUsaEscalaFracionada(produto, quantidadeArmazenada),
+      fracionada: leituraArmazenadaEmMilesimos(
+        produto: produto,
+        quantidadeArmazenada: quantidadeArmazenada,
+        emMilesimos: emMilesimos,
+      ),
     );
   }
 
@@ -548,46 +564,27 @@ class ProdutoEmbalagem {
   static String textoQuantidadeArmazenada({
     required Produto? produto,
     required int quantidadeArmazenada,
+    bool? emMilesimos,
   }) {
-    if (produto == null) {
-      return quantidadeArmazenada.toString();
-    }
-    final carrinho = quantidadeCarrinhoDeItemPersistido(
+    return formatarQuantidadeItemImpressao(
       produto: produto,
       quantidadeArmazenada: quantidadeArmazenada,
+      emMilesimos: emMilesimos,
     );
-    if (carrinho.emUnidadeCompra) {
-      return rotuloQuantidadeCarrinho(
-        produto: produto,
-        quantidadeDigitada: carrinho.quantidadeDigitada,
-        emUnidadeCompra: true,
-      );
-    }
-    final qtd = quantidadeVendaEfetivaItem(
-      produto: produto,
-      quantidadeArmazenada: quantidadeArmazenada,
-    );
-    return formatarQuantidadeUnidadeVenda(produto, qtd);
   }
 
   /// Incremento/decremento em [ItemVenda.quantidade] (caixa +/-).
   static int passoQuantidadeArmazenada({
     required Produto? produto,
     required int quantidadeArmazenada,
+    bool? emMilesimos,
   }) {
-    if (produto == null) return 1;
-    final carrinho = quantidadeCarrinhoDeItemPersistido(
+    if (produto == null && emMilesimos == null) return 1;
+    if (leituraArmazenadaEmMilesimos(
       produto: produto,
       quantidadeArmazenada: quantidadeArmazenada,
-    );
-    if (carrinho.emUnidadeCompra && vendaPodeUsarUnidadeCompra(produto)) {
-      return quantidadeArmazenadaItemVenda(
-        produto: produto,
-        quantidadeDigitada: 1,
-        emUnidadeCompra: true,
-      );
-    }
-    if (leituraUsaEscalaFracionada(produto, quantidadeArmazenada)) {
+      emMilesimos: emMilesimos,
+    )) {
       return QuantidadeVendaUtil.passoFracionadoArmazenado;
     }
     return 1;
@@ -636,10 +633,15 @@ class ProdutoEmbalagem {
     required Produto produto,
     required int quantidadeDigitada,
     required bool emUnidadeCompra,
+    bool? emMilesimos,
   }) {
     final uVenda = normalizarUnidade(produto.unidade);
     if (!emUnidadeCompra || !vendaPodeUsarUnidadeCompra(produto)) {
-      final fracionada = leituraUsaEscalaFracionada(produto, quantidadeDigitada);
+      final fracionada = leituraArmazenadaEmMilesimos(
+        produto: produto,
+        quantidadeArmazenada: quantidadeDigitada,
+        emMilesimos: emMilesimos,
+      );
       if (fracionada) {
         final qTxt = QuantidadeVendaUtil.formatarExibicao(
           QuantidadeVendaUtil.valorExibicao(

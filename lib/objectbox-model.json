@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:805574422642691043",
-      "lastPropertyId": "21:4765084299784932302",
+      "lastPropertyId": "22:47480856491977679",
       "name": "ItemVenda",
       "properties": [
         {
@@ -119,6 +119,11 @@
           "id": "21:4765084299784932302",
           "name": "precoUnitarioManual",
           "type": 1
+        },
+        {
+          "id": "22:47480856491977679",
+          "name": "escalaQuantidade",
+          "type": 6
         }
       ],
       "relations": []

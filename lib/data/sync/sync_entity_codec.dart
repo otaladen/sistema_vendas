@@ -291,6 +291,7 @@ class SyncEntityCodec {
         'lojaOrigemMercadoria': i.lojaOrigemMercadoria,
         'buscarNaLojaStatus': i.buscarNaLojaStatus,
         'quantidadeBuscarNaLoja': i.quantidadeBuscarNaLoja,
+        'quantidadeEmMilesimos': i.quantidadeEmMilesimosResolvida,
         'produtoId': i.produto.targetId,
       });
     }
@@ -495,6 +496,9 @@ class SyncEntityCodec {
       buscarNaLojaStatus: (m['buscarNaLojaStatus'] ?? '').toString(),
       quantidadeBuscarNaLoja:
           (m['quantidadeBuscarNaLoja'] as num?)?.toInt() ?? 0,
+      escalaQuantidade: ItemVenda.escalaDeFlag(
+        m['quantidadeEmMilesimos'] as bool?,
+      ),
     );
     final pid = (m['produtoId'] as num?)?.toInt() ?? 0;
     if (pid > 0) item.produto.targetId = pid;

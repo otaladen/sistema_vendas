@@ -795,6 +795,9 @@ class LanApiClient {
         buscarNaLojaStatus: (e['buscarNaLojaStatus'] ?? '').toString(),
         quantidadeBuscarNaLoja:
             (e['quantidadeBuscarNaLoja'] as num?)?.toInt() ?? 0,
+        escalaQuantidade: ItemVenda.escalaDeFlag(
+          e['quantidadeEmMilesimos'] as bool?,
+        ),
       );
       item.venda.target = venda;
       if (produtoId > 0) {

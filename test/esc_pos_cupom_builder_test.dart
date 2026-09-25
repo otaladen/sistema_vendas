@@ -78,9 +78,40 @@ void main() {
         abrirGaveta: false,
       ),
     );
-    expect(ascii, contains('QTD: 8,04 M2'));
+    expect(ascii, contains('8,04 M2 x R\$ 45,00'));
     expect(ascii, contains('PISO -'));
-    expect(ascii, isNot(contains('8 M2 x')));
+    expect(ascii, isNot(contains('8,040')));
+  });
+
+  test('cupom ESC/POS: quantidade inteira sem zeros e faixa de controle', () {
+    final venda = Venda(
+      id: 7,
+      numeroControle: 1234,
+      status: 'finalizada',
+      total: 50,
+      formaPagamento: 'dinheiro',
+    );
+    final ascii = _ascii(
+      EscPosCupomBuilder.montar(
+        _dados(venda),
+        largura: EscPosLarguraBobina.mm80,
+        abrirGaveta: false,
+      ),
+    );
+    expect(ascii, contains('CONTROLE: #1234 | VIA CONSUMIDOR'));
+    expect(ascii, contains('1 SC x R\$ 50,00'));
+    expect(ascii, contains('R\$ 50,00'));
+    expect(ascii, isNot(contains('1,000')));
+    expect(ascii, contains('VALOR TOTAL R\$'));
+    expect(ascii, contains('FORMA DE PAGAMENTO'));
+    expect(
+      ascii.indexOf('CONTROLE:'),
+      lessThan(ascii.indexOf('DANFE NFC-e')),
+    );
+    expect(
+      ascii.indexOf('VALOR TOTAL'),
+      lessThan(ascii.indexOf('CHAVE DE ACESSO')),
+    );
   });
 
   test('cupom dinheiro ESC/POS usa layout DANFE com chave e QR', () {
@@ -101,7 +132,7 @@ void main() {
 
     expect(ascii, contains('DANFE NFC-e'));
     expect(ascii, contains('939 - Cimento'));
-    expect(ascii, contains('QTD:'));
+    expect(ascii, contains('1 SC x R\$ 50,00'));
     expect(ascii, contains('VIA CONSUMIDOR'));
     expect(ascii, contains('CONTIGENCIA'));
     expect(ascii, contains('CHAVE DE ACESSO'));

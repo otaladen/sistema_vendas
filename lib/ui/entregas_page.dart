@@ -232,8 +232,29 @@ class _EntregasPageState extends State<EntregasPage>
   Timer? _refreshEntregaDebounce;
   bool _refreshEntregaViaApi = false;
 
+  bool get _filtroResumoPorDataAtivo =>
+      _filtroResumoLista == _FiltroResumoEntregas.atrasadas ||
+      _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje;
+
+  /// Chips de topo (Atrasadas / Pendentes hoje) sao exclusivos entre si e com
+  /// "Concluidas"; desligar volta para o dia selecionado no calendario.
+  void _alternarFiltroResumo(_FiltroResumoEntregas alvo, bool ligar) {
+    setState(() {
+      if (ligar) {
+        _filtroResumoLista = alvo;
+        _exibirEntregasConcluidas = false;
+      } else if (_filtroResumoLista == alvo) {
+        _filtroResumoLista = _FiltroResumoEntregas.nenhum;
+      }
+    });
+    _carregarEntregas();
+  }
+
   void _selecionarDiaPlanejamento(String? chave) {
     setState(() {
+      if (_filtroResumoPorDataAtivo) {
+        _filtroResumoLista = _FiltroResumoEntregas.nenhum;
+      }
       _chaveDiaPlanejamentoSelecionado = chave;
       _filtroDataMarcada = _filtroDataMarcadaDeChaveDia(chave);
       _filtroApenasSemMotorista = false;
@@ -310,7 +331,12 @@ class _EntregasPageState extends State<EntregasPage>
   }
 
   void _definirExibirEntregasConcluidas(bool ligar) {
-    setState(() => _exibirEntregasConcluidas = ligar);
+    setState(() {
+      _exibirEntregasConcluidas = ligar;
+      if (ligar && _filtroResumoPorDataAtivo) {
+        _filtroResumoLista = _FiltroResumoEntregas.nenhum;
+      }
+    });
     _carregarEntregas();
   }
 
@@ -1133,6 +1159,13 @@ class _EntregasPageState extends State<EntregasPage>
             ? false
             : (_filtroResumoLista == _FiltroResumoEntregas.nenhum &&
                   usarPeriodoVendaNaLista));
+    final resumoAtrasadas = !buscaGlobal &&
+        !paraContagemResumo &&
+        _filtroResumoLista == _FiltroResumoEntregas.atrasadas;
+    final resumoPendentesHoje = !buscaGlobal &&
+        !paraContagemResumo &&
+        _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje;
+    final hoje = PlanejamentoEntregaDia.soDia(DateTime.now());
     final dataMarcada = buscaGlobal || paraContagemResumo
         ? (
             inicio: null,
@@ -1140,7 +1173,21 @@ class _EntregasPageState extends State<EntregasPage>
             filtroMemoria: 'todos',
             filtradoNoBanco: false,
           )
-        : _parametrosDataMarcadaFiltro();
+        : resumoAtrasadas
+            ? (
+                inicio: null,
+                fim: EntregaFiltroUtil.fimDataMarcadaAtrasadas(),
+                filtroMemoria: 'todos',
+                filtradoNoBanco: true,
+              )
+            : resumoPendentesHoje
+                ? (
+                    inicio: hoje,
+                    fim: PlanejamentoEntregaDia.fimDoDia(hoje),
+                    filtroMemoria: 'todos',
+                    filtradoNoBanco: true,
+                  )
+                : _parametrosDataMarcadaFiltro();
     return FiltroListagemEntregas(
       statusEntrega: _statusSelecionado,
       bairroTermo: termoBusca,
@@ -1153,14 +1200,8 @@ class _EntregasPageState extends State<EntregasPage>
       filtroMotorista: _filtroMotorista,
       filtroVendedor: _filtroVendedor,
       numeroNota: '',
-      apenasAtrasadas: buscaGlobal
-          ? false
-          : !paraContagemResumo &&
-                _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
-      apenasPendentesHoje: buscaGlobal
-          ? false
-          : !paraContagemResumo &&
-                _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
+      apenasAtrasadas: resumoAtrasadas,
+      apenasPendentesHoje: resumoPendentesHoje,
       incluirEntregasConcluidas: paraContagemResumo
           ? false
           : buscaGlobal || _incluirConcluidasNaConsulta,
@@ -1202,7 +1243,8 @@ class _EntregasPageState extends State<EntregasPage>
         _contagemPendentesHojeCache = resultado.pendentesHoje as int? ?? 0;
         _vendedoresDisponiveis = vendedoresDisponiveis;
         if (_chaveDiaPlanejamentoSelecionado != null &&
-            _filtroDataMarcada == 'todos') {
+            _filtroDataMarcada == 'todos' &&
+            _filtroResumoLista == _FiltroResumoEntregas.nenhum) {
           final fmtPlanej = DateFormat('dd/MM/yyyy');
           final aindaExiste = entregas.any(
             (v) => _vendaNaChaveDiaPlanejamento(
@@ -1397,7 +1439,8 @@ class _EntregasPageState extends State<EntregasPage>
         _contagemPendentesHojeCache = resultado.pendentesHoje as int? ?? 0;
         _vendedoresDisponiveis = vendedoresDisponiveis;
         if (_chaveDiaPlanejamentoSelecionado != null &&
-            _filtroDataMarcada == 'todos') {
+            _filtroDataMarcada == 'todos' &&
+            _filtroResumoLista == _FiltroResumoEntregas.nenhum) {
           final fmtPlanej = DateFormat('dd/MM/yyyy');
           final aindaExiste = entregas.any(
             (v) => _vendaNaChaveDiaPlanejamento(
@@ -4840,9 +4883,14 @@ class _EntregasPageState extends State<EntregasPage>
                     SizedBox(height: 48),
                     Center(
                       child: Text(
-                        _chaveDiaPlanejamentoSelecionado == null
-                            ? 'Nenhuma entrega encontrada para os filtros.'
-                            : 'Nenhuma entrega para o dia selecionado no planejamento.',
+                        _filtroResumoLista == _FiltroResumoEntregas.atrasadas
+                            ? 'Nenhuma entrega atrasada.'
+                            : _filtroResumoLista ==
+                                    _FiltroResumoEntregas.pendentesHoje
+                                ? 'Nenhuma entrega pendente para hoje.'
+                                : _chaveDiaPlanejamentoSelecionado == null
+                                    ? 'Nenhuma entrega encontrada para os filtros.'
+                                    : 'Nenhuma entrega para o dia selecionado no planejamento.',
                       ),
                     ),
                   ],
@@ -5134,25 +5182,19 @@ class _EntregasPageState extends State<EntregasPage>
                       _filtroResumoLista == _FiltroResumoEntregas.atrasadas,
                   filtroPendentesHojeAtivo:
                       _filtroResumoLista == _FiltroResumoEntregas.pendentesHoje,
-                  onFiltroAtrasadas: (ligar) {
-                    setState(() {
-                      _filtroResumoLista = ligar
-                          ? _FiltroResumoEntregas.atrasadas
-                          : _FiltroResumoEntregas.nenhum;
-                    });
-                    _carregarEntregas();
-                  },
-                  onFiltroPendentesHoje: (ligar) {
-                    setState(() {
-                      _filtroResumoLista = ligar
-                          ? _FiltroResumoEntregas.pendentesHoje
-                          : _FiltroResumoEntregas.nenhum;
-                    });
-                    _carregarEntregas();
-                  },
+                  onFiltroAtrasadas: (ligar) => _alternarFiltroResumo(
+                    _FiltroResumoEntregas.atrasadas,
+                    ligar,
+                  ),
+                  onFiltroPendentesHoje: (ligar) => _alternarFiltroResumo(
+                    _FiltroResumoEntregas.pendentesHoje,
+                    ligar,
+                  ),
                   mostrarPlanejamento: _entregasResumoDias.isNotEmpty,
                   resumoPorDia: resumoPorDia,
-                  chaveDiaSelecionada: _chaveDiaPlanejamentoSelecionado,
+                  chaveDiaSelecionada: _filtroResumoPorDataAtivo
+                      ? null
+                      : _chaveDiaPlanejamentoSelecionado,
                   onSelecionarDia: _selecionarDiaPlanejamento,
                   onAbrirSeletorDia: () =>
                       _abrirSeletorPlanejamentoDia(resumoPorDia),

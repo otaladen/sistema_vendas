@@ -261,7 +261,7 @@ class PdvConsultaPreviewPanel extends StatelessWidget {
         ),
       const SizedBox(height: 2),
       Text(
-        'Unidade: ${rotuloUnidadeProdutoLista(produto)}',
+        'Unidade: ${rotuloUnidadeProdutoExibicao(produto.unidade)}',
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: scheme.onSecondaryContainer,
               fontWeight: FontWeight.w700,
@@ -415,7 +415,8 @@ class PdvConsultaControlesAdicionarState
   late double _quantidade;
   late final TextEditingController _qtdController;
 
-  bool get _emUnidadeCompra => widget.produto.pdvPodeVenderEmUnidadeCompra;
+  /// A consulta sempre adiciona na unidade de venda (ver `_confirmarProduto`).
+  bool get _emUnidadeCompra => false;
 
   bool get _fracionada => true;
 

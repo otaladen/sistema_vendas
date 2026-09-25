@@ -34,6 +34,7 @@ import '../entregas/romaneio_pdf.dart';
 import '../../model/historico_entrega.dart';
 import '../shell/main_menu_deps.dart';
 import '../widgets/lan_api_feedback.dart';
+import 'buscar_na_loja_quantidade_dialog.dart';
 import 'nao_entregue_dialog.dart';
 
 /// Painel do motorista: entregas do dia atribuidas ao usuario logado.
@@ -521,69 +522,19 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
   }
 
   Future<int?> _perguntarQtdBuscarNaLoja(Venda venda, ItemVenda item) async {
-    final obterProduto = _obterProdutoEntrega;
-    final opcoes = BuscarNaLoja.opcoesQuantidadeModal(
+    final entrada = BuscarNaLoja.entradaQuantidadeModal(
       venda,
       item,
-      obterProduto: obterProduto,
+      obterProduto: _obterProdutoEntrega,
     );
-    if (opcoes.isEmpty) return null;
-    if (opcoes.length == 1) return opcoes.first.armazenado;
-    var escolhido = BuscarNaLoja.armazenadoInicialModal(
-      venda,
-      item,
-      obterProduto: obterProduto,
-    );
-    return showDialog<int>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Buscar na nossa loja'),
-          content: StatefulBuilder(
-            builder: (ctx, setLocal) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    BuscarNaLoja.textoIntroducaoModal(
-                      venda,
-                      item,
-                      obterProduto: obterProduto,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButton<int>(
-                    isExpanded: true,
-                    value: escolhido,
-                    items: [
-                      for (final o in opcoes)
-                        DropdownMenuItem(
-                          value: o.armazenado,
-                          child: Text(o.rotulo),
-                        ),
-                    ],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setLocal(() => escolhido = v);
-                    },
-                  ),
-                ],
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, escolhido),
-              child: const Text('Avisar pátio'),
-            ),
-          ],
-        );
-      },
+    if (entrada == null) return null;
+    if (!entrada.aceitaDecimal && entrada.totalExibicao <= 1) {
+      return entrada.totalArmazenado;
+    }
+    return mostrarBuscarNaLojaQuantidadeDialog(
+      context,
+      nomeProduto: item.nomeProduto,
+      entrada: entrada,
     );
   }
 

@@ -175,7 +175,7 @@ void main() {
     expect(qtd * produto.preco1, closeTo(260.29, 0.05));
   });
 
-  test('quantidadeCarrinhoDeItemPersistido reconverte 5260 para 2 CX', () {
+  test('quantidadeCarrinhoDeItemPersistido mantem 5260 em M2 (sem CX)', () {
     final produto = Produto(
       id: 5,
       codigoInterno: '008858',
@@ -194,8 +194,16 @@ void main() {
       produto: produto,
       quantidadeArmazenada: 5260,
     );
-    expect(carrinho.emUnidadeCompra, isTrue);
-    expect(carrinho.quantidadeDigitada, 2);
+    expect(carrinho.emUnidadeCompra, isFalse);
+    expect(carrinho.quantidadeDigitada, 5260);
+    expect(
+      ProdutoEmbalagem.rotuloQuantidadeCarrinho(
+        produto: produto,
+        quantidadeDigitada: carrinho.quantidadeDigitada,
+        emUnidadeCompra: carrinho.emUnidadeCompra,
+      ),
+      '5,26 M2',
+    );
     final subtotal = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
           produto: produto,
           quantidadeArmazenada: 5260,
@@ -204,7 +212,7 @@ void main() {
     expect(subtotal, closeTo(173.53, 0.05));
   });
 
-  test('quantidadeCarrinhoDeItemPersistido ida e volta 1 CX', () {
+  test('quantidadeCarrinhoDeItemPersistido ida e volta 1 CX volta em M2', () {
     final produto = Produto(
       id: 6,
       codigoInterno: '008858',
@@ -228,8 +236,8 @@ void main() {
       produto: produto,
       quantidadeArmazenada: armazenado,
     );
-    expect(carrinho.emUnidadeCompra, isTrue);
-    expect(carrinho.quantidadeDigitada, 1);
+    expect(carrinho.emUnidadeCompra, isFalse);
+    expect(carrinho.quantidadeDigitada, armazenado);
     expect(
       ProdutoEmbalagem.quantidadeArmazenadaItemVenda(
         produto: produto,
@@ -467,14 +475,14 @@ void main() {
         produto: produto,
         quantidadeArmazenada: 10520,
       ),
-      '4 CX (= 10,52 M2)',
+      '10,52',
     );
     expect(
       ProdutoEmbalagem.passoQuantidadeArmazenada(
         produto: produto,
         quantidadeArmazenada: 10520,
       ),
-      QuantidadeVendaUtil.paraArmazenamento(2.63, fracionada: true),
+      QuantidadeVendaUtil.passoFracionadoArmazenado,
     );
   });
 
@@ -560,14 +568,21 @@ void main() {
       permiteQuantidadeFracionada: false,
     );
     const armazenado = 4500;
+    // Sem escala gravada, 4500 em UN e ambiguo com 4500 inteiros (ver 1400 UN):
+    // a escala persistida no item decide.
     expect(
-      ProdutoEmbalagem.leituraUsaEscalaFracionada(produto, armazenado),
+      ProdutoEmbalagem.leituraArmazenadaEmMilesimos(
+        produto: produto,
+        quantidadeArmazenada: armazenado,
+        emMilesimos: true,
+      ),
       isTrue,
     );
     expect(
       ProdutoEmbalagem.quantidadeVendaEfetivaItem(
         produto: produto,
         quantidadeArmazenada: armazenado,
+        emMilesimos: true,
       ),
       closeTo(4.5, 0.001),
     );
@@ -576,6 +591,7 @@ void main() {
         produto: produto,
         quantidadeDigitada: armazenado,
         emUnidadeCompra: false,
+        emMilesimos: true,
       ),
       '4,5 UN',
     );

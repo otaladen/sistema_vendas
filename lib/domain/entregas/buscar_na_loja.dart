@@ -3,17 +3,104 @@ import '../../model/produto.dart';
 import '../../model/venda.dart';
 import '../entrega_venda_helper.dart';
 import '../produto_embalagem.dart';
+import '../produto_unidade_exibicao.dart';
+import '../quantidade_venda_util.dart';
 import 'loja_origem_mercadoria.dart';
 
-/// Opcao do dropdown "Buscar na nossa loja" (valor persistido + rotulo).
-class OpcaoQuantidadeBuscarNaLoja {
-  const OpcaoQuantidadeBuscarNaLoja({
-    required this.armazenado,
-    required this.rotulo,
+/// Campo numerico do modal "Buscar na nossa loja": o motorista digita na
+/// unidade de venda (6,3 M²) e [armazenadoDe] devolve o valor persistido
+/// (6300 quando a linha usa milésimos).
+class EntradaQuantidadeBuscarNaLoja {
+  const EntradaQuantidadeBuscarNaLoja({
+    required this.totalArmazenado,
+    required this.emMilesimos,
+    required this.aceitaDecimal,
+    required this.unidade,
+    required this.inicialArmazenado,
   });
 
-  final int armazenado;
-  final String rotulo;
+  final int totalArmazenado;
+
+  /// [totalArmazenado] esta em milésimos (6300 = 6,3).
+  final bool emMilesimos;
+
+  /// Campo aceita casas decimais (M², KG...); UN/SC so inteiros.
+  final bool aceitaDecimal;
+
+  /// Rotulo legivel (M², UN, SC, KG). Vazio quando o produto nao resolveu.
+  final String unidade;
+
+  final int inicialArmazenado;
+
+  double get totalExibicao => exibicaoDe(totalArmazenado);
+
+  double exibicaoDe(int armazenado) => QuantidadeVendaUtil.valorExibicao(
+        armazenado,
+        fracionada: emMilesimos,
+      );
+
+  String textoExibicao(int armazenado) {
+    final q = exibicaoDe(armazenado);
+    return QuantidadeVendaUtil.formatarExibicao(
+      q,
+      fracionada: q != q.roundToDouble(),
+    );
+  }
+
+  String textoComUnidade(int armazenado) {
+    final q = textoExibicao(armazenado);
+    return unidade.isEmpty ? q : '$q $unidade';
+  }
+
+  String get textoTotal => textoExibicao(totalArmazenado);
+  String get textoTotalComUnidade => textoComUnidade(totalArmazenado);
+  String get textoInicial => textoExibicao(inicialArmazenado);
+
+  /// Texto parcial aceito durante a digitacao (vazio, "3," ou "3,15").
+  bool textoDigitacaoValido(String texto) =>
+      QuantidadeVendaUtil.textoQuantidadeValido(
+        texto,
+        fracionada: aceitaDecimal,
+      );
+
+  /// Mensagem de erro do campo ou `null` se [texto] for valido.
+  String? validar(String texto) {
+    final t = texto.trim();
+    if (t.isEmpty) return 'Informe a quantidade';
+    final v = _parse(t);
+    if (v == null) return 'Quantidade inválida';
+    if (!aceitaDecimal && v != v.roundToDouble()) {
+      return 'Use número inteiro';
+    }
+    if (v <= 0 || _paraArmazenado(v) <= 0) return 'Quantidade inválida';
+    if (v > totalExibicao + 1e-9) {
+      return 'Máximo $textoTotalComUnidade';
+    }
+    return null;
+  }
+
+  /// Valor persistido para a API/banco ou `null` se [texto] for invalido.
+  int? armazenadoDe(String texto) {
+    if (validar(texto) != null) return null;
+    final v = _parse(texto.trim())!;
+    final arm = _paraArmazenado(v);
+    return arm > totalArmazenado ? totalArmazenado : arm;
+  }
+
+  int _paraArmazenado(double quantidadeExibicao) =>
+      QuantidadeVendaUtil.paraArmazenamento(
+        quantidadeExibicao,
+        fracionada: emMilesimos,
+      );
+
+  static double? _parse(String texto) {
+    final t = texto
+        .replaceAll(RegExp(r'[\s\u00A0\u202F]'), '')
+        .replaceAll(',', '.');
+    final v = double.tryParse(t);
+    if (v == null || !v.isFinite) return null;
+    return v;
+  }
 }
 
 /// Motorista na outra loja pede para buscar o item nesta prateleira.
@@ -145,152 +232,47 @@ abstract final class BuscarNaLoja {
     return '$qTxt de $totalTxt';
   }
 
-  /// Texto do corpo do modal do motorista.
-  static String textoIntroducaoModal(
+  /// Estado inicial do campo numerico do modal (`null` = nada a buscar).
+  ///
+  /// A escala vem de [ItemVenda.escalaQuantidade]; itens legados usam a
+  /// heuristica do romaneio e, em unidades de medida (M², KG...), tratam
+  /// valores >= 1000 como milésimos para nunca exibir 6300 no lugar de 6,3.
+  static EntradaQuantidadeBuscarNaLoja? entradaQuantidadeModal(
     Venda venda,
     ItemVenda item, {
     Produto? Function(int id)? obterProduto,
   }) {
     final totalArm = qtdCarga(venda, item);
-    final totalTxt = EntregaVendaHelper.textoQuantidadeRetiradaComUnidade(
-      item,
-      quantidadeArmazenada: totalArm,
-      obterProduto: obterProduto,
-    );
-    return 'A outra loja não tem a quantidade toda. '
-        'De $totalTxt, quantos buscar nesta loja?';
-  }
-
-  /// Opcoes do dropdown (1..N unidades reais ou passo 0,5 em M²/M³/KG).
-  static List<OpcaoQuantidadeBuscarNaLoja> opcoesQuantidadeModal(
-    Venda venda,
-    ItemVenda item, {
-    Produto? Function(int id)? obterProduto,
-  }) {
-    final totalArm = qtdCarga(venda, item);
-    if (totalArm <= 0) return const [];
-
-    final totalExib = EntregaVendaHelper.quantidadeRomaneioCargaExibicao(
-      venda,
-      item,
-      obterProduto: obterProduto,
-    );
-    if (totalExib <= 0) return const [];
-
+    if (totalArm <= 0) return null;
     final produto = EntregaVendaHelper.produtoItemEntrega(
       item,
       obterProduto: obterProduto,
     );
-    final passoFracionado = produto != null &&
-        !_modalIncrementoInteiroUnidade(produto) &&
-        EntregaVendaHelper.retiradaEntradaFracionada(
-          item,
-          quantidadeArmazenadaReferencia: totalArm,
-          obterProduto: obterProduto,
-        );
-
-    final opcoes = <OpcaoQuantidadeBuscarNaLoja>[];
-
-    if (!passoFracionado) {
-      final max = totalExib.round();
-      if (max <= 1) {
-        return [
-          OpcaoQuantidadeBuscarNaLoja(
-            armazenado: totalArm,
-            rotulo: _rotuloOpcaoModal(
-              venda,
-              item,
-              armazenado: totalArm,
-              obterProduto: obterProduto,
-            ),
-          ),
-        ];
-      }
-      for (var n = 1; n <= max; n++) {
-        final arm = armazenadoDeQuantidadeExibicao(
-          venda,
-          item,
-          n.toDouble(),
-          obterProduto: obterProduto,
-        );
-        if (arm <= 0 || opcoes.any((o) => o.armazenado == arm)) continue;
-        opcoes.add(
-          OpcaoQuantidadeBuscarNaLoja(
-            armazenado: arm,
-            rotulo: _rotuloOpcaoModal(
-              venda,
-              item,
-              armazenado: arm,
-              obterProduto: obterProduto,
-            ),
-          ),
-        );
-      }
-      return opcoes;
-    }
-
-    const passoExib = 0.5;
-    var qExib = passoExib;
-    while (qExib < totalExib - 1e-9) {
-      final arm = armazenadoDeQuantidadeExibicao(
-        venda,
-        item,
-        qExib,
-        obterProduto: obterProduto,
-      );
-      if (arm > 0 && !opcoes.any((o) => o.armazenado == arm)) {
-        opcoes.add(
-          OpcaoQuantidadeBuscarNaLoja(
-            armazenado: arm,
-            rotulo: _rotuloOpcaoModal(
-              venda,
-              item,
-              armazenado: arm,
-              obterProduto: obterProduto,
-            ),
-          ),
-        );
-      }
-      qExib += passoExib;
-    }
-    if (!opcoes.any((o) => o.armazenado == totalArm)) {
-      opcoes.add(
-        OpcaoQuantidadeBuscarNaLoja(
-          armazenado: totalArm,
-          rotulo: _rotuloOpcaoModal(
-            venda,
-            item,
-            armazenado: totalArm,
-            obterProduto: obterProduto,
-          ),
-        ),
-      );
-    }
-    return opcoes;
-  }
-
-  /// Valor inicial do dropdown (persistido, clampado a uma opcao valida).
-  static int armazenadoInicialModal(
-    Venda venda,
-    ItemVenda item, {
-    Produto? Function(int id)? obterProduto,
-  }) {
-    final opcoes = opcoesQuantidadeModal(
+    final emMilesimos = _escalaMilesimos(
       venda,
       item,
+      totalArm,
+      produto: produto,
       obterProduto: obterProduto,
     );
-    if (opcoes.isEmpty) return 0;
-    final desejado = item.quantidadeBuscarNaLoja > 0
-        ? clampQuantidade(venda, item, item.quantidadeBuscarNaLoja)
-        : opcoes.last.armazenado;
-    for (final o in opcoes) {
-      if (o.armazenado == desejado) return desejado;
-    }
-    return opcoes.last.armazenado;
+    final unidadeInteira =
+        produto != null && _modalIncrementoInteiroUnidade(produto);
+    return EntradaQuantidadeBuscarNaLoja(
+      totalArmazenado: totalArm,
+      emMilesimos: emMilesimos,
+      aceitaDecimal: emMilesimos && !unidadeInteira,
+      unidade: produto == null
+          ? ''
+          : rotuloUnidadeProdutoExibicao(
+              ProdutoEmbalagem.normalizarUnidade(produto.unidade),
+            ),
+      inicialArmazenado: item.quantidadeBuscarNaLoja > 0
+          ? clampQuantidade(venda, item, item.quantidadeBuscarNaLoja)
+          : totalArm,
+    );
   }
 
-  /// Converte quantidade escolhida na UI (unidade real) para milésimos/inteiro.
+  /// Converte quantidade digitada na UI (unidade real) para milésimos/inteiro.
   static int armazenadoDeQuantidadeExibicao(
     Venda venda,
     ItemVenda item,
@@ -298,46 +280,46 @@ abstract final class BuscarNaLoja {
     Produto? Function(int id)? obterProduto,
   }) {
     if (quantidadeExibicao <= 0) return 0;
-    final totalArm = qtdCarga(venda, item);
-    if (totalArm <= 0) return 0;
+    final entrada = entradaQuantidadeModal(
+      venda,
+      item,
+      obterProduto: obterProduto,
+    );
+    if (entrada == null) return 0;
+    if (quantidadeExibicao >= entrada.totalExibicao - 1e-9) {
+      return entrada.totalArmazenado;
+    }
+    final arm = QuantidadeVendaUtil.paraArmazenamento(
+      quantidadeExibicao,
+      fracionada: entrada.emMilesimos,
+    );
+    return clampQuantidade(venda, item, arm);
+  }
+
+  static bool _escalaMilesimos(
+    Venda venda,
+    ItemVenda item,
+    int totalArm, {
+    required Produto? produto,
+    Produto? Function(int id)? obterProduto,
+  }) {
+    final persistida = item.quantidadeEmMilesimosPersistida;
+    if (persistida != null) return persistida;
     final totalExib = EntregaVendaHelper.quantidadeRomaneioCargaExibicao(
       venda,
       item,
       obterProduto: obterProduto,
     );
-    if (totalExib <= 0) return 0;
-    if (quantidadeExibicao >= totalExib - 1e-9) {
-      return totalArm;
-    }
-    final arm = (quantidadeExibicao / totalExib * totalArm).round();
-    return clampQuantidade(venda, item, arm);
+    if ((totalExib - totalArm).abs() > 1e-9) return true;
+    return produto != null &&
+        totalArm >= QuantidadeVendaUtil.escalaFracionada &&
+        (produto.permiteQuantidadeFracionada ||
+            ProdutoEmbalagem.unidadeVendaTipicamenteFracionada(
+              produto.unidade,
+            ));
   }
 
-  static String _rotuloOpcaoModal(
-    Venda venda,
-    ItemVenda item, {
-    required int armazenado,
-    Produto? Function(int id)? obterProduto,
-  }) {
-    final totalArm = qtdCarga(venda, item);
-    final totalTxt = EntregaVendaHelper.textoQuantidadeRetiradaComUnidade(
-      item,
-      quantidadeArmazenada: totalArm,
-      obterProduto: obterProduto,
-    );
-    if (armazenado >= totalArm) {
-      return 'Todos ($totalTxt)';
-    }
-    final qTxt = _textoQuantidadeExibicaoRelativa(
-      venda,
-      item,
-      armazenado,
-      obterProduto: obterProduto,
-    );
-    return '$qTxt de $totalTxt';
-  }
-
-  /// UN/SC/PC etc.: passo 1 na unidade de venda; demais usam 0,5 quando fracionado.
+  /// UN/SC/PC etc.: campo so aceita inteiros na unidade de venda.
   static bool _modalIncrementoInteiroUnidade(Produto produto) {
     switch (ProdutoEmbalagem.normalizarUnidade(produto.unidade)) {
       case 'UN':

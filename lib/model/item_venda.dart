@@ -28,7 +28,18 @@ class ItemVenda {
     this.lojaOrigemMercadoria = '',
     this.buscarNaLojaStatus = '',
     this.quantidadeBuscarNaLoja = 0,
+    this.escalaQuantidade = escalaQuantidadeLegado,
   });
+
+  static const int escalaQuantidadeLegado = 0;
+  static const int escalaQuantidadeLiteral = 1;
+  static const int escalaQuantidadeMilesimos = 1000;
+
+  static int escalaDeFlag(bool? emMilesimos) => switch (emMilesimos) {
+        true => escalaQuantidadeMilesimos,
+        false => escalaQuantidadeLiteral,
+        null => escalaQuantidadeLegado,
+      };
 
   @Id(assignable: true)
   int id;
@@ -83,6 +94,26 @@ class ItemVenda {
   /// Zero = linha inteira segue a origem gravada.
   int quantidadeBuscarNaLoja;
 
+  /// Escala de [quantidade] e das quantidades derivadas (retirada, carreto...):
+  /// [escalaQuantidadeMilesimos] (4200 = 4,2), [escalaQuantidadeLiteral]
+  /// (1400 = 1400 UN) ou [escalaQuantidadeLegado] (itens antigos: heuristica).
+  int escalaQuantidade;
+
+  /// `null` = item legado sem escala gravada.
+  bool? get quantidadeEmMilesimosPersistida => switch (escalaQuantidade) {
+        escalaQuantidadeMilesimos => true,
+        escalaQuantidadeLiteral => false,
+        _ => null,
+      };
+
+  /// Escala definitiva (gravada ou deduzida pelo produto) para API/sync.
+  bool get quantidadeEmMilesimosResolvida =>
+      quantidadeEmMilesimosPersistida ??
+      ProdutoEmbalagem.leituraArmazenadaEmMilesimos(
+        produto: produtoOuNull,
+        quantidadeArmazenada: quantidade,
+      );
+
   final produto = ToOne<Produto>();
   final venda = ToOne<Venda>();
 
@@ -99,6 +130,7 @@ class ItemVenda {
       ProdutoEmbalagem.quantidadeVendaEfetivaItem(
         produto: produtoOuNull,
         quantidadeArmazenada: quantidade,
+        emMilesimos: quantidadeEmMilesimosPersistida,
       );
 
   /// Quantidade em unidades de estoque ([Produto.unidade]) para baixa/reserva.
@@ -119,6 +151,7 @@ class ItemVenda {
       ProdutoEmbalagem.textoQuantidadeArmazenada(
         produto: produtoOuNull,
         quantidadeArmazenada: quantidade,
+        emMilesimos: quantidadeEmMilesimosPersistida,
       );
 
   double get subtotal => quantidadeVendaEfetiva * precoUnitario;

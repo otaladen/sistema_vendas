@@ -146,34 +146,21 @@ abstract final class EscPosCupomBuilder {
     }
     out.add(EscPosCommands.separator(cols));
     _adicionarFaixaHomologacao(out, cols, homolog);
+    _adicionarFaixaControleVia(
+      out,
+      cols,
+      controle: VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda),
+      segundaVia: dados.segundaVia,
+    );
 
     // Titulo estilo DANFE (cupom dinheiro e NFC-e real).
+    out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line('DANFE NFC-e - DOCUMENTO AUXILIAR'));
     out.add(EscPosCommands.line('DA NOTA FISCAL ELETRONICA'));
     out.add(EscPosCommands.line('PARA CONSUMIDOR FINAL'));
     out.add(EscPosCommands.boldOff);
-    if (dados.segundaVia) {
-      out.add(EscPosCommands.line('*** SEGUNDA VIA ***'));
-    }
     out.add(EscPosCommands.alignLeft);
-
-    out.add(EscPosCommands.line('NFC-e $numeroDoc Serie $serieDoc'));
-    out.add(EscPosCommands.line('Emissao: ${_data.format(emissao)}'));
-    if (temNfceReal) {
-      final prot = venda.nfceProtocolo.trim();
-      if (prot.isNotEmpty && !prot.startsWith('emissao:')) {
-        out.add(EscPosCommands.line('Protocolo: ${EscPosTextLayout.trunc(prot, cols - 11)}'));
-      }
-    }
-    out.add(EscPosCommands.boldOn);
-    out.add(EscPosCommands.line(
-      dados.segundaVia ? 'SEGUNDA VIA' : 'VIA CONSUMIDOR',
-    ));
-    out.add(EscPosCommands.boldOff);
-    out.add(EscPosCommands.line(
-      VendaDocumentoRotuloHelper.rotuloControleInterno(venda),
-    ));
 
     final vendNome = CupomNaoFiscalVendaPdf.rotuloVendedorUmLinha(dados.vendedor);
     if (vendNome.trim().isNotEmpty &&
@@ -181,31 +168,12 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.line('Vendedor: ${EscPosTextLayout.trunc(vendNome, cols - 10)}'));
     }
 
-    _adicionarBlocoEntregaCarreto(
-      out,
-      cols: cols,
-      venda: venda,
-      cliente: dados.cliente,
-      itens: dados.itens,
-    );
-
-    final cli = dados.cliente;
-    if (temNfceReal && homolog) {
-      out.add(EscPosCommands.line(
-        EscPosTextLayout.trunc('Cliente: NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO', cols),
-      ));
-    }
-
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.boldOn);
-    if (cols >= 42) {
-      out.add(EscPosCommands.line('CODIGO / DESCRICAO'));
-      out.add(EscPosCommands.line(
-        EscPosTextLayout.padCols('QTD x UN    VALOR UN', 'TOTAL', cols),
-      ));
-    } else {
-      out.add(EscPosCommands.line('ITENS'));
-    }
+    out.add(EscPosCommands.line('CODIGO - DESCRICAO'));
+    out.add(EscPosCommands.line(
+      EscPosTextLayout.padCols('QTD UN x VL UNIT', 'SUBTOTAL', cols),
+    ));
     out.add(EscPosCommands.boldOff);
     out.add(EscPosCommands.separator(cols));
 
@@ -224,9 +192,10 @@ abstract final class EscPosCupomBuilder {
       final qtd = ProdutoEmbalagem.formatarQuantidadeItemImpressao(
         produto: item.produtoOuNull,
         quantidadeArmazenada: item.quantidade,
+        emMilesimos: item.quantidadeEmMilesimosPersistida,
       );
-      final unit = _moeda.format(item.precoUnitario);
-      final tot = _moeda.format(item.subtotal);
+      final unit = 'R\$ ${_moeda.format(item.precoUnitario)}';
+      final tot = 'R\$ ${_moeda.format(item.subtotal)}';
       final titulo = '$cod - $nome';
       for (final l in EscPosTextLayout.wrap(titulo, cols)) {
         out.add(EscPosCommands.line(l));
@@ -259,24 +228,48 @@ abstract final class EscPosCupomBuilder {
         EscPosTextLayout.padCols('Acrescimo/Frete', _moeda.format(frete), cols),
       ));
     }
+    out.add(EscPosCommands.separator(cols, '='));
+    out.add(EscPosCommands.boldOn);
+    out.add(EscPosCommands.doubleHeightOn);
+    out.add(EscPosCommands.line(
+      EscPosTextLayout.padCols(
+        'VALOR TOTAL R\$',
+        _moeda.format(venda.total),
+        cols,
+      ),
+    ));
+    out.add(EscPosCommands.normalSize);
+    out.add(EscPosCommands.boldOff);
+    out.add(EscPosCommands.separator(cols, '='));
+
     out.add(EscPosCommands.boldOn);
     out.add(EscPosCommands.line(
-      EscPosTextLayout.padCols('TOTAL', 'R\$ ${_moeda.format(venda.total)}', cols),
+      EscPosTextLayout.padCols('FORMA DE PAGAMENTO', 'VALOR PAGO', cols),
     ));
     out.add(EscPosCommands.boldOff);
-
-    out.add(EscPosCommands.line(
-      'Pagamento: ${CupomNaoFiscalVendaPdf.rotuloPagamentoCabecalho(venda)}',
-    ));
-    if (dados.totalRecebido > 0.0001) {
+    for (final p in CupomNaoFiscalVendaPdf.linhasPagamentoCupom(
+      venda,
+      totalRecebido: dados.totalRecebido,
+      troco: dados.troco,
+    )) {
       out.add(EscPosCommands.line(
-        EscPosTextLayout.padCols('Recebido', _moeda.format(dados.totalRecebido), cols),
+        EscPosTextLayout.padCols(
+          p.forma,
+          'R\$ ${_moeda.format(p.valor)}',
+          cols,
+        ),
       ));
     }
     if (dados.troco > 0.0001) {
+      out.add(EscPosCommands.boldOn);
       out.add(EscPosCommands.line(
-        EscPosTextLayout.padCols('Troco', _moeda.format(dados.troco), cols),
+        EscPosTextLayout.padCols(
+          'TROCO',
+          'R\$ ${_moeda.format(dados.troco)}',
+          cols,
+        ),
       ));
+      out.add(EscPosCommands.boldOff);
     }
 
     // Cupom dinheiro (sem NFC-e SEFAZ): aviso de contingencia visual LDV.
@@ -291,10 +284,31 @@ abstract final class EscPosCupomBuilder {
         out.add(EscPosCommands.line(l));
       }
       out.add(EscPosCommands.boldOff);
+      out.add(EscPosCommands.alignLeft);
     }
 
+    _adicionarBlocoEntregaCarreto(
+      out,
+      cols: cols,
+      venda: venda,
+      cliente: dados.cliente,
+      itens: dados.itens,
+    );
+
+    // --- Bloco fiscal (rodape) ---
     out.add(EscPosCommands.separator(cols));
     out.add(EscPosCommands.alignCenter);
+    out.add(EscPosCommands.line('NFC-e $numeroDoc  Serie $serieDoc'));
+    out.add(EscPosCommands.line('Emissao: ${_data.format(emissao)}'));
+    if (temNfceReal) {
+      final prot = venda.nfceProtocolo.trim();
+      if (prot.isNotEmpty && !prot.startsWith('emissao:')) {
+        out.add(EscPosCommands.line(
+          'Protocolo: ${EscPosTextLayout.trunc(prot, cols - 11)}',
+        ));
+      }
+    }
+    out.add(EscPosCommands.line(''));
 
     final urlConsulta = CupomPdfLayout.urlConsultaNfcePorUf();
     out.add(EscPosCommands.line('Consulte pela Chave de Acesso em'));
@@ -311,23 +325,24 @@ abstract final class EscPosCupomBuilder {
       }
     }
 
+    out.add(EscPosCommands.separator(cols));
+    out.add(EscPosCommands.boldOn);
+    final linhasConsumidor = temNfceReal && homolog
+        ? const ['CONSUMIDOR: NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO']
+        : CupomPdfLayout.linhasIdentificacaoConsumidor(dados.cliente);
+    for (final linha in linhasConsumidor) {
+      for (final l in EscPosTextLayout.wrap(linha, cols)) {
+        out.add(EscPosCommands.line(l));
+      }
+    }
+    out.add(EscPosCommands.boldOff);
+
     final qr = _payloadQr(venda, chaveImpressao);
     if (qr.isNotEmpty) {
       out.add(EscPosCommands.feed(1));
       out.add(EscPosCommands.line('Consulta via leitor de QR Code'));
       out.add(EscPosCommands.qrCode(qr, moduleSize: cols >= 42 ? 5 : 4));
       out.add(EscPosCommands.feed(1));
-    }
-
-    if (!(temNfceReal && homolog)) {
-      out.add(EscPosCommands.separator(cols));
-      out.add(EscPosCommands.boldOn);
-      for (final linha in CupomPdfLayout.linhasIdentificacaoConsumidor(cli)) {
-        for (final l in EscPosTextLayout.wrap(linha, cols)) {
-          out.add(EscPosCommands.line(l));
-        }
-      }
-      out.add(EscPosCommands.boldOff);
     }
 
     if (homolog) {
@@ -370,25 +385,52 @@ abstract final class EscPosCupomBuilder {
     Cliente? cliente,
     required List<ItemVenda> itens,
   }) {
-    final linhas = EntregaVendaHelper.linhasBlocoEntregaImpressao(
+    final linhas = EntregaVendaHelper.linhasBlocoEntregaImpressaoDetalhadas(
       venda: venda,
       cliente: cliente,
       itens: itens,
     );
     if (linhas.isEmpty) return;
 
-    out.add(EscPosCommands.separator(cols));
-    out.add(EscPosCommands.alignLeft);
+    out.add(EscPosCommands.separator(cols, '='));
+    out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
-    for (final l in EscPosTextLayout.wrap(EntregaVendaHelper.tituloBlocoEntregaImpressao, cols)) {
+    for (final l in EscPosTextLayout.wrap(
+      EntregaVendaHelper.rotuloBlocoEntregaImpressao,
+      cols,
+    )) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.boldOff);
+    out.add(EscPosCommands.alignLeft);
+    out.add(EscPosCommands.separator(cols));
     for (final linha in linhas) {
-      for (final l in EscPosTextLayout.wrap(linha, cols)) {
+      if (linha.destaque) out.add(EscPosCommands.boldOn);
+      for (final l in EscPosTextLayout.wrap(linha.texto, cols)) {
         out.add(EscPosCommands.line(l));
       }
+      if (linha.destaque) out.add(EscPosCommands.boldOff);
     }
+    out.add(EscPosCommands.separator(cols, '='));
+  }
+
+  /// Faixa `CONTROLE: #N | VIA CONSUMIDOR` logo abaixo dos dados da loja.
+  static void _adicionarFaixaControleVia(
+    BytesBuilder out,
+    int cols, {
+    required String controle,
+    required bool segundaVia,
+  }) {
+    final via = segundaVia ? 'SEGUNDA VIA' : 'VIA CONSUMIDOR';
+    out.add(EscPosCommands.alignCenter);
+    out.add(EscPosCommands.boldOn);
+    out.add(EscPosCommands.doubleHeightOn);
+    for (final l in EscPosTextLayout.wrap('CONTROLE: $controle | $via', cols)) {
+      out.add(EscPosCommands.line(l));
+    }
+    out.add(EscPosCommands.normalSize);
+    out.add(EscPosCommands.boldOff);
+    out.add(EscPosCommands.separator(cols));
   }
 
   static bool _pareceRodapeNaoFiscal(String s) {
@@ -449,7 +491,7 @@ abstract final class EscPosCupomBuilder {
         '${d.substring(8, 12)}-${d.substring(12)}';
   }
 
-  /// Linha 2 do item: quantidade destacada + total alinhado a direita (padLeft).
+  /// Linha 2 do item: `20 UN x R$ 5,00` + subtotal alinhado a direita.
   static String _linhaQtdComTotal({
     required String qtd,
     required String un,
@@ -458,7 +500,7 @@ abstract final class EscPosCupomBuilder {
     required int cols,
   }) {
     final qtdUn = un.trim().isEmpty ? qtd.trim() : '${qtd.trim()} ${un.trim()}';
-    final esquerda = EscPosTextLayout.trunc('  QTD: $qtdUn  x  R\$ $unit', cols - 1);
+    final esquerda = EscPosTextLayout.trunc('$qtdUn x $unit', cols - 1);
     final total = EscPosTextLayout.trunc(tot, cols ~/ 3);
     final espaco = cols - esquerda.length;
     if (espaco <= 0) {

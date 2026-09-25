@@ -1,4 +1,4 @@
-import '../domain/pagamento_orcamento.dart';
+import '../domain/pagamentos_recebidos_caixa.dart';
 import '../model/venda.dart';
 
 /// Montagem e reconciliacao do grupo de pagamentos (vPag) no JSON Focus NFe.
@@ -59,7 +59,10 @@ class FocusNfePayloadBuilder {
 
     if (venda.formaPagamento == 'misto' &&
         venda.pagamentosJson.trim().isNotEmpty) {
-      for (final l in PagamentoOrcamentoCodec.decode(venda.pagamentosJson)) {
+      for (final l in PagamentosRecebidosCaixa.linhasMisto(
+        venda,
+        totalNota: valorTotalNota,
+      )) {
         meios.add(l.meio);
         valores.add(l.valor);
       }

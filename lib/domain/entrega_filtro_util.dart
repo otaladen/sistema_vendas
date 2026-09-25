@@ -72,6 +72,13 @@ abstract final class EntregaFiltroUtil {
     return baseMarcada.isBefore(baseHoje);
   }
 
+  /// Limite superior (inclusivo) de data marcada para o chip "Atrasadas":
+  /// ultimo instante de ontem, ou seja `dataEntregaMarcada < hoje 00:00`.
+  static DateTime fimDataMarcadaAtrasadas([DateTime? agora]) {
+    return soDia(agora ?? DateTime.now())
+        .subtract(const Duration(milliseconds: 1));
+  }
+
   static bool ehAgendaHoje(Venda venda) {
     if (_bloqueiaResumoAtrasadaOuHoje(venda.statusEntrega)) return false;
     final marcada = venda.dataEntregaMarcada?.toLocal();

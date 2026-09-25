@@ -25,7 +25,7 @@ void main() {
     return venda;
   }
 
-  test('30 UN em milesimos (30000) exibe 30 UN no modal e opcoes 1..30', () {
+  test('30 UN em milesimos (30000) exibe 30 UN e aceita so inteiros', () {
     final produto = produtoUnMilesimos();
     final item = ItemVenda(
       id: 10,
@@ -40,16 +40,13 @@ void main() {
     final venda = vendaCarreto(item);
 
     expect(BuscarNaLoja.qtdCarga(venda, item), 30000);
-    expect(
-      BuscarNaLoja.textoIntroducaoModal(venda, item),
-      contains('De 30 UN'),
-    );
-
-    final opcoes = BuscarNaLoja.opcoesQuantidadeModal(venda, item);
-    expect(opcoes, hasLength(30));
-    expect(opcoes.first.rotulo, '1 UN de 30 UN');
-    expect(opcoes.last.armazenado, 30000);
-    expect(opcoes.last.rotulo, 'Todos (30 UN)');
+    final entrada = BuscarNaLoja.entradaQuantidadeModal(venda, item)!;
+    expect(entrada.textoTotalComUnidade, '30 UN');
+    expect(entrada.aceitaDecimal, isFalse);
+    expect(entrada.armazenadoDe('1'), 1000);
+    expect(entrada.armazenadoDe('30'), 30000);
+    expect(entrada.armazenadoDe('1,5'), isNull);
+    expect(entrada.armazenadoDe('31'), isNull);
   });
 
   test('6000 armazenados legado UN fracionado exibe 6 UN (caso 6 unidades)', () {
@@ -74,13 +71,9 @@ void main() {
 
     final venda = vendaCarreto(item);
 
-    expect(
-      BuscarNaLoja.textoIntroducaoModal(venda, item),
-      contains('De 6 UN'),
-    );
-    final opcoes = BuscarNaLoja.opcoesQuantidadeModal(venda, item);
-    expect(opcoes, hasLength(6));
-    expect(opcoes.last.armazenado, 6000);
+    final entrada = BuscarNaLoja.entradaQuantidadeModal(venda, item)!;
+    expect(entrada.textoTotalComUnidade, '6 UN');
+    expect(entrada.armazenadoDe(entrada.textoTotal), 6000);
   });
 
   test('selecionar 6 unidades envia valor interno correto ao patio', () {
@@ -102,12 +95,12 @@ void main() {
       6000,
     );
     expect(
-      BuscarNaLoja.opcoesQuantidadeModal(venda, item).last.armazenado,
+      BuscarNaLoja.entradaQuantidadeModal(venda, item)!.inicialArmazenado,
       30000,
     );
   });
 
-  test('M2 fracionado gera opcoes em 0,5 na unidade de venda', () {
+  test('M2 fracionado aceita decimal na unidade de venda', () {
     final produto = Produto(
       codigoInterno: 'FORM',
       nome: 'Piso',
@@ -129,16 +122,10 @@ void main() {
 
     final venda = vendaCarreto(item);
 
-    expect(
-      BuscarNaLoja.textoIntroducaoModal(venda, item),
-      contains('De 2 M2'),
-    );
-
-    final opcoes = BuscarNaLoja.opcoesQuantidadeModal(venda, item);
-    expect(opcoes.first.rotulo, '0,5 M2 de 2 M2');
-    expect(opcoes.first.armazenado, 500);
-    expect(opcoes.last.armazenado, 2000);
-
+    final entrada = BuscarNaLoja.entradaQuantidadeModal(venda, item)!;
+    expect(entrada.textoTotalComUnidade, '2 M²');
+    expect(entrada.aceitaDecimal, isTrue);
+    expect(entrada.armazenadoDe('0,5'), 500);
     expect(
       BuscarNaLoja.armazenadoDeQuantidadeExibicao(venda, item, 1.5),
       1500,

@@ -5,6 +5,14 @@ import '../model/venda.dart';
 import 'produto_embalagem.dart';
 import 'quantidade_venda_util.dart';
 
+/// Linha do bloco de entrega impresso; [destaque] = negrito (bairro, referencia, obs).
+class LinhaEntregaImpressao {
+  const LinhaEntregaImpressao(this.texto, {this.destaque = false});
+
+  final String texto;
+  final bool destaque;
+}
+
 /// Tipos de entrega por item e na venda (inclui [tipoMisto] no cabecalho).
 class EntregaVendaHelper {
   EntregaVendaHelper._();
@@ -362,6 +370,7 @@ class EntregaVendaHelper {
     return ProdutoEmbalagem.formatarQuantidadeItemImpressaoComUnidade(
       produto: produtoItemEntrega(item, obterProduto: obterProduto),
       quantidadeArmazenada: raw,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
   }
 
@@ -407,6 +416,7 @@ class EntregaVendaHelper {
     return ProdutoEmbalagem.quantidadeVendaEfetivaItem(
       produto: produtoItemEntrega(item, obterProduto: obterProduto),
       quantidadeArmazenada: raw,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
   }
 
@@ -446,6 +456,7 @@ class EntregaVendaHelper {
     Produto? Function(int id)? obterProduto,
     int? quantidadeArmazenada,
   }) {
+    if (item.quantidadeEmMilesimosPersistida == true) return true;
     final p = produtoItemEntrega(item, obterProduto: obterProduto);
     if (p == null) return false;
     final raw = quantidadeArmazenada ?? item.quantidade;
@@ -463,6 +474,7 @@ class EntregaVendaHelper {
     return ProdutoEmbalagem.formatarQuantidadeItemImpressaoComUnidade(
       produto: produtoItemEntrega(item, obterProduto: obterProduto),
       quantidadeArmazenada: quantidadeArmazenada,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
   }
 
@@ -475,6 +487,7 @@ class EntregaVendaHelper {
     return ProdutoEmbalagem.formatarQuantidadeItemImpressao(
       produto: produtoItemEntrega(item, obterProduto: obterProduto),
       quantidadeArmazenada: quantidadeArmazenada,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
   }
 
@@ -484,6 +497,7 @@ class EntregaVendaHelper {
     required int quantidadeArmazenadaReferencia,
     Produto? Function(int id)? obterProduto,
   }) {
+    if (item.quantidadeEmMilesimosPersistida == true) return true;
     final p = produtoItemEntrega(item, obterProduto: obterProduto);
     if (p == null) return false;
     if (ProdutoEmbalagem.leituraUsaEscalaFracionada(
@@ -560,8 +574,61 @@ class EntregaVendaHelper {
     return tipoEfetivoItem(item) == tipoEntregaLoja;
   }
 
+  static const String rotuloBlocoEntregaImpressao =
+      'DADOS PARA ENTREGA / CARRETO';
+
   static const String tituloBlocoEntregaImpressao =
-      '--- DADOS PARA ENTREGA / CARRETO ---';
+      '--- $rotuloBlocoEntregaImpressao ---';
+
+  static final RegExp _carimboDataLog = RegExp(r'\[\d{2}/\d{2}/\d{4}[^\]]*\]');
+
+  static final List<RegExp> _linhasLogInterno = [
+    RegExp(r'^[A-Z]+(?:_[A-Z]+)+\b'),
+    RegExp(r'^Quem retirou\s*:', caseSensitive: false),
+    RegExp(r'^Retirada\s*\([^)]*\)\s*:', caseSensitive: false),
+    RegExp(r'^Retirada \S+ em .+\.$', caseSensitive: false),
+    RegExp(r'^Patio (separou|vai separar)\b', caseSensitive: false),
+  ];
+
+  /// Linhas de [Venda.observacaoEntrega] digitadas na venda, sem o historico
+  /// que o patio/entregas anexa ao mesmo campo (`[dd/MM/yyyy HH:mm] STATUS
+  /// por ...`). O campo gravado nao muda: telas internas ainda leem o log.
+  static List<String> observacaoEntregaParaCliente(String observacao) {
+    final out = <String>[];
+    for (final raw in observacao.split('\n')) {
+      var t = raw.trim();
+      final carimbo = _carimboDataLog.firstMatch(t);
+      if (carimbo != null) t = t.substring(0, carimbo.start).trim();
+      if (t.isEmpty) continue;
+      if (_linhasLogInterno.any((re) => re.hasMatch(t))) continue;
+      out.add(t);
+    }
+    return out;
+  }
+
+  /// Telefone BR para comprovantes: `(71) 98225-0887` / `(71) 3222-1234`.
+  static String formatarTelefoneImpressao(String telefone) {
+    final bruto = telefone.trim();
+    var d = bruto.replaceAll(RegExp(r'\D'), '');
+    if (d.startsWith('55') && (d.length == 12 || d.length == 13)) {
+      d = d.substring(2);
+    }
+    if (d.startsWith('0') && (d.length == 11 || d.length == 12)) {
+      d = d.substring(1);
+    }
+    switch (d.length) {
+      case 11:
+        return '(${d.substring(0, 2)}) ${d.substring(2, 7)}-${d.substring(7)}';
+      case 10:
+        return '(${d.substring(0, 2)}) ${d.substring(2, 6)}-${d.substring(6)}';
+      case 9:
+        return '${d.substring(0, 5)}-${d.substring(5)}';
+      case 8:
+        return '${d.substring(0, 4)}-${d.substring(4)}';
+      default:
+        return bruto;
+    }
+  }
 
   /// Aliases legados do cabecalho (`carreto`, `entrega`, etc.).
   static bool tipoEntregaEhCarreto(String? tipo) {
@@ -593,74 +660,122 @@ class EntregaVendaHelper {
     required Venda venda,
     Cliente? cliente,
     List<ItemVenda>? itens,
+  }) =>
+      linhasBlocoEntregaImpressaoDetalhadas(
+        venda: venda,
+        cliente: cliente,
+        itens: itens,
+      ).map((l) => l.texto).toList();
+
+  /// Igual a [linhasBlocoEntregaImpressao], com bairro e referencia/obs
+  /// marcados para impressao em destaque.
+  static List<LinhaEntregaImpressao> linhasBlocoEntregaImpressaoDetalhadas({
+    required Venda venda,
+    Cliente? cliente,
+    List<ItemVenda>? itens,
   }) {
     if (!vendaDeveImprimirBlocoEntrega(venda, itens: itens)) {
       return const [];
     }
 
-    final linhas = <String>[];
+    final obsCliente = observacaoEntregaParaCliente(venda.observacaoEntrega);
+    final linhas = <LinhaEntregaImpressao>[];
     final nome = cliente?.nomeRazao.trim() ?? '';
     if (nome.isNotEmpty) {
-      linhas.add('Nome: $nome');
+      linhas.add(LinhaEntregaImpressao('Nome: $nome'));
     }
 
     final tel = cliente?.telefone.trim() ?? '';
     if (tel.isNotEmpty) {
-      linhas.add('Telefone/WhatsApp: $tel');
+      linhas.add(
+        LinhaEntregaImpressao(
+          'Telefone/WhatsApp: ${formatarTelefoneImpressao(tel)}',
+        ),
+      );
     }
 
     final enderecoGravado = venda.enderecoEntrega.trim();
     if (enderecoGravado.isNotEmpty) {
-      linhas.add('Endereco: $enderecoGravado');
+      linhas.addAll(_linhasEnderecoGravado(enderecoGravado));
     } else {
       final padrao = cliente?.enderecoPadraoEntrega();
       if (padrao != null) {
-        final partes = <String>[];
         final ruaNumero = [
           padrao.endereco.trim(),
           padrao.numero.trim(),
         ].where((p) => p.isNotEmpty).join(', ');
-        if (ruaNumero.isNotEmpty) partes.add(ruaNumero);
+        if (ruaNumero.isNotEmpty) {
+          linhas.add(LinhaEntregaImpressao('Endereco: $ruaNumero'));
+        }
         if (padrao.bairro.trim().isNotEmpty) {
-          partes.add(padrao.bairro.trim());
+          linhas.add(
+            LinhaEntregaImpressao(
+              'BAIRRO: ${padrao.bairro.trim().toUpperCase()}',
+              destaque: true,
+            ),
+          );
         }
         final cidadeUf = [
           padrao.cidade.trim(),
           padrao.uf.trim(),
         ].where((p) => p.isNotEmpty).join(' - ');
-        if (cidadeUf.isNotEmpty) partes.add(cidadeUf);
-        if (partes.isNotEmpty) {
-          linhas.add('Endereco: ${partes.join(' | ')}');
+        if (cidadeUf.isNotEmpty) {
+          linhas.add(LinhaEntregaImpressao('Cidade: $cidadeUf'));
         }
         final refCliente = padrao.referencia.trim();
         if (refCliente.isNotEmpty &&
-            !venda.observacaoEntrega.trim().contains(refCliente)) {
-          linhas.add('Referencia: $refCliente');
+            !obsCliente.any((l) => l.contains(refCliente))) {
+          linhas.add(
+            LinhaEntregaImpressao('REFERENCIA: $refCliente', destaque: true),
+          );
         }
       }
     }
 
-    final obs = venda.observacaoEntrega.trim();
-    if (obs.isNotEmpty) {
-      for (final linha in obs.split('\n')) {
-        final t = linha.trim();
-        if (t.isEmpty) continue;
-        linhas.add(
-          t.toLowerCase().startsWith('obs')
-              ? t
-              : 'Obs entrega: $t',
-        );
-      }
+    for (final t in obsCliente) {
+      linhas.add(
+        LinhaEntregaImpressao(
+          t.toLowerCase().startsWith('obs') ? t : 'OBS/REFERENCIA: $t',
+          destaque: true,
+        ),
+      );
     }
 
     if (linhas.isEmpty) {
-      linhas.add('Modalidade: ${rotuloTipoEntregaVenda(venda.tipoEntrega)}');
+      linhas.add(
+        LinhaEntregaImpressao(
+          'Modalidade: ${rotuloTipoEntregaVenda(venda.tipoEntrega)}',
+        ),
+      );
     }
 
     return linhas;
   }
 
-  /// Divisoria + titulo + corpo (estimativa para altura do PDF).
+  /// Endereco gravado no formato de [EnderecoCliente.resumo]
+  /// (`Rua, n | Bairro | Cidade - UF | CEP: ...`); texto livre fica em uma linha.
+  static List<LinhaEntregaImpressao> _linhasEnderecoGravado(String endereco) {
+    final partes = endereco
+        .split('|')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    final bairroProvavel = partes.length >= 3 &&
+        !partes[1].toUpperCase().startsWith('CEP');
+    if (!bairroProvavel) {
+      return [LinhaEntregaImpressao('Endereco: $endereco')];
+    }
+    return [
+      LinhaEntregaImpressao('Endereco: ${partes[0]}'),
+      LinhaEntregaImpressao(
+        'BAIRRO: ${partes[1].toUpperCase()}',
+        destaque: true,
+      ),
+      LinhaEntregaImpressao('Cidade: ${partes.sublist(2).join(' | ')}'),
+    ];
+  }
+
+  /// Divisorias + titulo + corpo (estimativa para altura do PDF).
   static int contarLinhasBlocoEntregaImpressao({
     required Venda venda,
     Cliente? cliente,
@@ -672,7 +787,7 @@ class EntregaVendaHelper {
       itens: itens,
     );
     if (corpo.isEmpty) return 0;
-    return 2 + corpo.length;
+    return 3 + corpo.length;
   }
 
   static String resumoContagem(Iterable<String> tiposItens) {

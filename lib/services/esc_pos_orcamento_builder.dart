@@ -190,6 +190,7 @@ abstract final class EscPosOrcamentoBuilder {
         final qtdEfetiva = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
           produto: produto,
           quantidadeArmazenada: item.quantidade,
+          emMilesimos: item.quantidadeEmMilesimosPersistida,
         );
         final snap = item.nomeProduto.trim();
         final nome = produto != null

@@ -82,6 +82,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         return ItemVendaInput(
           produtoId: (m['produtoId'] as num?)?.toInt() ?? 0,
           quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
+          quantidadeEmMilesimos: m['quantidadeEmMilesimos'] as bool?,
           precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
           precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
           tipoEntregaItem: (m['tipoEntregaItem'] ?? '').toString(),
@@ -172,6 +173,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         return ItemVendaInput(
           produtoId: (m['produtoId'] as num?)?.toInt() ?? 0,
           quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
+          quantidadeEmMilesimos: m['quantidadeEmMilesimos'] as bool?,
           precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
           precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
           tipoEntregaItem: (m['tipoEntregaItem'] ?? '').toString(),
@@ -372,6 +374,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
               'lojaOrigemMercadoria': i.lojaOrigemMercadoria,
               'buscarNaLojaStatus': i.buscarNaLojaStatus,
               'quantidadeBuscarNaLoja': i.quantidadeBuscarNaLoja,
+              'quantidadeEmMilesimos': i.quantidadeEmMilesimosResolvida,
               'produtoId': i.produto.targetId,
             },
           )
@@ -577,6 +580,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         ItemVendaInput(
           produtoId: (m['produtoId'] as num?)?.toInt() ?? 0,
           quantidade: (m['quantidade'] as num?)?.toInt() ?? 0,
+          quantidadeEmMilesimos: m['quantidadeEmMilesimos'] as bool?,
           precoUnitario: (m['precoUnitario'] as num?)?.toDouble() ?? 0,
           precoTipo: (m['precoTipo'] ?? 'preco1').toString(),
           tipoEntregaItem: (m['tipoEntregaItem'] ?? '').toString(),

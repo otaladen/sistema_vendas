@@ -48,7 +48,6 @@ class CupomLayoutPreviewPdf {
     final comLogo = logoBytes.isNotEmpty;
     final agora = DateTime.now();
     final dataHora = DateFormat('dd/MM/yyyy HH:mm:ss').format(agora);
-    final qtdLegado = NumberFormat('#,##0.000', 'pt_BR');
     final modelo = empresaModeloPdfDeString(empresa.modeloPdf);
     final doc = CupomPdfLayout.criarDocumento(layout);
 
@@ -111,6 +110,10 @@ class CupomLayoutPreviewPdf {
                   endereco: empresa.endereco,
                   logoBytes: null,
                 ),
+                CupomPdfLayout.faixaControleViaLegadoLdv(
+                  layout: layout,
+                  controle: '#$numeroExemplo',
+                ),
                 CupomPdfLayout.faixaTituloDocumentoLegadoLdv(
                   layout: layout,
                   linha1: CupomPdfLayout.tituloDanfeNfceLegadoLinha1,
@@ -123,7 +126,7 @@ class CupomLayoutPreviewPdf {
                   codigo: '001',
                   unidade: 'SC',
                   descricao: itens[0].nome,
-                  quantidade: qtdLegado.format(itens[0].qtd),
+                  quantidade: '${itens[0].qtd}',
                   vlBruto: _valor(itens[0].qtd * itens[0].unit),
                   desconto: _valor(0),
                   vlUnit: _valor(itens[0].unit),
@@ -135,7 +138,7 @@ class CupomLayoutPreviewPdf {
                   codigo: '002',
                   unidade: 'GL',
                   descricao: itens[1].nome,
-                  quantidade: qtdLegado.format(itens[1].qtd),
+                  quantidade: '${itens[1].qtd}',
                   vlBruto: _valor(itens[1].qtd * itens[1].unit),
                   desconto: _valor(0),
                   vlUnit: _valor(itens[1].unit),
@@ -164,7 +167,7 @@ class CupomLayoutPreviewPdf {
                   numero: numeroExemplo,
                   serie: serieExemplo,
                   emissao: dataHora,
-                  via: 'VIA CONSUMIDOR',
+                  via: '',
                 ),
                 CupomPdfLayout.blocoConsultaChaveAcessoLegadoLdv(
                   layout: layout,

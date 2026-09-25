@@ -303,6 +303,7 @@ class _CaixaPageState extends State<CaixaPage>
     final qtd = ProdutoEmbalagem.quantidadeVendaEfetivaItem(
       produto: _produtoDoItem(item),
       quantidadeArmazenada: item.quantidade,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
     return qtd * item.precoUnitario;
   }
@@ -4253,6 +4254,7 @@ class _CaixaPageState extends State<CaixaPage>
     final passo = ProdutoEmbalagem.passoQuantidadeArmazenada(
       produto: _produtoDoItem(item),
       quantidadeArmazenada: item.quantidade,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
     final novaQtd = item.quantidade + delta * passo;
     if (novaQtd <= 0) {
@@ -4292,7 +4294,7 @@ class _CaixaPageState extends State<CaixaPage>
       CaixaFeedback.sucesso(
         context,
         'Quantidade atualizada: ${item.nomeProduto} '
-        '(${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: _produtoDoItem(item), quantidadeArmazenada: novaQtd)}).',
+        '(${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: _produtoDoItem(item), quantidadeArmazenada: novaQtd, emMilesimos: item.quantidadeEmMilesimosPersistida)}).',
       );
     } catch (e) {
       if (!mounted) return;
@@ -4320,7 +4322,7 @@ class _CaixaPageState extends State<CaixaPage>
         title: const Text('Remover item do orcamento?'),
         content: Text(
           '${item.nomeProduto}\n\n'
-          'Quantidade: ${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: _produtoDoItem(item), quantidadeArmazenada: item.quantidade)}\n'
+          'Quantidade: ${ProdutoEmbalagem.textoQuantidadeArmazenada(produto: _produtoDoItem(item), quantidadeArmazenada: item.quantidade, emMilesimos: item.quantidadeEmMilesimosPersistida)}\n'
           'Valor da linha: ${_formatarMoeda(_subtotalLinhaItem(item))}\n\n'
           'O total sera recalculado automaticamente.',
         ),
@@ -4827,6 +4829,7 @@ class _CaixaPageState extends State<CaixaPage>
           ItemVendaInput(
             produtoId: produto.id,
             quantidade: qArmazenada,
+            quantidadeEmMilesimos: fracionada,
             precoUnitario: resPreco.precoFinal,
             precoTipo: resPreco.precoTipo,
             tipoEntregaItem: tipoEntregaItem,
@@ -4841,6 +4844,7 @@ class _CaixaPageState extends State<CaixaPage>
           ItemVendaInput(
             produtoId: produto.id,
             quantidade: qArmazenada,
+            quantidadeEmMilesimos: fracionada,
             precoUnitario: resPreco.precoFinal,
             precoTipo: resPreco.precoTipo,
             tipoEntregaItem: tipoEntregaItem,
@@ -7664,10 +7668,12 @@ class _CaixaPageState extends State<CaixaPage>
                   final passoQtd = ProdutoEmbalagem.passoQuantidadeArmazenada(
                     produto: produto,
                     quantidadeArmazenada: item.quantidade,
+                    emMilesimos: item.quantidadeEmMilesimosPersistida,
                   );
                   final qtdTexto = ProdutoEmbalagem.textoQuantidadeArmazenada(
                     produto: produto,
                     quantidadeArmazenada: item.quantidade,
+                    emMilesimos: item.quantidadeEmMilesimosPersistida,
                   );
                   final noMinimo = item.quantidade <= passoQtd;
                   final fundoTipo = PdvBotaoTipoEntregaItem.fundoPara(

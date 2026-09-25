@@ -6884,6 +6884,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             (item) => ItemVendaInput(
               produtoId: item.produto.id,
               quantidade: item.quantidadeParaPersistir,
+              quantidadeEmMilesimos: item.quantidadePersistidaEmMilesimos,
               precoUnitario: item.precoUnitario,
               precoTipo: item.precoTipo,
               tipoEntregaItem: item.tipoEntregaItem,
@@ -7540,9 +7541,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           precoUnitarioManual: item.precoUnitarioManual,
           tipoEntregaItem: tipoItem,
           quantidadeEmUnidadeCompra: qCarrinho.emUnidadeCompra,
-          gravadoEmMilesimosPdv: ProdutoEmbalagem.leituraUsaEscalaFracionada(
-            produto,
-            item.quantidade,
+          gravadoEmMilesimosPdv: ProdutoEmbalagem.leituraArmazenadaEmMilesimos(
+            produto: produto,
+            quantidadeArmazenada: item.quantidade,
+            emMilesimos: item.quantidadeEmMilesimosPersistida,
           ),
           promocaoId: item.promocaoId,
           promocaoNome: item.promocaoNomeSnapshot,
@@ -10122,6 +10124,16 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
         emUnidadeCompra: quantidadeEmUnidadeCompra,
       );
 
+  bool get quantidadePersistidaEmMilesimos {
+    if (quantidadeEmUnidadeCompra && produto.pdvPodeVenderEmUnidadeCompra) {
+      return ProdutoEmbalagem.exigeQuantidadeDecimalUnidadeVenda(
+        produto,
+        quantidadeVendaEfetiva,
+      );
+    }
+    return usaArmazenamentoFracionado;
+  }
+
   @override
   int get quantidadeEstoque => quantidadeVendaEfetiva.ceil().clamp(0, 1 << 30);
 
@@ -10130,6 +10142,7 @@ class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {
         produto: produto,
         quantidadeDigitada: quantidade,
         emUnidadeCompra: quantidadeEmUnidadeCompra,
+        emMilesimos: usaArmazenamentoFracionado,
       );
 
   String get unidadeMedidaExibicao {

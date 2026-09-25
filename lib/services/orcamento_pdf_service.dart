@@ -67,6 +67,7 @@ abstract final class OrcamentoPdfService {
     return ProdutoEmbalagem.formatarQuantidadeItemImpressaoComUnidade(
       produto: produto,
       quantidadeArmazenada: item.quantidade,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
   }
 
@@ -288,6 +289,7 @@ abstract final class OrcamentoPdfService {
                       ProdutoEmbalagem.quantidadeVendaEfetivaItem(
                     produto: produto,
                     quantidadeArmazenada: item.quantidade,
+                    emMilesimos: item.quantidadeEmMilesimosPersistida,
                   );
                   final snap = item.nomeProduto.trim();
                   final nome = produto != null

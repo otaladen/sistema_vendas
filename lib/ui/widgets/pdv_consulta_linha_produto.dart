@@ -147,7 +147,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
               SizedBox(
                 width: PdvConsultaColunas.larguraUnidade,
                 child: Text(
-                  rotuloUnidadeProdutoLista(produto),
+                  rotuloUnidadeProdutoExibicao(produto.unidade),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,

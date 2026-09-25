@@ -262,10 +262,14 @@ class ItemVendaInput {
     this.precoUnitarioManual = false,
     this.botaForaAplicado = false,
     this.percentualBotaForaAplicado = 0,
+    this.quantidadeEmMilesimos,
   });
 
   final int produtoId;
   final int quantidade;
+
+  /// Escala de [quantidade] decidida no PDV (`null` = heuristica legada).
+  final bool? quantidadeEmMilesimos;
   final double precoUnitario;
   final String precoTipo;
   final String tipoEntregaItem;
@@ -304,6 +308,7 @@ ItemVenda _criarItemVendaFromInput(
     precoUnitarioManual: input.precoUnitarioManual,
     botaForaAplicado: input.botaForaAplicado,
     percentualBotaForaAplicado: input.percentualBotaForaAplicado,
+    escalaQuantidade: ItemVenda.escalaDeFlag(input.quantidadeEmMilesimos),
   );
 }
 
@@ -2329,6 +2334,8 @@ class VendaRepository {
           precoTipo: input.precoTipo,
           precoUnitario: input.precoUnitario,
           precoCustoUnitario: produto.precoCusto,
+          escalaQuantidade:
+              ItemVenda.escalaDeFlag(input.quantidadeEmMilesimos),
         );
         item.produto.target = produto;
         itens.add(item);

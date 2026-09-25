@@ -10,6 +10,7 @@ import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/pagamento_orcamento.dart';
+import '../domain/pagamentos_recebidos_caixa.dart';
 import '../domain/plano_fiado.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
@@ -84,6 +85,53 @@ class CupomNaoFiscalVendaPdf {
     final linhas = PagamentoOrcamentoCodec.decode(v.pagamentosJson);
     if (linhas.isEmpty) return 'Misto';
     return _textoDetalheLinhasPagamento(linhas);
+  }
+
+  /// Linhas `forma | valor` do bloco de pagamento (misto detalhado por meio).
+  /// Misto: mesmas linhas enviadas a Focus NFe (dinheiro com o valor entregue).
+  static List<({String forma, double valor})> linhasPagamentoCupom(
+    Venda v, {
+    required double totalRecebido,
+    double? troco,
+  }) {
+    if (v.formaPagamento == 'misto' && v.pagamentosJson.trim().isNotEmpty) {
+      final linhas = PagamentosRecebidosCaixa.linhasMisto(
+        v,
+        troco: troco != null && troco > 0.009 ? troco : null,
+      );
+      if (linhas.isNotEmpty) {
+        return linhas
+            .map(
+              (l) => (
+                forma: _rotuloFormaComParcelas(l.meio, l.valor, l.parcelas),
+                valor: l.valor,
+              ),
+            )
+            .toList();
+      }
+    }
+    return [
+      (
+        forma: _rotuloFormaComParcelas(
+          v.formaPagamento,
+          v.total,
+          v.quantidadeParcelas,
+        ),
+        valor: totalRecebido > 0.009 ? totalRecebido : v.total,
+      ),
+    ];
+  }
+
+  static String _rotuloFormaComParcelas(
+    String meio,
+    double valor,
+    int parcelas,
+  ) {
+    final rotulo = rotuloFormaPagamento(meio);
+    if (meio == 'cartao_credito' && parcelas > 1) {
+      return '$rotulo ${parcelas}x ${formatarValorNumerico(valor / parcelas)}';
+    }
+    return rotulo;
   }
 
   static String rotuloTipoEntrega(String tipoEntrega) =>
@@ -168,6 +216,11 @@ class CupomNaoFiscalVendaPdf {
         temDesconto: venda.descontoImplicitoTotal > 0,
         temEntrega: EntregaVendaHelper.vendaDeveImprimirBlocoEntrega(
           venda,
+          itens: itens,
+        ),
+        linhasEntrega: EntregaVendaHelper.contarLinhasBlocoEntregaImpressao(
+          venda: venda,
+          cliente: cliente,
           itens: itens,
         ),
         temFiado: PlanoFiadoCodec.vendaTemPlanoQuitacao(venda),
@@ -280,11 +333,6 @@ class CupomNaoFiscalVendaPdf {
     );
   }
 
-  static String _quantidadeItemLegado(ItemVenda item) {
-    final q = item.quantidadeVendaEfetiva;
-    return NumberFormat('#,##0.000', 'pt_BR').format(q);
-  }
-
   static bool _chaveNfceValida(Venda venda) =>
       CupomPdfLayout.chaveAcessoSomenteDigitos(venda.nfceChaveAcesso).length ==
       44;
@@ -297,6 +345,7 @@ class CupomNaoFiscalVendaPdf {
     return ProdutoEmbalagem.formatarQuantidadeItemImpressao(
       produto: item.produtoOuNull,
       quantidadeArmazenada: item.quantidade,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
     );
   }
 
@@ -333,17 +382,15 @@ class CupomNaoFiscalVendaPdf {
     final exibirAvisoContingencia = !chaveValida || contingenciaSefaz;
     final temNfceIdentificada =
         chaveValida || venda.nfceNumero.trim().isNotEmpty;
-    final linhasMisto = venda.formaPagamento == 'misto' &&
-            venda.pagamentosJson.trim().isNotEmpty
-        ? PagamentoOrcamentoCodec.decode(venda.pagamentosJson)
-            .map(
-              (l) => (
-                forma: rotuloFormaPagamento(l.meio),
-                valor: formatarValorNumerico(l.valor),
-              ),
-            )
-            .toList()
-        : const <({String forma, String valor})>[];
+    final linhasPagamento = linhasPagamentoCupom(
+      venda,
+      totalRecebido: totalRecebido,
+      troco: troco,
+    )
+        .map(
+          (l) => (forma: l.forma, valor: formatarValorNumerico(l.valor)),
+        )
+        .toList();
 
     final numeroDocumento = temNfceIdentificada
         ? _numeroNfceExibicao(venda)
@@ -371,6 +418,11 @@ class CupomNaoFiscalVendaPdf {
         logoBytes: null,
       ),
       if (homolog) _faixaHomologacaoFiscal(layout),
+      CupomPdfLayout.faixaControleViaLegadoLdv(
+        layout: layout,
+        controle: VendaDocumentoRotuloHelper.hashIdentificadorEntrega(venda),
+        via: segundaVia ? 'SEGUNDA VIA' : 'VIA CONSUMIDOR',
+      ),
       CupomPdfLayout.faixaTituloDocumentoLegadoLdv(
         layout: layout,
         linha1: CupomPdfLayout.tituloDanfeNfceLegadoLinha1,
@@ -392,7 +444,7 @@ class CupomNaoFiscalVendaPdf {
           codigo: dados.codigo,
           unidade: dados.unidade,
           descricao: nomeImp,
-          quantidade: _quantidadeItemLegado(item),
+          quantidade: _quantidadeItemNfce(item),
           vlBruto: formatarValorNumerico(vlBruto),
           desconto: formatarValorNumerico(descLinha),
           vlUnit: formatarValorNumerico(item.precoUnitario),
@@ -413,13 +465,13 @@ class CupomNaoFiscalVendaPdf {
         formaPagamento: _rotuloFormaPagamentoResumo(venda),
         valorPago: formatarValorNumerico(totalRecebido),
         troco: formatarValorNumerico(troco),
-        linhasMisto: linhasMisto,
+        linhasMisto: linhasPagamento,
       ),
       if (exibirAvisoContingencia)
         CupomPdfLayout.faixaContingenciaAposPagamentoLegadoLdv(layout: layout),
-      ...CupomPdfLayout.blocoDadosEntregaCarreto(
+      ...CupomPdfLayout.blocoDadosEntregaCarretoDetalhado(
         layout: layout,
-        linhas: EntregaVendaHelper.linhasBlocoEntregaImpressao(
+        linhas: EntregaVendaHelper.linhasBlocoEntregaImpressaoDetalhadas(
           venda: venda,
           cliente: cliente,
           itens: itensCupom,
@@ -433,16 +485,10 @@ class CupomNaoFiscalVendaPdf {
             ? DateFormat('dd/MM/yyyy HH:mm:ss')
                 .format(venda.nfceEmitidaEm!.toLocal())
             : _emissaoLegadoComSegundos(dataLinhaPrincipal),
-        via: segundaVia ? 'SEGUNDA VIA' : 'VIA CONSUMIDOR',
-        linhaExtra: () {
-          final extras = <String>[
-            VendaDocumentoRotuloHelper.rotuloControleInterno(venda),
-          ];
-          if (segundaVia && dataReimpressao != null) {
-            extras.add('Reimpressao: $dataReimpressao');
-          }
-          return extras.join('\n');
-        }(),
+        via: '',
+        linhaExtra: segundaVia && dataReimpressao != null
+            ? 'Reimpressao: $dataReimpressao'
+            : null,
       ),
       CupomPdfLayout.blocoConsultaChaveAcessoLegadoLdv(
         layout: layout,
@@ -494,7 +540,8 @@ class CupomNaoFiscalVendaPdf {
   }) {
     final itensCupom = _itensDaVenda(venda, itens);
     final descontoNota = venda.descontoImplicitoTotal;
-    final linhasEntrega = EntregaVendaHelper.linhasBlocoEntregaImpressao(
+    final linhasEntrega =
+        EntregaVendaHelper.linhasBlocoEntregaImpressaoDetalhadas(
       venda: venda,
       cliente: cliente,
       itens: itensCupom,
@@ -559,7 +606,7 @@ class CupomNaoFiscalVendaPdf {
           'Telefone: ${cliente!.telefone}',
           layout,
         ),
-      ...CupomPdfLayout.blocoDadosEntregaCarreto(
+      ...CupomPdfLayout.blocoDadosEntregaCarretoDetalhado(
         layout: layout,
         linhas: linhasEntrega,
       ),

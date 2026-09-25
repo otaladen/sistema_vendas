@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../config/fiscal_config.dart';
+import '../domain/entrega_venda_helper.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
 
@@ -250,20 +251,36 @@ class CupomPdfLayout {
   static List<pw.Widget> blocoDadosEntregaCarreto({
     required ConfigLayoutImpressao layout,
     required List<String> linhas,
+  }) =>
+      blocoDadosEntregaCarretoDetalhado(
+        layout: layout,
+        linhas: linhas.map(LinhaEntregaImpressao.new).toList(),
+      );
+
+  /// Bloco de entrega entre divisorias; linhas com destaque saem em negrito.
+  static List<pw.Widget> blocoDadosEntregaCarretoDetalhado({
+    required ConfigLayoutImpressao layout,
+    required List<LinhaEntregaImpressao> linhas,
   }) {
     if (linhas.isEmpty) return const [];
     return [
-      divisoriaSecao(layout: layout),
-      tituloSecao(
-        '--- DADOS PARA ENTREGA / CARRETO ---',
+      divisoriaSecao(layout: layout, destaque: true),
+      _textoCentralizado(
         layout,
+        texto: EntregaVendaHelper.rotuloBlocoEntregaImpressao,
+        fontSize: layout.tamanhoFonteCorpo.fontSizeCorpo,
+        fontWeight: pw.FontWeight.bold,
       ),
+      divisoriaSecao(layout: layout, compacta: true),
       ...linhas.map(
         (linha) => textoCorpo(
-          textoTermicoAscii(linha),
+          textoTermicoAscii(linha.texto),
           layout,
+          fontWeight:
+              linha.destaque ? pw.FontWeight.bold : pw.FontWeight.normal,
         ),
       ),
+      divisoriaSecao(layout: layout, destaque: true),
     ];
   }
 
@@ -1588,18 +1605,40 @@ class CupomPdfLayout {
     );
   }
 
+  /// Faixa `CONTROLE: #N | VIA CONSUMIDOR` logo abaixo dos dados da loja.
+  static pw.Widget faixaControleViaLegadoLdv({
+    required ConfigLayoutImpressao layout,
+    required String controle,
+    String via = 'VIA CONSUMIDOR',
+  }) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        divisoriaSecao(layout: layout, compacta: true),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+        _textoCentralizado(
+          layout,
+          texto: 'CONTROLE: $controle | ${via.toUpperCase()}',
+          fontSize: layout.tamanhoFonteCorpo.fontSizeTipoDocumento,
+          fontWeight: pw.FontWeight.bold,
+        ),
+        pw.SizedBox(height: 0.35 * PdfPageFormat.mm),
+      ],
+    );
+  }
+
   static pw.Widget cabecalhoTabelaItensLegadoLdv(ConfigLayoutImpressao layout) {
     final fs = layout.tamanhoFonteItens.fontSizeItemDetalhe - 0.5;
     final estiloCab = estilo(layout, fontSize: fs, fontWeight: pw.FontWeight.bold);
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        pw.Text('CODIGO / DESCRICAO', style: estiloCab),
+        pw.Text('CODIGO - DESCRICAO', style: estiloCab),
         pw.SizedBox(height: 0.3 * PdfPageFormat.mm),
         linhaColunas(
           layout: layout,
-          esquerda: 'QTD x UN    VALOR UN',
-          direita: 'TOTAL',
+          esquerda: 'QTD UN x VL UNIT',
+          direita: 'SUBTOTAL',
           fontSize: fs,
           fontWeight: pw.FontWeight.bold,
         ),
@@ -1625,9 +1664,10 @@ class CupomPdfLayout {
     final linhaProduto = textoTermicoAscii(
       '${codigo.trim()} - ${descricao.trim()}',
     );
-    final linhaQtd = textoTermicoAscii(
-      '  QTD: ${quantidade.trim()} ${unidade.trim()}  x  R\$ $vlUnit',
-    );
+    final qtdUn = unidade.trim().isEmpty
+        ? quantidade.trim()
+        : '${quantidade.trim()} ${unidade.trim().toUpperCase()}';
+    final linhaQtd = textoTermicoAscii('$qtdUn x R\$ $vlUnit');
 
     return pw.Padding(
       padding: pw.EdgeInsets.only(bottom: 0.35 * PdfPageFormat.mm),
@@ -1644,7 +1684,7 @@ class CupomPdfLayout {
           linhaColunas(
             layout: layout,
             esquerda: linhaQtd,
-            direita: vlTotal,
+            direita: 'R\$ $vlTotal',
             fontSize: fs - 0.5,
             fontWeightDireita: pw.FontWeight.bold,
           ),
@@ -1693,6 +1733,7 @@ class CupomPdfLayout {
             valor: frete,
             fontSize: fs,
           ),
+        divisoriaSecao(layout: layout, destaque: true, compacta: true),
         linhaResumoLegadoLdv(
           layout: layout,
           rotulo: 'VALOR TOTAL R\$',
@@ -1701,6 +1742,7 @@ class CupomPdfLayout {
           fontWeight: pw.FontWeight.bold,
           fontWeightValor: pw.FontWeight.bold,
         ),
+        divisoriaSecao(layout: layout, destaque: true, compacta: true),
       ],
     );
   }
@@ -1715,14 +1757,12 @@ class CupomPdfLayout {
     final fs = layout.tamanhoFonteTotais.fontSizeTotais;
     final forma = formaPagamento.trim().toUpperCase();
     final children = <pw.Widget>[
-      pw.Padding(
-        padding: pw.EdgeInsets.symmetric(vertical: 0.12 * PdfPageFormat.mm),
-        child: _textoCentralizado(
-          layout,
-          texto: 'FORMA DE PAGAMENTO | VALOR PAGO',
-          fontSize: fs,
-          fontWeight: pw.FontWeight.bold,
-        ),
+      linhaResumoLegadoLdv(
+        layout: layout,
+        rotulo: 'FORMA DE PAGAMENTO',
+        valor: 'VALOR PAGO',
+        fontSize: fs,
+        fontWeight: pw.FontWeight.bold,
       ),
     ];
 
@@ -1871,15 +1911,21 @@ class CupomPdfLayout {
         pw.SizedBox(height: 1 * PdfPageFormat.mm),
         _textoCentralizado(
           layout,
-          texto: 'NUMERO: $numFmt SERIE: $serFmt EMISSAO: $emissao',
+          texto: 'NUMERO: $numFmt  SERIE: $serFmt',
           fontSize: fs,
         ),
         _textoCentralizado(
           layout,
-          texto: via.toUpperCase(),
+          texto: 'EMISSAO: $emissao',
           fontSize: fs,
-          fontWeight: pw.FontWeight.bold,
         ),
+        if (via.trim().isNotEmpty)
+          _textoCentralizado(
+            layout,
+            texto: via.toUpperCase(),
+            fontSize: fs,
+            fontWeight: pw.FontWeight.bold,
+          ),
         if (linhaExtra != null && linhaExtra.trim().isNotEmpty)
           _textoCentralizado(
             layout,
@@ -2445,16 +2491,17 @@ class CupomPdfLayout {
     bool segundaVia = false,
     bool temDesconto = false,
     bool temEntrega = false,
+    int linhasEntrega = 0,
     bool temFiado = false,
     int linhasFiado = 0,
     int linhasRodape = 1,
     bool temChave = false,
     bool contingenciaSefaz = false,
   }) {
-    var n = 30 + (qtdItens * 2.5).ceil();
+    var n = 34 + (qtdItens * 2.5).ceil();
     if (segundaVia) n += 3;
     if (temDesconto) n++;
-    if (temEntrega) n += 2;
+    if (temEntrega) n += linhasEntrega > 0 ? linhasEntrega : 4;
     if (temFiado) n += 2 + linhasFiado;
     n += 12;
     if (contingenciaSefaz) n += 3;

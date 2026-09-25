@@ -2045,6 +2045,7 @@ class VendaApiRepository extends ChangeNotifier {
             (i) => {
               'produtoId': i.produtoId,
               'quantidade': i.quantidade,
+              'quantidadeEmMilesimos': i.quantidadeEmMilesimos,
               'precoUnitario': i.precoUnitario,
               'precoTipo': i.precoTipo,
               'tipoEntregaItem': i.tipoEntregaItem,
@@ -2132,6 +2133,7 @@ class VendaApiRepository extends ChangeNotifier {
             (i) => {
               'produtoId': i.produtoId,
               'quantidade': i.quantidade,
+              'quantidadeEmMilesimos': i.quantidadeEmMilesimos,
               'precoUnitario': i.precoUnitario,
               'precoTipo': i.precoTipo,
               'tipoEntregaItem': i.tipoEntregaItem,
@@ -2490,6 +2492,7 @@ class VendaApiRepository extends ChangeNotifier {
       {
         'produtoId': input.produtoId,
         'quantidade': input.quantidade,
+        'quantidadeEmMilesimos': input.quantidadeEmMilesimos,
         'precoUnitario': input.precoUnitario,
         'precoTipo': input.precoTipo,
         'tipoEntregaItem': input.tipoEntregaItem,
