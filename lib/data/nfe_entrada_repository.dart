@@ -19,6 +19,7 @@ import '../services/gerenciador_estoque_service.dart';
 import 'lista_compra_repository.dart';
 import 'nfe_entrada_xml_store.dart';
 import 'objectbox.dart';
+import 'produto_busca_util.dart';
 import 'sync/sync_dirty_outbox.dart';
 import 'sync/sync_write_trigger.dart';
 
@@ -464,7 +465,10 @@ class NfeEntradaRepository {
         produtoIdsAfetados.add(produto.id);
         _db.historicoEntradaBox.remove(h.id);
 
-        if (_podeRemoverProdutoCriadoNaNfe(produto)) {
+        if (_podeRemoverProdutoCriadoNaNfe(
+          produto,
+          dataHoraImportacao: registro.dataHoraImportacao,
+        )) {
           produtosParaRemover.add(produto.id);
         }
       }
@@ -581,6 +585,8 @@ class NfeEntradaRepository {
       }
       final fornecedorId = _db.fornecedorNfeBox.put(fornecedor);
       fornecedor.id = fornecedorId;
+
+      List<String>? skusOcupados;
 
       for (final linha in linhas) {
         final fator = linha.fatorConversao;
@@ -706,7 +712,9 @@ class NfeEntradaRepository {
             }
           }
         } else {
-          final codigoInterno = _gerarCodigoInterno(nfe, linha.item);
+          final ocupados = skusOcupados ??= _listarCodigosInternos();
+          final codigoInterno = proximoSkuNumericoSequencial(ocupados);
+          ocupados.add(codigoInterno);
           final uNota = ProdutoEmbalagem.normalizarUnidade(
             linha.item.unidadeComercial,
           );
@@ -726,6 +734,11 @@ class NfeEntradaRepository {
             quantidadePorEmbalagem: gravarEmbalagemCadastro ? fator : 1,
             embalagemMultiplica: embalagemMultiplica,
             codigoBarras: linha.item.codigoBarras,
+            apelidosBusca: apelidosBuscaComCodigoFornecedor(
+              '',
+              codigoFornecedor: linha.item.codigo,
+              codigoBarras: linha.item.codigoBarras,
+            ),
             ncm: linha.item.ncm,
             fornecedor: nomeFantasiaOuRazao,
             precoCusto: custoUnitInterno,
@@ -922,35 +935,39 @@ class NfeEntradaRepository {
     }
   }
 
-  String _gerarCodigoInterno(NfeXmlParseResult nfe, ItemNotaTemporario item) {
-    final chave = nfe.chaveAcesso.replaceAll(RegExp(r'\D'), '');
-    final sufixo = chave.length >= 8
-        ? chave.substring(chave.length - 8)
-        : chave;
-    final base = 'NFE-$sufixo-${item.numeroItem}';
-    if (_codigoInternoLivre(base)) return base;
-    var i = 0;
-    while (i < 1000) {
-      final tentativa = '$base-$i';
-      if (_codigoInternoLivre(tentativa)) return tentativa;
-      i++;
-    }
-    return '$base-${DateTime.now().millisecondsSinceEpoch}';
-  }
-
-  bool _codigoInternoLivre(String codigo) {
-    final q = _db.produtoBox
-        .query(Produto_.codigoInterno.equals(codigo))
-        .build();
+  List<String> _listarCodigosInternos() {
+    final q = _db.produtoBox.query().build();
     try {
-      return q.find().isEmpty;
+      final pq = q.property(Produto_.codigoInterno);
+      try {
+        return pq.find();
+      } finally {
+        pq.close();
+      }
     } finally {
       q.close();
     }
   }
 
-  bool _podeRemoverProdutoCriadoNaNfe(Produto produto) {
-    if (!produto.codigoInterno.startsWith('NFE-')) return false;
+  /// Produto cadastrado automaticamente na propria confirmacao desta NF-e:
+  /// SKU legado `NFE-...` ou [Produto.criadoEm] colado ao horario da importacao
+  /// (mesma transacao de [confirmarEntrada]).
+  static bool _produtoCriadoNaImportacao(
+    Produto produto,
+    DateTime dataHoraImportacao,
+  ) {
+    if (produto.codigoInterno.trim().toUpperCase().startsWith('NFE-')) {
+      return true;
+    }
+    final delta = dataHoraImportacao.difference(produto.criadoEm).abs();
+    return delta <= const Duration(minutes: 1);
+  }
+
+  bool _podeRemoverProdutoCriadoNaNfe(
+    Produto produto, {
+    required DateTime dataHoraImportacao,
+  }) {
+    if (!_produtoCriadoNaImportacao(produto, dataHoraImportacao)) return false;
     if (produto.estoqueReal != 0 || produto.estoqueReservado != 0) {
       return false;
     }

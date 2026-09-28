@@ -179,6 +179,25 @@ List<String> parseApelidosBusca(String raw) {
   return out;
 }
 
+/// Acrescenta o codigo do produto no fornecedor (`cProd` da NF-e) em
+/// [apelidosAtuais], sem duplicar e sem repetir o EAN ja gravado em
+/// [codigoBarras].
+String apelidosBuscaComCodigoFornecedor(
+  String apelidosAtuais, {
+  required String codigoFornecedor,
+  String codigoBarras = '',
+}) {
+  final codigo = codigoFornecedor.trim();
+  final existentes = parseApelidosBusca(apelidosAtuais);
+  if (codigo.isEmpty ||
+      codigo == codigoBarras.trim() ||
+      existentes.any((a) => a.toLowerCase() == codigo.toLowerCase())) {
+    return apelidosAtuais;
+  }
+  final base = apelidosAtuais.trim();
+  return base.isEmpty ? codigo : '$base; $codigo';
+}
+
 /// Codigos somente-digitos (EAN alternativos) extraidos dos apelidos.
 List<String> codigosBarrasAlternativosDeApelidos(Iterable<String> apelidos) {
   final out = <String>[];
