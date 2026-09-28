@@ -132,6 +132,8 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   late final FocusNode _listaFocus;
   late final ScrollController _scrollController;
   Timer? _debounce;
+  final DetectorEntradaLeitorCodigo _detectorLeitor =
+      DetectorEntradaLeitorCodigo();
   Timer? _debouncePreview;
   SugestaoVendaMetricaRepository? _sugestaoMetricaRepo;
 
@@ -261,22 +263,22 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
 
   void _agendarBuscaDigitacao() {
     _debounce?.cancel();
+    _detectorLeitor.registrarTexto(_pesquisaController.text);
     final comando = PdvPesquisaComando.parse(_pesquisaController.text);
     final termo = comando.termoBusca;
-    if (consultaEanProvavelCompleto(termo)) {
-      _debounce = Timer(const Duration(milliseconds: 120), () {
+    final viaLeitor = _detectorLeitor.pareceLeitor(termo);
+    _debounce = Timer(
+      Duration(
+        milliseconds: viaLeitor || consultaEanProvavelCompleto(termo) ? 120 : 220,
+      ),
+      () {
         if (!mounted) return;
-        _atualizarLista(forcarAutoSeUnico: true, manterFocoNaPesquisa: true);
-      });
-      return;
-    }
-    _debounce = Timer(const Duration(milliseconds: 220), () {
-      if (!mounted) return;
-      _atualizarLista(
-        manterFocoNaPesquisa: true,
-        autoSeUnicoEnquantoDigita: true,
-      );
-    });
+        _atualizarLista(
+          manterFocoNaPesquisa: true,
+          entradaViaLeitor: viaLeitor,
+        );
+      },
+    );
   }
 
   Future<void> _abrirLeitorCameraConsulta() async {
@@ -385,16 +387,14 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
   bool _deveAutoConfirmarResolvido(
     PdvPesquisaResolvida resolvido, {
     required bool forcarAutoSeUnico,
-    required bool autoSeUnicoEnquantoDigita,
+    required bool entradaViaLeitor,
     required String termo,
   }) {
     if (!resolvido.deveAutoSelecionar) return false;
     if (forcarAutoSeUnico) return true;
-    if (!autoSeUnicoEnquantoDigita) return false;
-    return PdvBuscaInteligenteHelper.permiteAutoEnquantoDigita(
+    return PdvBuscaInteligenteHelper.permiteAutoSemEnter(
       termo,
-      matchCodigoBarras:
-          resolvido.motivoAuto == PdvBuscaAutoMotivo.codigoBarras,
+      entradaViaLeitor: entradaViaLeitor,
     );
   }
 
@@ -708,7 +708,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
 
   void _atualizarLista({
     bool forcarAutoSeUnico = false,
-    bool autoSeUnicoEnquantoDigita = false,
+    bool entradaViaLeitor = false,
     bool manterFocoNaPesquisa = false,
     bool focarListaSeTiverItens = false,
   }) {
@@ -741,7 +741,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       if (_deveAutoConfirmarResolvido(
         resolvido,
         forcarAutoSeUnico: forcarAutoSeUnico,
-        autoSeUnicoEnquantoDigita: autoSeUnicoEnquantoDigita,
+        entradaViaLeitor: entradaViaLeitor,
         termo: termo,
       )) {
         _confirmarProduto(resolvido.produtoAuto!, comando: comando);
@@ -771,7 +771,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
           termo,
           comando: comando,
           forcarAutoSeUnico: forcarAutoSeUnico,
-          autoSeUnicoEnquantoDigita: autoSeUnicoEnquantoDigita,
+          entradaViaLeitor: entradaViaLeitor,
           manterFocoNaPesquisa: manterFocoNaPesquisa,
           focarListaSeTiverItens: focarListaSeTiverItens,
         ),
@@ -794,7 +794,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
     String termo, {
     required PdvPesquisaComando comando,
     required bool forcarAutoSeUnico,
-    required bool autoSeUnicoEnquantoDigita,
+    required bool entradaViaLeitor,
     required bool manterFocoNaPesquisa,
     required bool focarListaSeTiverItens,
   }) async {
@@ -828,7 +828,7 @@ class _PdvConsultaProdutosPageState extends State<PdvConsultaProdutosPage> {
       if (_deveAutoConfirmarResolvido(
         resolvido,
         forcarAutoSeUnico: forcarAutoSeUnico,
-        autoSeUnicoEnquantoDigita: autoSeUnicoEnquantoDigita,
+        entradaViaLeitor: entradaViaLeitor,
         termo: termo,
       )) {
         _confirmarProduto(resolvido.produtoAuto!, comando: comando);

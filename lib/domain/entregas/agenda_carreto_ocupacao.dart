@@ -6,6 +6,7 @@ import '../entrega_filtro_util.dart';
 import '../entrega_venda_helper.dart';
 import '../venda_documento_rotulo_helper.dart';
 import '../venda_relacao_safe.dart';
+import 'cargas_entrega.dart';
 
 /// Ocupacao da agenda de carretos (PDV checkout + API).
 class AgendaCarretoOcupacaoMes {
@@ -100,6 +101,7 @@ class AgendaCarretoOcupacaoItem {
     required this.status,
     required this.ehOrcamento,
     this.produtos = const [],
+    this.cargaRotulo = '',
   });
 
   final String dataChave;
@@ -111,6 +113,9 @@ class AgendaCarretoOcupacaoItem {
   final String status;
   final bool ehOrcamento;
   final List<AgendaCarretoProdutoLinha> produtos;
+
+  /// "Carga 2/3" quando a venda foi dividida em varios carretos.
+  final String cargaRotulo;
 
   String get janelaRotulo => AgendaCarretoOcupacaoHelper.rotuloJanela(janela);
   String get statusRotulo => AgendaCarretoOcupacaoHelper.rotuloStatus(status);
@@ -125,6 +130,7 @@ class AgendaCarretoOcupacaoItem {
         'status': status,
         'ehOrcamento': ehOrcamento,
         'produtos': produtos.map((e) => e.paraMap()).toList(),
+        if (cargaRotulo.isNotEmpty) 'cargaRotulo': cargaRotulo,
       };
 
   factory AgendaCarretoOcupacaoItem.deMap(Map<String, dynamic> m) {
@@ -148,22 +154,28 @@ class AgendaCarretoOcupacaoItem {
       status: (m['status'] ?? '').toString(),
       ehOrcamento: m['ehOrcamento'] == true,
       produtos: produtos,
+      cargaRotulo: (m['cargaRotulo'] ?? '').toString(),
     );
   }
 
   AgendaCarretoOcupacaoItem copyWith({
+    String? dataChave,
+    String? janela,
+    String? status,
     List<AgendaCarretoProdutoLinha>? produtos,
+    String? cargaRotulo,
   }) {
     return AgendaCarretoOcupacaoItem(
-      dataChave: dataChave,
+      dataChave: dataChave ?? this.dataChave,
       vendaId: vendaId,
       numero: numero,
       clienteNome: clienteNome,
       bairro: bairro,
-      janela: janela,
-      status: status,
+      janela: janela ?? this.janela,
+      status: status ?? this.status,
       ehOrcamento: ehOrcamento,
       produtos: produtos ?? this.produtos,
+      cargaRotulo: cargaRotulo ?? this.cargaRotulo,
     );
   }
 }
@@ -306,6 +318,52 @@ abstract final class AgendaCarretoOcupacaoHelper {
       ehOrcamento: ehOrc,
       produtos: produtos,
     );
+  }
+
+  /// Venda dividida em cargas: um item por carga pendente no mes (dia da carga).
+  /// Produtos vem sempre preenchidos (do proprio plano, sem ler itens).
+  static List<AgendaCarretoOcupacaoItem> itensDasCargas(
+    Venda venda, {
+    required int ano,
+    required int mes,
+    dynamic clienteRepository,
+  }) {
+    final cargas = CargasEntregaCodec.decode(venda.cargasEntregaJson);
+    if (cargas.isEmpty || venda.dataEntregaMarcada == null) return const [];
+    final baseVenda = itemDeVenda(venda, clienteRepository: clienteRepository);
+    final atual = CargasEntregaHelper.cargaAtual(cargas);
+    final out = <AgendaCarretoOcupacaoItem>[];
+    for (final c in cargas) {
+      final d = c.data;
+      if (c.entregue || d == null) continue;
+      if (d.year != ano || d.month != mes) continue;
+      final ehAtual = c.numero == atual?.numero;
+      out.add(
+        baseVenda.copyWith(
+          dataChave: AgendaCarretoOcupacaoMes.chaveDia(d),
+          janela: c.janela == 'nao_definida' ? baseVenda.janela : c.janela,
+          status: ehAtual ? baseVenda.status : 'pendente',
+          cargaRotulo: 'Carga ${c.numero}/${cargas.length}',
+          produtos: [
+            for (final l in c.linhas)
+              AgendaCarretoProdutoLinha(
+                nomeProduto: l.nomeProduto,
+                quantidade: l.quantidade,
+                quantidadeTexto: _textoQuantidade(l.quantidade),
+              ),
+          ],
+        ),
+      );
+    }
+    return out;
+  }
+
+  static String _textoQuantidade(double q) {
+    if (q == q.roundToDouble()) return '${q.toInt()}';
+    return q
+        .toStringAsFixed(3)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceAll('.', ',');
   }
 
   /// Produtos do carreto (em misto, so linhas entrega_loja).

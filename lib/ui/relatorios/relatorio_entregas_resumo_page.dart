@@ -60,6 +60,18 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
         clienteRepository: widget.clienteRepository,
       );
 
+  int _viagensFeitas() =>
+      _entregas.fold(0, (s, v) => s + relatorioViagensFeitas(v));
+
+  int _viagensTotal() =>
+      _entregas.fold(0, (s, v) => s + relatorioViagensTotal(v));
+
+  String _statusComCarga(Venda v) {
+    final carga = relatorioRotuloCargas(v);
+    final status = relatorioRotuloStatusEntrega(v.statusEntrega);
+    return carga.isEmpty ? status : '$status · $carga';
+  }
+
   Map<String, int> _porStatus() {
     final m = <String, int>{};
     for (final v in _entregas) {
@@ -70,7 +82,16 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
   }
 
   List<List<String>> _linhasCsv() => [
-        ['Nota', 'Cliente', 'Status', 'Data marcada', 'Total'],
+        [
+          'Nota',
+          'Cliente',
+          'Status',
+          'Carga',
+          'Viagens feitas',
+          'Viagens total',
+          'Data marcada',
+          'Total',
+        ],
         ..._entregas.map((v) {
           final cli = _nomeCliente(v);
           final dm = v.dataEntregaMarcada;
@@ -78,6 +99,9 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
             '${v.numeroOrcamento}',
             cli,
             v.statusEntrega,
+            relatorioRotuloCargas(v),
+            '${relatorioViagensFeitas(v)}',
+            '${relatorioViagensTotal(v)}',
             dm != null ? _fmtData.format(dm.toLocal()) : '',
             _fmtMoeda.format(v.total),
           ];
@@ -87,14 +111,15 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
   List<String> _paginasPdf() {
     return relatorioMontarPaginasTabela(
       titulo: 'RESUMO ENTREGAS',
-      subtitulo: '${_entregas.length} pedido(s) com carreto',
+      subtitulo: '${_entregas.length} pedido(s) com carreto · '
+          '${_viagensFeitas()}/${_viagensTotal()} viagem(ns)',
       cabecalho: ['Nota', 'Status', 'Data marc.', 'Cliente'],
       linhas: _entregas
           .take(200)
           .map(
             (v) => [
               '${v.numeroOrcamento}',
-              relatorioRotuloStatusEntrega(v.statusEntrega),
+              _statusComCarga(v),
               v.dataEntregaMarcada != null
                   ? _fmtData.format(v.dataEntregaMarcada!.toLocal())
                   : '-',
@@ -162,6 +187,15 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
                         Colors.grey.shade700,
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _chipResumo(
+                        context,
+                        'Viagens feitas',
+                        '${_viagensFeitas()}/${_viagensTotal()}',
+                        Colors.green.shade700,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -212,7 +246,7 @@ class _RelatorioEntregasResumoPageState extends State<RelatorioEntregasResumoPag
                           'Ped. ${v.numeroOrcamento} · ${_nomeCliente(v)}',
                         ),
                         subtitle: Text(
-                          '${relatorioRotuloStatusEntrega(v.statusEntrega)} · '
+                          '${_statusComCarga(v)} · '
                           '${dm != null ? _fmtData.format(dm.toLocal()) : 'Sem data'} · '
                           'R\$ ${_fmtMoeda.format(v.total)}',
                         ),

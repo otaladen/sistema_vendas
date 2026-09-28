@@ -58,6 +58,7 @@ import '../../domain/pagamento_orcamento.dart';
 import '../../domain/vale_credito.dart';
 import '../../domain/leitura_parcial_caixa.dart';
 import '../../domain/sessao_caixa_referencia.dart';
+import '../../domain/sessao_operacional_guard.dart';
 import '../../domain/plano_fiado.dart';
 import '../../domain/ultimas_vendas_finalizadas_ordenacao.dart';
 import '../../model/caixa_sessao.dart';
@@ -103,6 +104,7 @@ import '../promocao_margem_autorizacao.dart';
 import '../../model/usuario_sistema.dart';
 import 'alterar_pagamento_caixa_dialog.dart';
 import 'autorizacao_gerente_caixa.dart';
+import 'autorizacao_supervisor_caixa_dialog.dart';
 import 'caixa_desconto_dialog.dart';
 import 'caixa_etapa.dart';
 import 'caixa_feedback.dart';
@@ -1946,6 +1948,7 @@ class _CaixaPageState extends State<CaixaPage>
   Future<void> _registrarAuditoriaCaixa(
     String evento, {
     Map<String, dynamic>? detalhes,
+    LanApiClient? clientApi,
   }) async {
     final em = DateTime.now();
     final detalhesFinais = CaixaAuditoriaRepository.enriquecerDetalhes(
@@ -1954,7 +1957,7 @@ class _CaixaPageState extends State<CaixaPage>
       operador: _operadorCaixa,
       detalhes: detalhes,
     );
-    final clientApi = mounted
+    clientApi ??= mounted
         ? MainMenuDeps.maybeOf(context)?.lanApiClient
         : null;
     final registro = <String, dynamic>{
@@ -2017,8 +2020,10 @@ class _CaixaPageState extends State<CaixaPage>
 
   ObjectBox? _objectBoxLocal() {
     try {
-      final viaDeps = MainMenuDeps.maybeOf(context)?.objectBox;
-      if (viaDeps != null) return viaDeps;
+      if (mounted) {
+        final viaDeps = MainMenuDeps.maybeOf(context)?.objectBox;
+        if (viaDeps != null) return viaDeps;
+      }
       final ob = widget.produtoRepository.objectBox;
       if (ob is ObjectBox) return ob;
     } catch (_) {}
@@ -2128,70 +2133,32 @@ class _CaixaPageState extends State<CaixaPage>
     )) {
       return true;
     }
-    final loginController = TextEditingController();
-    final senhaController = TextEditingController();
+    if (!mounted) return false;
     final confirmar = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Autorizacao de supervisor'),
-          content: SingleChildScrollView(
-            child: SizedBox(
-              width: 420,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Divergencia acima de ${_formatarMoeda(limiteAtual)}. '
-                    'Informe credenciais de supervisor/administrador.',
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: loginController,
-                    decoration: const InputDecoration(labelText: 'Login'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: senhaController,
-                    obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Senha'),
-                  ),
-                ],
-              ),
-            ),
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (_) {
+        return AutorizacaoSupervisorCaixaDialog(
+          mensagem:
+              'Divergencia acima de ${_formatarMoeda(limiteAtual)}. '
+              'Informe credenciais de supervisor/administrador.',
+          validarCredenciais: (login, senha) async {
+            final usuario = await _usuarioRepository.autenticar(login, senha);
+            return usuario != null &&
+                usuario.ativo &&
+                (usuario.admin || usuario.podeFinanceiro);
+          },
+          aoCredencialNegada: () => _registrarAuditoriaCaixa(
+            'fechamento_negado_divergencia',
+            detalhes: {
+              'diferencaTotal': diferencaTotal,
+            },
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Autorizar'),
-            ),
-          ],
         );
       },
     );
-    if (confirmar != true) {
-      loginController.dispose();
-      senhaController.dispose();
-      return false;
-    }
-    final login = loginController.text.trim();
-    final senha = senhaController.text.trim();
-    loginController.dispose();
-    senhaController.dispose();
-    final usuario = await _usuarioRepository.autenticar(login, senha);
-    final autorizado = usuario != null && usuario.ativo && (usuario.admin || usuario.podeFinanceiro);
-    if (!autorizado && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Credenciais sem permissao de supervisor/financeiro.'),
-        ),
-      );
-    }
-    return autorizado;
+    return confirmar == true;
   }
 
   Future<void> _abrirHistoricoAuditoria() async {
@@ -3407,12 +3374,22 @@ class _CaixaPageState extends State<CaixaPage>
   }
 
   Future<void> _fecharCaixa() async {
+    SessaoOperacionalGuard.marcarFechamentoCaixaIniciado();
+    try {
+      await _executarFechamentoCaixa();
+    } finally {
+      SessaoOperacionalGuard.marcarFechamentoCaixaConcluido();
+    }
+  }
+
+  Future<void> _executarFechamentoCaixa() async {
     if (!_caixaAberto) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('O caixa ja esta fechado.')));
       return;
     }
+    final clientApiFechamento = MainMenuDeps.maybeOf(context)?.lanApiClient;
     late final Map<String, double> esperados;
     try {
       esperados = await _totaisEsperadosFechamentoAsync();
@@ -3441,7 +3418,7 @@ class _CaixaPageState extends State<CaixaPage>
         ),
       );
       if (tentar == true && mounted) {
-        await _fecharCaixa();
+        await _executarFechamentoCaixa();
       }
       return;
     }
@@ -3452,69 +3429,116 @@ class _CaixaPageState extends State<CaixaPage>
     final creditoController = TextEditingController(text: '0,00');
     final obsController = TextEditingController();
     _registrarDestinoCalculadora(dinheiroController);
+    var autorizandoFechamento = false;
+    // A conferencia so fecha depois da senha do supervisor. Se a senha
+    // estiver errada, este dialogo continua aberto com os valores digitados.
     final confirmar = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Fechamento de caixa'),
-          content: SingleChildScrollView(
-            child: SizedBox(
-              width: 560,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildLinhaConferenciaFechamento(
-                    label: 'Dinheiro',
-                    controller: dinheiroController,
-                    trailing: IconButton(
-                      tooltip: 'Calculadora / contagem (F9)',
-                      icon: const Icon(Icons.calculate_outlined),
-                      onPressed: () {
-                        unawaited(
-                          _abrirCalculadoraSomador(
-                            destino: dinheiroController,
-                          ),
-                        );
-                      },
-                    ),
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (_, setLocal) {
+            Future<void> confirmarFechamento() async {
+              if (autorizandoFechamento) return;
+              setLocal(() => autorizandoFechamento = true);
+              var autorizado = false;
+              try {
+                autorizado = await popDialogoSomenteSeAutorizado(
+                  dialogContext: dialogContext,
+                  autorizar: () {
+                    final dif =
+                        CaixaDivergenciaAutorizacao.divergenciaTotalConferencia(
+                      declaradoDinheiro:
+                          _parseValor(dinheiroController.text) ?? 0,
+                      esperadoDinheiro: esperados['dinheiro'] ?? 0,
+                      declaradoPix: _parseValor(pixController.text) ?? 0,
+                      esperadoPix: esperados['pix'] ?? 0,
+                      declaradoDebito: _parseValor(debitoController.text) ?? 0,
+                      esperadoDebito: esperados['debito'] ?? 0,
+                      declaradoCredito:
+                          _parseValor(creditoController.text) ?? 0,
+                      esperadoCredito: esperados['credito'] ?? 0,
+                    );
+                    return _autorizarSupervisorSeNecessario(dif);
+                  },
+                );
+              } catch (e) {
+                debugPrint(
+                  'Caixa: autorizacao de supervisor no fechamento: $e',
+                );
+              }
+              if (!dialogContext.mounted || autorizado) return;
+              setLocal(() => autorizandoFechamento = false);
+            }
+
+            return AlertDialog(
+              title: const Text('Fechamento de caixa'),
+              content: SingleChildScrollView(
+                child: SizedBox(
+                  width: 560,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildLinhaConferenciaFechamento(
+                        label: 'Dinheiro',
+                        controller: dinheiroController,
+                        trailing: IconButton(
+                          tooltip: 'Calculadora / contagem (F9)',
+                          icon: const Icon(Icons.calculate_outlined),
+                          onPressed: autorizandoFechamento
+                              ? null
+                              : () {
+                                  unawaited(
+                                    _abrirCalculadoraSomador(
+                                      destino: dinheiroController,
+                                    ),
+                                  );
+                                },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildLinhaConferenciaFechamento(
+                        label: 'PIX',
+                        controller: pixController,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildLinhaConferenciaFechamento(
+                        label: 'Cartao debito',
+                        controller: debitoController,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildLinhaConferenciaFechamento(
+                        label: 'Cartao credito',
+                        controller: creditoController,
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: obsController,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'Observacao de fechamento',
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  _buildLinhaConferenciaFechamento(
-                    label: 'PIX',
-                    controller: pixController,
-                  ),
-                  const SizedBox(height: 8),
-                  _buildLinhaConferenciaFechamento(
-                    label: 'Cartao debito',
-                    controller: debitoController,
-                  ),
-                  const SizedBox(height: 8),
-                  _buildLinhaConferenciaFechamento(
-                    label: 'Cartao credito',
-                    controller: creditoController,
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: obsController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Observacao de fechamento',
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Confirmar fechamento'),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: autorizandoFechamento
+                      ? null
+                      : () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  onPressed:
+                      autorizandoFechamento ? null : confirmarFechamento,
+                  child: const Text('Confirmar fechamento'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -3540,16 +3564,6 @@ class _CaixaPageState extends State<CaixaPage>
       declaradoCredito: declaradoCredito,
       esperadoCredito: esperados['credito'] ?? 0,
     );
-    final autorizado = await _autorizarSupervisorSeNecessario(difTotal);
-    if (!autorizado) {
-      await _registrarAuditoriaCaixa(
-        'fechamento_negado_divergencia',
-        detalhes: {
-          'diferencaTotal': difTotal,
-        },
-      );
-      return;
-    }
     final operadorFechamento = _operadorCaixa;
     final aberturaFechamento = _aberturaCaixaEm;
     final fundoAbertura = _fundoTrocoAbertura;
@@ -3567,6 +3581,32 @@ class _CaixaPageState extends State<CaixaPage>
         _umCaixaPorLojaRemoto ||
         (_terminalSessaoAbertaId.isNotEmpty &&
             _terminalSessaoAbertaId != _terminalId);
+    // Gravar assim que a sessao for encerrada, mesmo se a tela ja tiver sido
+    // descartada: sem isso o caixa fica fechado sem rastro nem valores.
+    Future<void> registrarAuditoriaFechamento() => _registrarAuditoriaCaixa(
+          'fechamento_caixa',
+          clientApi: clientApiFechamento,
+          detalhes: {
+            'operador': operadorFechamento,
+            if (aberturaFechamento != null)
+              'aberturaEm': aberturaFechamento.toUtc().toIso8601String(),
+            'fundoTroco': fundoAbertura,
+            'suprimentos': suprimentos,
+            'sangrias': sangrias,
+            'sessaoFechada': sessaoDonaId,
+            'forcarLoja': forcarRemoto,
+            'esperadoDinheiro': esperados['dinheiro'] ?? 0,
+            'esperadoPix': esperados['pix'] ?? 0,
+            'esperadoDebito': esperados['debito'] ?? 0,
+            'esperadoCredito': esperados['credito'] ?? 0,
+            'declaradoDinheiro': declaradoDinheiro,
+            'declaradoPix': declaradoPix,
+            'declaradoDebito': declaradoDebito,
+            'declaradoCredito': declaradoCredito,
+            'diferencaTotal': difTotal,
+            'observacao': obs,
+          },
+        );
     if (forcarRemoto &&
         sessaoDonaId.isNotEmpty &&
         sessaoDonaId != _terminalId &&
@@ -3600,7 +3640,10 @@ class _CaixaPageState extends State<CaixaPage>
           terminalId: _terminalId,
           forcar: forcarRemoto,
         );
-        if (!mounted) return;
+        if (!mounted) {
+          if (r.ok) await registrarAuditoriaFechamento();
+          return;
+        }
         if (!r.ok && r.errorCode == 'caixa_outro_terminal') {
           final ok2 = await showDialog<bool>(
             context: context,
@@ -3621,6 +3664,10 @@ class _CaixaPageState extends State<CaixaPage>
           );
           if (ok2 != true) return;
           r = await api.fechar(terminalId: _terminalId, forcar: true);
+          if (!mounted) {
+            if (r.ok) await registrarAuditoriaFechamento();
+            return;
+          }
         }
         if (!r.ok) {
           // Ultimo recurso: reset de orfaos no servidor.
@@ -3646,11 +3693,13 @@ class _CaixaPageState extends State<CaixaPage>
           );
           if (resetar == true) {
             final rr = await api.reset(motivo: 'fechamento_ui');
-            if (!rr.ok && mounted) {
-              CaixaFeedback.erro(
-                context,
-                rr.message ?? 'Falha ao resetar sessoes de caixa',
-              );
+            if (!rr.ok) {
+              if (mounted) {
+                CaixaFeedback.erro(
+                  context,
+                  rr.message ?? 'Falha ao resetar sessoes de caixa',
+                );
+              }
               return;
             }
           } else {
@@ -3688,6 +3737,7 @@ class _CaixaPageState extends State<CaixaPage>
         propagarRede: true,
       );
     }
+    await registrarAuditoriaFechamento();
     if (!mounted) return;
     await _limparUltimoTrocoRegistrado();
     setState(() {
@@ -3720,29 +3770,6 @@ class _CaixaPageState extends State<CaixaPage>
       }
     }
     CaixaLocalRefreshHub.instance.notificar();
-    await _registrarAuditoriaCaixa(
-      'fechamento_caixa',
-      detalhes: {
-        'operador': operadorFechamento,
-        if (aberturaFechamento != null)
-          'aberturaEm': aberturaFechamento.toUtc().toIso8601String(),
-        'fundoTroco': fundoAbertura,
-        'suprimentos': suprimentos,
-        'sangrias': sangrias,
-        'sessaoFechada': sessaoDonaId,
-        'forcarLoja': forcarRemoto,
-        'esperadoDinheiro': esperados['dinheiro'] ?? 0,
-        'esperadoPix': esperados['pix'] ?? 0,
-        'esperadoDebito': esperados['debito'] ?? 0,
-        'esperadoCredito': esperados['credito'] ?? 0,
-        'declaradoDinheiro': declaradoDinheiro,
-        'declaradoPix': declaradoPix,
-        'declaradoDebito': declaradoDebito,
-        'declaradoCredito': declaradoCredito,
-        'diferencaTotal': difTotal,
-        'observacao': obs,
-      },
-    );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

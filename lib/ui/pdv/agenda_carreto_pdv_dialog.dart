@@ -581,6 +581,7 @@ class _CardEntregaAgenda extends StatelessWidget {
     final theme = Theme.of(context);
     final produtos = item.produtos;
     final meta =
+        '${item.cargaRotulo.isEmpty ? '' : '${item.cargaRotulo} · '}'
         '${item.bairro} · ${item.janelaRotulo} · ${item.statusRotulo}'
         '${item.numero > 0 ? ' · #${item.numero}' : ''}';
 

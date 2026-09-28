@@ -1,4 +1,5 @@
 import 'entrega_nao_entregue.dart';
+import 'entregas/cargas_entrega.dart';
 import '../model/venda.dart';
 
 /// Agregado de entregas / insucessos por motorista (ou veiculo).
@@ -32,8 +33,11 @@ class RelatorioPerformanceEntregaLinha {
 abstract final class RelatorioPerformanceEntregas {
   RelatorioPerformanceEntregas._();
 
-  static bool noPeriodo(Venda v, DateTime inicio, DateTime fim) {
-    final raw = (v.dataEntregaMarcada ?? v.data).toLocal();
+  static bool noPeriodo(Venda v, DateTime inicio, DateTime fim) =>
+      _diaNoPeriodo(v.dataEntregaMarcada ?? v.data, inicio, fim);
+
+  static bool _diaNoPeriodo(DateTime quando, DateTime inicio, DateTime fim) {
+    final raw = quando.toLocal();
     final dia = DateTime(raw.year, raw.month, raw.day);
     final ini = DateTime(inicio.year, inicio.month, inicio.day);
     final fimDia = DateTime(fim.year, fim.month, fim.day);
@@ -57,23 +61,43 @@ abstract final class RelatorioPerformanceEntregas {
     required String dimensao,
   }) {
     final map = <String, RelatorioPerformanceEntregaLinha>{};
-    for (final v in entregas) {
-      if (!noPeriodo(v, inicio, fim)) continue;
-      final chave = dimensao == 'veiculo'
-          ? nomeVeiculo(v)
-          : nomeMotorista(v);
+    RelatorioPerformanceEntregaLinha linha(String motorista, String veiculo) {
+      final chave = dimensao == 'veiculo' ? veiculo : motorista;
       final cur = map.putIfAbsent(
         chave,
         () => RelatorioPerformanceEntregaLinha(
           chave: chave,
           nome: chave,
-          veiculo: nomeVeiculo(v),
+          veiculo: veiculo,
         ),
       );
-      if (cur.veiculo == 'Sem veiculo' && nomeVeiculo(v) != 'Sem veiculo') {
-        cur.veiculo = nomeVeiculo(v);
+      if (cur.veiculo == 'Sem veiculo' && veiculo != 'Sem veiculo') {
+        cur.veiculo = veiculo;
       }
-      _aplicarStatus(cur, v);
+      return cur;
+    }
+
+    for (final v in entregas) {
+      final cargas = CargasEntregaCodec.decode(v.cargasEntregaJson);
+      if (cargas.isNotEmpty) {
+        // Cada carga entregue e uma viagem, do motorista que a levou.
+        for (final c in cargas.where((c) => c.entregue)) {
+          final dia = c.entregueEm ?? c.data ?? v.dataEntregaMarcada ?? v.data;
+          if (!_diaNoPeriodo(dia, inicio, fim)) continue;
+          linha(
+            c.motorista.isEmpty ? nomeMotorista(v) : c.motorista,
+            c.veiculo.isEmpty ? nomeVeiculo(v) : c.veiculo,
+          ).entregues++;
+        }
+        final s = v.statusEntrega.trim();
+        if (s == 'entregue' || !noPeriodo(v, inicio, fim)) continue;
+        if (s == 'entregue_complemento_pendente' || s == 'reagendada') {
+          _aplicarStatus(linha(nomeMotorista(v), nomeVeiculo(v)), v);
+        }
+        continue;
+      }
+      if (!noPeriodo(v, inicio, fim)) continue;
+      _aplicarStatus(linha(nomeMotorista(v), nomeVeiculo(v)), v);
     }
     final lista = map.values.toList()
       ..sort((a, b) {

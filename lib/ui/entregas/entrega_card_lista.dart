@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entrega_venda_helper.dart';
+import '../../domain/entregas/carga_atual_venda.dart';
 import '../../domain/entregas/loja_origem_mercadoria.dart';
 import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
@@ -199,7 +200,7 @@ class EntregaCardLista extends StatelessWidget {
                             InkWell(
                               onTap: callbacks.onChecklistCarga,
                               child: Text(
-                                'Carga $progressoCarga/3',
+                                'Checklist $progressoCarga/3',
                                 style: theme.textTheme.labelSmall?.copyWith(
                                   color: corCarga,
                                   fontWeight: FontWeight.w600,
@@ -212,6 +213,17 @@ class EntregaCardLista extends StatelessWidget {
                                   venda.dataEntregaMarcada!.toLocal(),
                                 ),
                                 style: theme.textTheme.labelSmall,
+                              ),
+                            if (CargaAtualVenda.rotulo(venda) case final carga?)
+                              Chip(
+                                avatar: const Icon(
+                                  Icons.local_shipping_outlined,
+                                  size: 16,
+                                ),
+                                label: Text(carga),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
                               ),
                             if (venda.tipoEntrega == EntregaVendaHelper.tipoMisto)
                               Chip(

@@ -129,6 +129,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
           (entregaMap['dataEntregaMarcada'] ?? '').toString(),
         )?.toUtc(),
         entregaSomenteCotacao: entregaMap['entregaSomenteCotacao'] == true,
+        cargasEntregaJson: (entregaMap['cargasEntregaJson'] ?? '').toString(),
       );
       final idResult = d.vendaRepository.registrarOrcamentoIdempotente(
         itens,
@@ -220,6 +221,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
           (entregaMap['dataEntregaMarcada'] ?? '').toString(),
         )?.toUtc(),
         entregaSomenteCotacao: entregaMap['entregaSomenteCotacao'] == true,
+        cargasEntregaJson: (entregaMap['cargasEntregaJson'] ?? '').toString(),
       );
       final vendaId = int.parse(id);
       d.vendaRepository.atualizarOrcamento(

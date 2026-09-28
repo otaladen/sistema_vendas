@@ -59,6 +59,7 @@ import '../services/entrega_fluxo_service.dart';
 import '../services/entrega_pod_finalizacao.dart';
 import '../services/entrega_pod_prefetch_service.dart';
 import 'entregas/entrega_pod_chip.dart';
+import 'entregas/cargas_entrega_panel.dart';
 import 'entregas/entrega_pod_foto_panel.dart';
 import 'entregas/pod_entrega_dialog.dart';
 import 'pdv_vendedor_bloqueio.dart';
@@ -3709,6 +3710,7 @@ class _EntregasPageState extends State<EntregasPage>
                           }
                         },
                       ),
+                      CargasEntregaPanel(venda: exibir),
                       if (itensLista.isEmpty)
                         const Text('Nenhum item encontrado para esta entrega.')
                       else ...[

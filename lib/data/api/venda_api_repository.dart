@@ -2067,6 +2067,7 @@ class VendaApiRepository extends ChangeNotifier {
             ?.toUtc()
             .toIso8601String(),
         'entregaSomenteCotacao': entrega.entregaSomenteCotacao,
+        'cargasEntregaJson': entrega.cargasEntregaJson,
       },
       clienteId: clienteId,
       vendedorId: vendedorId,
@@ -2155,6 +2156,7 @@ class VendaApiRepository extends ChangeNotifier {
             ?.toUtc()
             .toIso8601String(),
         'entregaSomenteCotacao': entrega.entregaSomenteCotacao,
+        'cargasEntregaJson': entrega.cargasEntregaJson,
       },
       clienteId: clienteId,
       vendedorId: vendedorId,

@@ -77,7 +77,8 @@ class AutoBackupService {
         'auto_backup',
         'Adiado apos revalidar sessao critica '
         '(pdvEmUso=${SessaoOperacionalGuard.pdvEmUso}, '
-        'terminaisWs=${SessaoOperacionalGuard.terminaisConectados})',
+        'terminaisWs=${SessaoOperacionalGuard.terminaisConectados}, '
+        'fechamentoCaixa=${SessaoOperacionalGuard.fechamentoCaixaEmAndamento})',
       );
       return;
     }

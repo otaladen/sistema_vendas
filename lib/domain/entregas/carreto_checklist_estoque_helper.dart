@@ -43,7 +43,8 @@ abstract final class CarretoChecklistEstoqueHelper {
     final lista = <({ItemVenda item, int quantidade, Produto? produto})>[];
     for (final item in venda.itens) {
       if (ItemVendaProdutoOrfaoHelper.itemSemProdutoVinculado(item)) continue;
-      final q = GerenciadorEstoqueService.quantidadeItemParaEstoqueCarreto(item);
+      final q =
+          GerenciadorEstoqueService.quantidadeCarretoCargaAtual(venda, item);
       if (q <= 0) continue;
       Produto? produto;
       try {
@@ -166,7 +167,7 @@ abstract final class CarretoChecklistEstoqueHelper {
         );
       }
       final qFisico =
-          GerenciadorEstoqueService.quantidadeFisicaDestaLojaCarreto(
+          GerenciadorEstoqueService.quantidadeFisicaCargaAtual(
         venda,
         par.item,
       );

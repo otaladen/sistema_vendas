@@ -10,7 +10,9 @@ import 'package:printing/printing.dart';
 
 import '../domain/cliente_busca_util.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/entregas/cargas_entrega.dart';
 import '../domain/pdv_balcao_rapido_helper.dart';
+import '../domain/pdv_busca_inteligente.dart';
 import '../domain/quantidade_venda_util.dart';
 import '../domain/troca_com_nota_pdv_intent.dart';
 import '../domain/limite_credito_helper.dart';
@@ -58,7 +60,6 @@ import '../domain/promocao_cadastro.dart';
 import '../domain/promocao_carrinho_service.dart';
 import '../domain/promocao_preco_result.dart';
 import '../domain/promocao_preco_service.dart';
-import '../data/produto_busca_util.dart';
 import '../data/sync/lan_sync_scheduler.dart';
 import '../data/sync/sync_service.dart';
 import '../data/sync/safe_sync_refresh_mixin.dart';
@@ -83,6 +84,7 @@ import 'clientes_page.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_consulta_produtos_page.dart';
 import 'pdv/agenda_carreto_pdv_dialog.dart';
+import 'pdv/dividir_cargas_pdv_dialog.dart';
 import 'widgets/cadastro_rapido_cliente_dialog.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'pdv_pesquisa_comando.dart';
@@ -290,6 +292,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   final List<int> _produtosRecentesPdv = [];
 
   Timer? _debounceLeitorBarrasPdv;
+  final DetectorEntradaLeitorCodigo _detectorLeitorPdv =
+      DetectorEntradaLeitorCodigo();
   bool _processandoLeitorBarrasPdv = false;
   bool? _apiOnlinePdv;
 
@@ -398,6 +402,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _entregaSomenteCotacao = true;
     _entregaSemDataCombinada = true;
     _dataEntregaMarcada = null;
+    _cargasEntrega = const [];
     _enderecoEntregaController.clear();
     _observacaoEntregaController.clear();
   }
@@ -779,6 +784,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   String _janelaEntregaSelecionada = 'nao_definida';
   DateTime? _dataEntregaMarcada;
   bool _entregaSemDataCombinada = false;
+
+  /// Carreto dividido em varias viagens. Vazio = uma carga so; a carga 1
+  /// acompanha [_dataEntregaMarcada] / [_janelaEntregaSelecionada].
+  List<CargaEntrega> _cargasEntrega = const [];
 
   /// Cotacao com carreto: frete estimado sem endereco/agenda obrigatorios.
   bool _entregaSomenteCotacao = false;
@@ -1503,13 +1512,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   void _onPesquisaPdvTextoChanged() {
+    _detectorLeitorPdv.registrarTexto(_pesquisaController.text);
     if (_sugestoesCarrinhoVisiveis.isNotEmpty &&
         _pesquisaController.text.trim().isNotEmpty) {
       _fecharSugestoesCarrinho();
     }
     if (!_pesquisaFocus.hasFocus || _processandoLeitorBarrasPdv) return;
-    final texto = _pesquisaController.text;
-    if (!consultaEanProvavelCompleto(texto)) return;
+    if (!_entradaPdvVeioDoLeitor()) return;
     _debounceLeitorBarrasPdv?.cancel();
     _debounceLeitorBarrasPdv = Timer(const Duration(milliseconds: 100), () {
       if (!mounted) return;
@@ -1517,10 +1526,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     });
   }
 
+  /// Digitacao manual exige Enter; so o leitor adiciona sem confirmacao.
+  bool _entradaPdvVeioDoLeitor() => _detectorLeitorPdv.pareceLeitor(
+        PdvPesquisaComando.parse(_pesquisaController.text).termoBusca,
+      );
+
   Future<void> _tentarLeitorBarrasAutomaticoPdv() async {
     if (!mounted || _processandoLeitorBarrasPdv) return;
     final texto = _pesquisaController.text.trim();
-    if (!consultaEanProvavelCompleto(texto)) return;
+    if (texto.isEmpty || !_entradaPdvVeioDoLeitor()) return;
     final resultado = await _processarCodigoBarrasPdv(texto);
     if (!mounted || !resultado.sucesso) return;
     _pesquisaController.clear();
@@ -3308,6 +3322,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     WidgetsBinding.instance.addPostFrameCallback((_) => entry.remove());
   }
 
+  /// Painel maior que a tela deixa [limite] negativo e `clamp` lançaria erro.
+  static double _clampPosicaoOverlay(double valor, double limite) {
+    if (limite <= 0) return 0.0;
+    return valor.clamp(0.0, limite).toDouble();
+  }
+
   void _toggleCalculadoraPdv() {
     if (_overlayCalculadoraPdv != null) {
       _fecharCalculadoraPdv();
@@ -3327,8 +3347,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           );
           _calculadoraPdvPosicionada = true;
         }
-        final left = _calculadoraPdvOffset.dx.clamp(0.0, size.width - w);
-        final top = _calculadoraPdvOffset.dy.clamp(0.0, size.height - h);
+        final left =
+            _clampPosicaoOverlay(_calculadoraPdvOffset.dx, size.width - w);
+        final top =
+            _clampPosicaoOverlay(_calculadoraPdvOffset.dy, size.height - h);
         return Stack(
           children: [
             Positioned(
@@ -3344,12 +3366,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                     if (!mounted || _overlayCalculadoraPdv == null) return;
                     final area = MediaQuery.sizeOf(overlayContext);
                     _calculadoraPdvOffset = Offset(
-                      (_calculadoraPdvOffset.dx + delta.dx).clamp(
-                        0.0,
+                      _clampPosicaoOverlay(
+                        _calculadoraPdvOffset.dx + delta.dx,
                         area.width - w,
                       ),
-                      (_calculadoraPdvOffset.dy + delta.dy).clamp(
-                        0.0,
+                      _clampPosicaoOverlay(
+                        _calculadoraPdvOffset.dy + delta.dy,
                         area.height - h,
                       ),
                     );
@@ -3421,8 +3443,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             );
             _obraCalculadoraPdvPosicionada = true;
           }
-          final left = _obraCalculadoraPdvOffset.dx.clamp(0.0, size.width - w);
-          final top = _obraCalculadoraPdvOffset.dy.clamp(0.0, size.height - h);
+          final left =
+              _clampPosicaoOverlay(_obraCalculadoraPdvOffset.dx, size.width - w);
+          final top = _clampPosicaoOverlay(
+            _obraCalculadoraPdvOffset.dy,
+            size.height - h,
+          );
           return Stack(
             children: [
               Positioned(
@@ -3437,12 +3463,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                     if (!mounted || _overlayObraCalculadoraPdv == null) return;
                     final area = MediaQuery.sizeOf(overlayContext);
                     _obraCalculadoraPdvOffset = Offset(
-                      (_obraCalculadoraPdvOffset.dx + delta.dx).clamp(
-                        0.0,
+                      _clampPosicaoOverlay(
+                        _obraCalculadoraPdvOffset.dx + delta.dx,
                         area.width - w,
                       ),
-                      (_obraCalculadoraPdvOffset.dy + delta.dy).clamp(
-                        0.0,
+                      _clampPosicaoOverlay(
+                        _obraCalculadoraPdvOffset.dy + delta.dy,
                         area.height - h,
                       ),
                     );
@@ -3671,6 +3697,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       setState(() {
         _clienteSelecionadoId = null;
         _indiceEnderecoSelecionado = 0;
+        _cargasEntrega = const [];
         if (_entregaSomenteCotacao) {
           _dataEntregaMarcada = null;
           _entregaSemDataCombinada = true;
@@ -4081,7 +4108,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (obs.isNotEmpty) {
       partes.add('Obs: $obs');
     }
-    if (_dataEntregaMarcada != null) {
+    if (_cargasEntrega.length >= 2) {
+      final datas = _cargasEntrega
+          .map(
+            (c) => 'carga ${c.numero}: '
+                '${c.data == null ? 'sem data' : DateFormat('dd/MM/yyyy').format(c.data!)}',
+          )
+          .join(', ');
+      partes.add('${_cargasEntrega.length} cargas ($datas)');
+    } else if (_dataEntregaMarcada != null) {
       partes.add(
         'Data marcada: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
       );
@@ -4121,6 +4156,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       void aplicar() {
         _dataEntregaMarcada = escolhido;
         _entregaSemDataCombinada = false;
+        if (_cargasEntrega.isNotEmpty) {
+          _cargasEntrega = [
+            _cargasEntrega.first.copyWith(data: escolhido),
+            ..._cargasEntrega.skip(1),
+          ];
+        }
       }
 
       if (setDialogState != null) {
@@ -4186,6 +4227,110 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         ),
         icon: const Icon(Icons.calendar_month_outlined),
         label: Text(rotulo),
+      ),
+    );
+  }
+
+  /// Linhas de carreto do carrinho agregadas por produto (unidade de venda).
+  List<ProdutoCarretoTotal> _produtosCarretoParaCargas() {
+    final porProduto = <int, ProdutoCarretoTotal>{};
+    for (final item in _carrinho) {
+      if (EntregaVendaHelper.normalizarTipoItem(item.tipoEntregaItem) !=
+          EntregaVendaHelper.tipoEntregaLoja) {
+        continue;
+      }
+      final q = item.quantidadeVendaEfetiva;
+      if (q <= 0) continue;
+      final atual = porProduto[item.produto.id];
+      porProduto[item.produto.id] = ProdutoCarretoTotal(
+        produtoId: item.produto.id,
+        nomeProduto: item.produto.nome,
+        quantidade: CargasEntregaHelper.arredondar(
+          (atual?.quantidade ?? 0) + q,
+        ),
+        unidade: item.produto.unidade,
+        fracionado: (atual?.fracionado ?? false) ||
+            item.usaArmazenamentoFracionado ||
+            q != q.roundToDouble(),
+      );
+    }
+    return porProduto.values.toList(growable: false);
+  }
+
+  /// JSON do plano para gravar. Lanca [StateError] se o carrinho mudou
+  /// depois da divisao e as cargas nao batem mais com o vendido.
+  String _cargasEntregaJsonParaSalvar() {
+    if (_cargasEntrega.length < 2 ||
+        !_carrinhoTemItemCarreto ||
+        _entregaSomenteCotacao) {
+      return '';
+    }
+    final cargas = [
+      _cargasEntrega.first.copyWith(
+        data: _dataEntregaMarcada,
+        janela: _janelaEntregaSelecionada,
+      ),
+      ..._cargasEntrega.skip(1),
+    ];
+    final erro = CargasEntregaHelper.validarPlano(
+      cargas,
+      _produtosCarretoParaCargas(),
+    );
+    if (erro != null) {
+      throw StateError('Divisao em cargas: $erro');
+    }
+    return CargasEntregaCodec.encode(cargas);
+  }
+
+  Future<void> _abrirDividirCargas(StateSetter setDialogState) async {
+    final produtos = _produtosCarretoParaCargas();
+    if (produtos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nao ha itens de carreto no carrinho para dividir.'),
+        ),
+      );
+      return;
+    }
+    final resultado = await mostrarDividirCargasPdvDialog(
+      context: context,
+      vendaRepository: widget.vendaRepository,
+      produtos: produtos,
+      cargasIniciais: _cargasEntrega,
+      dataPrimeiraCarga: _dataEntregaMarcada,
+      janelaPrimeiraCarga: _janelaEntregaSelecionada,
+    );
+    if (!mounted || resultado == null) return;
+    _atualizarCheckoutFechamento(setDialogState, () {
+      _cargasEntrega = resultado.cargas;
+      final primeira = resultado.cargas.isEmpty ? null : resultado.cargas.first;
+      if (primeira != null) {
+        _dataEntregaMarcada = primeira.data;
+        _janelaEntregaSelecionada = primeira.janela;
+        _entregaSemDataCombinada = false;
+      }
+    });
+  }
+
+  Widget _buildBotaoDividirCargasCheckout({
+    required StateSetter setDialogState,
+  }) {
+    final dividido = _cargasEntrega.length >= 2;
+    final datas = _cargasEntrega
+        .map(
+          (c) => c.data == null ? '?' : DateFormat('dd/MM').format(c.data!),
+        )
+        .join(', ');
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () => unawaited(_abrirDividirCargas(setDialogState)),
+        icon: const Icon(Icons.local_shipping_outlined),
+        label: Text(
+          dividido
+              ? '${_cargasEntrega.length} cargas ($datas) — editar'
+              : 'Nao cabe em um carreto? Dividir em cargas',
+        ),
       ),
     );
   }
@@ -6071,6 +6216,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
               setDialogState: setDialogState,
               somenteConsulta: false,
             ),
+            const SizedBox(height: 4),
+            _buildBotaoDividirCargasCheckout(setDialogState: setDialogState),
             const SizedBox(height: 2),
             InkWell(
               onTap: () {
@@ -6078,6 +6225,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                   _entregaSemDataCombinada = !_entregaSemDataCombinada;
                   if (_entregaSemDataCombinada) {
                     _dataEntregaMarcada = null;
+                    _cargasEntrega = const [];
                   }
                 });
               },
@@ -6095,6 +6243,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                           _entregaSemDataCombinada = v == true;
                           if (_entregaSemDataCombinada) {
                             _dataEntregaMarcada = null;
+                            _cargasEntrega = const [];
                           }
                         });
                       },
@@ -6754,6 +6903,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _prioridadeEntregaSelecionada = 'normal';
       _janelaEntregaSelecionada = 'nao_definida';
       _dataEntregaMarcada = null;
+      _cargasEntrega = const [];
       _entregaSemDataCombinada = false;
       _entregaSomenteCotacao = false;
       _valorFreteController.clear();
@@ -6956,6 +7106,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         linhasMisto: pagamento.linhasMisto,
         planoFiado: valorFiado > 0.001 ? List.from(_planoFiadoParcelas) : null,
       );
+      final String cargasEntregaJson;
+      try {
+        cargasEntregaJson = _cargasEntregaJsonParaSalvar();
+      } on StateError catch (e) {
+        if (!mounted) return;
+        _pdvErro(e.message);
+        return;
+      }
       final entrega = DadosEntregaOrcamento(
         tipoEntrega: _resolverTipoEntregaVendaCarrinho(),
         valorFrete: valorFrete,
@@ -6977,6 +7135,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             ? _dataEntregaMarcada
             : null,
         entregaSomenteCotacao: _entregaSomenteCotacao,
+        cargasEntregaJson: cargasEntregaJson,
       );
       final orcamentoEdicaoId = _orcamentoEmEdicaoId;
       int orcamentoId;
@@ -7660,6 +7819,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _prioridadeEntregaSelecionada = prioridadeValida;
       _janelaEntregaSelecionada = janelaValida;
       _dataEntregaMarcada = orcamentoCompleto.dataEntregaMarcada;
+      _cargasEntrega = CargasEntregaCodec.decode(
+        orcamentoCompleto.cargasEntregaJson,
+      );
       _entregaSemDataCombinada = _carrinhoTemItemCarreto &&
           orcamentoCompleto.dataEntregaMarcada == null;
       _entregaSomenteCotacao = _carrinhoTemItemCarreto &&

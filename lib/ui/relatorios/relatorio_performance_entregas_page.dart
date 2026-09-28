@@ -164,7 +164,8 @@ class _RelatorioPerformanceEntregasPageState
                 ? null
                 : Text(
                     '${formatarIntervaloPeriodo(lim)} · '
-                    '$_entregues entregue(s) · $_insucessos insucesso(s) · '
+                    '$_entregues viagem(ns) entregue(s) · '
+                    '$_insucessos insucesso(s) · '
                     'taxa ${_pct.format(taxaGeral)}% · '
                     '$_voltou carga(s) voltou a loja.',
                     style: Theme.of(context).textTheme.bodySmall,

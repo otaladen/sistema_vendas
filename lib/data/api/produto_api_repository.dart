@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/pdv_busca_inteligente.dart';
+import '../../domain/produto/produto_busca_util.dart';
 import '../../domain/produto_substitutos_util.dart';
 import '../../model/historico_entrada.dart';
 import '../../model/movimento_estoque.dart';
@@ -26,6 +27,7 @@ class ProdutoApiRepository extends ChangeNotifier {
   LanApiClient get client => _client;
   final Map<int, Produto> _porId = {};
   List<Produto> _lista = [];
+  List<ProdutoBuscaDoc>? _docsBusca;
   bool _hidratado = false;
   int _catalogoRevision = 0;
   bool _sincronizandoCatalogo = false;
@@ -95,13 +97,26 @@ class ProdutoApiRepository extends ChangeNotifier {
       offset += pagina.length;
       if (offset >= 100000) break;
     }
+    _substituirCatalogo(todos);
+  }
+
+  void _substituirCatalogo(List<Produto> todos) {
     _lista = todos;
+    _docsBusca = null;
     _porId
       ..clear()
       ..addEntries(todos.map((p) => MapEntry(p.id, p)));
     _hidratado = true;
     notifyListeners();
   }
+
+  /// Carrega o catalogo sem HTTP (testes de paridade com o servidor).
+  @visibleForTesting
+  void carregarCatalogoLocal(List<Produto> produtos) =>
+      _substituirCatalogo(List<Produto>.from(produtos));
+
+  List<ProdutoBuscaDoc> get _docs =>
+      _docsBusca ??= ProdutoBuscaUtil.criarDocs(_lista);
 
   /// Atualiza o cache apos evento WS: ids pontuais ou catalogo completo.
   Future<void> aplicarEventoRede({
@@ -177,6 +192,7 @@ class ProdutoApiRepository extends ChangeNotifier {
   /// Libera cache pesado (logout / standby do terminal).
   void limparCache() {
     _lista = [];
+    _docsBusca = null;
     _porId.clear();
     _hidratado = false;
     _catalogoRevision = 0;
@@ -202,11 +218,26 @@ class ProdutoApiRepository extends ChangeNotifier {
           mudou = true;
         }
       }
+      _atualizarDocBusca(p);
     }
     if (mudou) notifyListeners();
   }
 
+  /// Evento de estoque troca poucos produtos: atualiza so os docs deles.
+  void _atualizarDocBusca(Produto p) {
+    final docs = _docsBusca;
+    if (docs == null) return;
+    final doc = ProdutoBuscaUtil.criarDoc(p);
+    final i = docs.indexWhere((d) => d.produto.id == p.id);
+    if (i >= 0) {
+      docs[i] = doc;
+    } else {
+      docs.add(doc);
+    }
+  }
+
   /// Busca paginada direto na API e mescla no cache (cadastro / fallback).
+  /// A ordem devolvida e o ranking do servidor ([ProdutoBuscaUtil]).
   Future<List<Produto>> pesquisarRemoto(
     String termo, {
     int offset = 0,
@@ -223,7 +254,7 @@ class ProdutoApiRepository extends ChangeNotifier {
       somenteInativos: somenteInativos,
     );
     _mesclarNoCache(items);
-    return reordenarResultadoBuscaProdutos(items, termo);
+    return items;
   }
 
   Produto? obterPorId(int id) => _porId[id];
@@ -292,10 +323,8 @@ class ProdutoApiRepository extends ChangeNotifier {
     bool excluirProdutosInternos = false,
   }) {
     if (_offline) return const [];
-    // Mesmo contrato do ObjectBox: curingas `%`, acentos, ranking basico.
-    // [clienteId] reservado para paridade de assinatura (historico no PC1).
-    return pesquisarProdutosEmMemoria(
-      _lista,
+    return ProdutoBuscaUtil.pesquisar(
+      _docs,
       termo,
       offset: offset,
       limite: limite,
@@ -382,14 +411,13 @@ class ProdutoApiRepository extends ChangeNotifier {
       );
       if (local.isNotEmpty) return local;
     }
-    final remotos = await pesquisarRemoto(
+    return pesquisarRemoto(
       '',
       offset: offset,
       limite: limite,
       somenteAtivos: somenteAtivos,
       somenteInativos: somenteInativos,
     );
-    return reordenarResultadoBuscaProdutos(remotos, termo);
   }
 
   List<Produto> pesquisarNaBasePadraoPdv(
@@ -424,24 +452,11 @@ class ProdutoApiRepository extends ChangeNotifier {
     bool somenteAtivos = true,
   }) {
     if (_offline) return null;
-    final t = termo.trim();
-    if (t.isEmpty) return null;
-    final dig = normalizarCodigoBarrasConsulta(t);
-    for (final p in _lista) {
-      if (somenteAtivos && !p.ativo) continue;
-      if (p.codigoInterno == t) return p;
-      if (dig.isNotEmpty) {
-        final barras = normalizarCodigoBarrasConsulta(p.codigoBarras);
-        if (barras == dig) return p;
-        final alts = codigosBarrasAlternativosDeApelidos(
-          parseApelidosBusca(p.apelidosBusca),
-        );
-        if (alts.contains(dig)) return p;
-      } else if (p.codigoBarras == t) {
-        return p;
-      }
-    }
-    return null;
+    return ProdutoBuscaUtil.buscarPorCodigoBarras(
+      _docs,
+      termo,
+      somenteAtivos: somenteAtivos,
+    );
   }
 
   PdvPesquisaResolvida resolverPesquisaPdv(
@@ -449,43 +464,20 @@ class ProdutoApiRepository extends ChangeNotifier {
     int? clienteId,
     bool somenteAtivos = true,
   }) {
-    final consulta = termo.trim();
-    if (consulta.isEmpty) return PdvPesquisaResolvida.vazia;
-    final barras = resolverLeitorCodigoBarras(
-      consulta,
+    if (_offline) return PdvPesquisaResolvida.vazia;
+    return ProdutoBuscaUtil.resolverPesquisaPdv(
+      _docs,
+      termo,
       somenteAtivos: somenteAtivos,
-    );
-    if (barras != null) {
-      return PdvPesquisaResolvida(
-        produtos: [barras],
-        totalCorrespondencias: 1,
-        produtoAuto: barras,
-        motivoAuto: PdvBuscaAutoMotivo.codigoBarras,
-      );
-    }
-    final lista = pesquisarPadraoPdv(
-      consulta,
-      clienteId: clienteId,
-      limite: 40,
-      somenteAtivos: somenteAtivos,
-    );
-    if (lista.length == 1) {
-      return PdvPesquisaResolvida(
-        produtos: lista,
-        totalCorrespondencias: 1,
-        produtoAuto: lista.first,
-        motivoAuto: PdvBuscaAutoMotivo.unicoResultado,
-      );
-    }
-    return PdvPesquisaResolvida(
-      produtos: lista,
-      totalCorrespondencias: lista.length,
+      resolverCodigoBarras: (t) =>
+          resolverLeitorCodigoBarras(t, somenteAtivos: somenteAtivos),
     );
   }
 
   void atualizarCacheAposMovimentoEstoque() {}
 
   void invalidarCacheBusca() {
+    _docsBusca = null;
     notifyListeners();
   }
 
@@ -555,12 +547,17 @@ class ProdutoApiRepository extends ChangeNotifier {
     String codigo, {
     bool somenteAtivos = true,
   }) async {
-    final local = resolverLeitorCodigoBarras(
-      codigo,
-      somenteAtivos: somenteAtivos,
-    );
-    if (local != null) return local;
     if (_offline) return null;
+    final local = resolverLeitorCodigoBarras(
+          codigo,
+          somenteAtivos: somenteAtivos,
+        ) ??
+        ProdutoBuscaUtil.buscarPorCodigoInternoExato(
+          _docs,
+          codigo,
+          somenteAtivos: somenteAtivos,
+        );
+    if (local != null) return local;
     final t = codigo.trim();
     if (t.isEmpty) return null;
     try {
@@ -782,6 +779,7 @@ class ProdutoApiRepository extends ChangeNotifier {
     if (m['ok'] == true) {
       _porId.remove(id);
       _lista.removeWhere((p) => p.id == id);
+      _docsBusca?.removeWhere((d) => d.produto.id == id);
       notifyListeners();
       return true;
     }

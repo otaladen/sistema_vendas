@@ -40,9 +40,11 @@ class HistoricoEntregaEventos {
   static const naoEntregue = 'entrega_evento_nao_entregue';
   static const buscarNaLoja = 'entrega_evento_buscar_na_loja';
   static const carretoSaidaProdutoOrfao = 'carreto_saida_produto_orfao';
+  static const cargaEntregue = 'entrega_evento_carga_entregue';
 
   static bool ehEventoOcorrencia(String statusNovo) {
     switch (statusNovo) {
+      case cargaEntregue:
       case devolucao:
       case troca:
       case retiradaFutura:
@@ -105,6 +107,8 @@ class HistoricoEntregaEventos {
         return 'Buscar nesta loja';
       case carretoSaidaProdutoOrfao:
         return 'Saida carreto (produto excluido)';
+      case cargaEntregue:
+        return 'Carga entregue';
       case 'pendente':
         return 'Pendente';
       case 'roteirizada':

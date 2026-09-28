@@ -543,7 +543,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(71, 2129533980183763586),
+    lastPropertyId: const obx_int.IdUid(72, 1942812125760673226),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -977,6 +977,12 @@ final _entities = <obx_int.ModelEntity>[
         type: 6,
         flags: 8,
         indexId: const obx_int.IdUid(89, 4261387862428198274),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(72, 1942812125760673226),
+        name: 'cargasEntregaJson',
+        type: 9,
+        flags: 0,
       ),
     ],
     relations: <obx_int.ModelRelation>[],
@@ -5075,7 +5081,10 @@ obx_int.ModelDefinition getObjectBoxModel() {
           object.lojaOrigemMercadoria,
         );
         final nfceUltimoErroOffset = fbb.writeString(object.nfceUltimoErro);
-        fbb.startTable(72);
+        final cargasEntregaJsonOffset = fbb.writeString(
+          object.cargasEntregaJson,
+        );
+        fbb.startTable(73);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -5149,6 +5158,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addFloat64(68, object.valorRecebidoCaixa);
         fbb.addFloat64(69, object.valorTrocoCaixa);
         fbb.addInt64(70, object.numeroControle);
+        fbb.addOffset(71, cargasEntregaJsonOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -5354,6 +5364,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final complementoEntregaJsonParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 70, '');
+        final cargasEntregaJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 146, '');
         final nfceChaveAcessoParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 78, '');
@@ -5505,6 +5518,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           caminhaoEntrega: caminhaoEntregaParam,
           lojaOrigemMercadoria: lojaOrigemMercadoriaParam,
           complementoEntregaJson: complementoEntregaJsonParam,
+          cargasEntregaJson: cargasEntregaJsonParam,
           nfceChaveAcesso: nfceChaveAcessoParam,
           nfceNumero: nfceNumeroParam,
           nfceSerie: nfceSerieParam,
@@ -10585,6 +10599,11 @@ class Venda_ {
   /// See [Venda.numeroControle].
   static final numeroControle = obx.QueryIntegerProperty<Venda>(
     _entities[2].properties[69],
+  );
+
+  /// See [Venda.cargasEntregaJson].
+  static final cargasEntregaJson = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[70],
   );
 
   /// see [Venda.itens]

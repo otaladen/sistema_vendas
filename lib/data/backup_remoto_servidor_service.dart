@@ -145,6 +145,12 @@ class BackupRemotoServidorService {
         'ou baixe o ultimo backup ja existente.',
       );
     }
+    if (SessaoOperacionalGuard.fechamentoCaixaEmAndamento) {
+      throw BackupRemotoOcupadoException(
+        'Ha um fechamento de caixa em andamento no PC servidor. '
+        'Aguarde a conclusao e tente de novo.',
+      );
+    }
 
     _emExecucao = true;
     try {

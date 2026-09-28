@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sistema_vendas/data/produto_busca_util.dart';
+import 'package:sistema_vendas/domain/produto/produto_busca_util.dart';
 import 'package:sistema_vendas/model/produto.dart';
 
 void main() {
@@ -249,7 +250,7 @@ void main() {
     });
   });
 
-  group('pesquisarProdutosEmMemoria (terminal)', () {
+  group('ProdutoBuscaUtil.pesquisar (motor unificado)', () {
     Produto p(String nome, {String codigo = '', bool ativo = true}) => Produto(
           codigoInterno: codigo.isEmpty ? nome : codigo,
           nome: nome,
@@ -265,20 +266,20 @@ void main() {
         p('Tubo PVC 50mm esgoto'),
         p('Cimento CP II 50kg'),
       ];
-      final r = pesquisarProdutosEmMemoria(lista, 'tub%sod%25');
+      final r = _buscar(lista, 'tub%sod%25');
       expect(r.map((e) => e.nome), ['Tubo Sod Fortlev 25mm']);
     });
 
     test('literal % nao casa sem modo curinga valido', () {
       final lista = [p('Produto 100% original')];
       // "100%" sozinho: segmento curto apos split pode invalidar
-      final r = pesquisarProdutosEmMemoria(lista, 'original');
+      final r = _buscar(lista, 'original');
       expect(r, hasLength(1));
     });
 
     test('busca normal ignora acento', () {
       final lista = [p('Conexão Joelho 90')];
-      final r = pesquisarProdutosEmMemoria(lista, 'conexao');
+      final r = _buscar(lista, 'conexao');
       expect(r, hasLength(1));
     });
 
@@ -287,40 +288,12 @@ void main() {
         p('Frete', codigo: kCodigoInternoFreteRetiradaFutura),
         p('Tubo PVC'),
       ];
-      final r = pesquisarProdutosEmMemoria(
+      final r = _buscar(
         lista,
         'tubo',
         excluirProdutosInternos: true,
       );
       expect(r.map((e) => e.nome), ['Tubo PVC']);
-    });
-
-    test('reordenar lista simula retorno da API fora de ordem', () {
-      Produto p(String nome) => Produto(
-            codigoInterno: nome,
-            nome: nome,
-            quantidadeMinima: 0,
-            precoCusto: 0,
-            precoVenda: 10,
-          );
-      final api = [
-        p('Cabo 10mm Flexivel 750v Preto'),
-        p('Cabo p/Martelo 35cm'),
-        p('Cabo 2.5mm Cobrecom Flex'),
-        p('Cabo Rj45 3m Rede LAN'),
-        p('Cabo 1.5mm Flexivel'),
-      ];
-      final ordenado = reordenarResultadoBuscaProdutos(api, 'cabo');
-      expect(
-        ordenado.map((e) => e.nome),
-        [
-          'Cabo 1.5mm Flexivel',
-          'Cabo 2.5mm Cobrecom Flex',
-          'Cabo 10mm Flexivel 750v Preto',
-          'Cabo p/Martelo 35cm',
-          'Cabo Rj45 3m Rede LAN',
-        ],
-      );
     });
 
     test('busca cabo agrupa bitolas e desempata marcas', () {
@@ -336,7 +309,7 @@ void main() {
         p('Cabo p/Martelo 35cm'),
         p('Cabo Rj45 3m Rede LAN'),
       ];
-      final r = pesquisarProdutosEmMemoria(lista, 'cabo');
+      final r = _buscar(lista, 'cabo');
       expect(
         r.map((e) => e.nome),
         [
@@ -355,3 +328,14 @@ void main() {
     });
   });
 }
+
+List<Produto> _buscar(
+  List<Produto> lista,
+  String termo, {
+  bool excluirProdutosInternos = false,
+}) =>
+    ProdutoBuscaUtil.pesquisar(
+      ProdutoBuscaUtil.criarDocs(lista),
+      termo,
+      excluirProdutosInternos: excluirProdutosInternos,
+    );

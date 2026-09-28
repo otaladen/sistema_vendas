@@ -18,6 +18,7 @@ import '../domain/item_venda_produto_orfao.dart';
 import '../services/entrega_fluxo_service.dart';
 import '../domain/operacao_permissao_guard.dart';
 import '../domain/entregas/agenda_carreto_ocupacao.dart';
+import '../domain/entregas/cargas_entrega.dart';
 import '../domain/filtro_listagem_entregas.dart';
 import '../domain/limite_credito_helper.dart';
 import '../domain/listagem_vendas_busca_relevancia.dart';
@@ -336,6 +337,14 @@ void _aplicarDadosEntregaOrcamentoNaVenda(
   venda.prioridadeEntrega = temCarreto ? entrega.prioridadeEntrega : 'normal';
   venda.janelaEntrega = temCarreto ? entrega.janelaEntrega : 'nao_definida';
   venda.dataEntregaMarcada = temCarreto ? entrega.dataEntregaMarcada : null;
+  final cargas = temCarreto && !cotacaoSemEndereco
+      ? CargasEntregaCodec.decode(entrega.cargasEntregaJson)
+      : const <CargaEntrega>[];
+  venda.cargasEntregaJson = CargasEntregaCodec.encode(cargas);
+  final primeira = cargas.isEmpty ? null : cargas.first;
+  if (primeira != null && primeira.data != null) {
+    venda.dataEntregaMarcada = primeira.data;
+  }
 }
 
 class LinhaDevolucaoEntradaInput {
@@ -436,6 +445,7 @@ class DadosEntregaOrcamento {
     this.janelaEntrega = 'nao_definida',
     this.dataEntregaMarcada,
     this.entregaSomenteCotacao = false,
+    this.cargasEntregaJson = '',
   });
 
   final String tipoEntrega; // retirada | retirada_futura | entrega_loja
@@ -448,6 +458,9 @@ class DadosEntregaOrcamento {
 
   /// Orcamento de cotacao: frete estimado sem endereco/agenda definidos.
   final bool entregaSomenteCotacao;
+
+  /// Plano de cargas (`CargasEntregaCodec`); vazio = uma viagem so.
+  final String cargasEntregaJson;
 }
 
 /// Filtros da [ListagemVendasPage]: condicoes aplicadas no ObjectBox (sem `getAll`).
@@ -4511,10 +4524,12 @@ class VendaRepository {
 
     final query = _db.vendaBox
         .query(
-          Venda_.cancelada
-              .equals(false)
-              .and(Venda_.dataEntregaMarcada.greaterOrEqualDate(iniUtc))
-              .and(Venda_.dataEntregaMarcada.lessOrEqualDate(fimUtc)),
+          Venda_.cancelada.equals(false).and(
+                Venda_.dataEntregaMarcada
+                    .greaterOrEqualDate(iniUtc)
+                    .and(Venda_.dataEntregaMarcada.lessOrEqualDate(fimUtc))
+                    .or(Venda_.cargasEntregaJson.notEquals('')),
+              ),
         )
         .order(Venda_.dataEntregaMarcada)
         .build();
@@ -4523,6 +4538,18 @@ class VendaRepository {
     try {
       for (final venda in query.find()) {
         if (!AgendaCarretoOcupacaoHelper.contaNaAgenda(venda)) continue;
+        if (CargasEntregaHelper.temPlano(venda.cargasEntregaJson)) {
+          for (final item in AgendaCarretoOcupacaoHelper.itensDasCargas(
+            venda,
+            ano: mes.year,
+            mes: mes.month,
+            clienteRepository: clienteRepository,
+          )) {
+            itens.add(item);
+            qtd.update(item.dataChave, (n) => n + 1, ifAbsent: () => 1);
+          }
+          continue;
+        }
         final marcada = venda.dataEntregaMarcada;
         if (marcada == null) continue;
         final diaLocal = AgendaCarretoOcupacaoMes.soDia(marcada);
@@ -4863,6 +4890,9 @@ class VendaRepository {
       venda.statusEntrega = novoStatus;
       venda.complementoEntregaJson = j;
       _estoque.creditarEstoqueComplementoFaltaNaIda(venda, linhas);
+    } else if (novoStatus == 'entregue' &&
+        _avancarParaProximaCargaSeHouver(venda, statusAnterior)) {
+      return;
     } else if (novoStatus == 'entregue') {
       final linhasComplemento = statusAnterior == 'entregue_complemento_pendente'
           ? ComplementoEntregaCodec.decode(venda.complementoEntregaJson)
@@ -4878,6 +4908,95 @@ class VendaRepository {
     } else {
       venda.statusEntrega = novoStatus;
     }
+  }
+
+  /// Plano de cargas: "entregue" conclui so a carga atual. Havendo cargas
+  /// seguintes, a venda volta ao patio para a proxima viagem (checklist,
+  /// grupo e POD zerados; o POD fica gravado na carga). O estoque da proxima
+  /// carga continua reservado e so baixa quando ela sair.
+  ///
+  /// Retorna false quando a carga atual era a ultima (segue o fluxo normal).
+  bool _avancarParaProximaCargaSeHouver(Venda venda, String statusAnterior) {
+    final cargas = CargasEntregaCodec.decode(venda.cargasEntregaJson);
+    final atual = CargasEntregaHelper.cargaAtual(cargas);
+    if (atual == null) return false;
+    final seguintes = cargas
+        .where((c) => c.pendente && c.numero != atual.numero)
+        .toList();
+    if (seguintes.isNotEmpty && !venda.cargaSaiu) {
+      throw StateError(
+        'A carga ${atual.numero}/${cargas.length} ainda nao saiu. '
+        'Marque "Saiu" antes de registrar a entrega.',
+      );
+    }
+    if (seguintes.isNotEmpty &&
+        statusAnterior == 'entregue_complemento_pendente') {
+      // Falta na ida desta carga chegou agora: baixa antes de trocar de carga.
+      final linhas =
+          ComplementoEntregaCodec.decode(venda.complementoEntregaJson);
+      if (linhas.isNotEmpty) {
+        _estoque.baixarEstoqueComplementoEntregaAoConcluir(venda, linhas);
+      }
+      venda.complementoEntregaJson = '';
+    }
+    venda.cargasEntregaJson = CargasEntregaCodec.encode([
+      for (final c in cargas)
+        c.numero == atual.numero
+            ? c.copyWith(
+                status: CargaEntrega.statusEntregue,
+                entregueEm: DateTime.now(),
+                recebidoPor: venda.podRecebidoPor.trim(),
+                podFotoPath: venda.podFotoPath.trim(),
+                podFotoPathServidor: venda.podFotoPathServidor.trim(),
+                podRegistradoPor: venda.podRegistradoPor.trim(),
+                motorista: venda.motoristaEntrega.trim(),
+                veiculo: venda.caminhaoEntrega.trim(),
+              )
+            : c,
+    ]);
+    if (seguintes.isEmpty) return false;
+
+    final proxima = seguintes.first;
+    venda.statusEntrega = 'pendente';
+    venda.cargaSeparada = false;
+    venda.cargaCarregada = false;
+    venda.cargaSaiu = false;
+    venda.grupoEntregaFreteId = 0;
+    venda.ordemEntrega = 0;
+    venda.podRecebidoPor = '';
+    venda.podRegistradoPor = '';
+    venda.podFotoPath = '';
+    venda.podFotoPathServidor = '';
+    venda.podRegistradoEm = null;
+    if (proxima.data != null) venda.dataEntregaMarcada = proxima.data;
+    if (proxima.janela != 'nao_definida') {
+      venda.janelaEntrega = proxima.janela;
+    }
+    for (final item in listarItensDaVendaGarantidos(venda.id)) {
+      if (item.buscarNaLojaStatus.isEmpty && item.quantidadeBuscarNaLoja == 0) {
+        continue;
+      }
+      item.buscarNaLojaStatus = '';
+      item.quantidadeBuscarNaLoja = 0;
+      _db.itemVendaBox.put(item);
+    }
+    final quando = proxima.data == null
+        ? 'sem data'
+        : 'em ${_formatarDiaCarga(proxima.data!)}';
+    _putOcorrenciaEmVenda(
+      venda: venda,
+      status: HistoricoEntregaEventos.cargaEntregue,
+      motivo: 'Carga ${atual.numero}/${cargas.length} entregue. '
+          'Proxima: carga ${proxima.numero} $quando.',
+      usuario: 'sistema',
+    );
+    return true;
+  }
+
+  static String _formatarDiaCarga(DateTime d) {
+    final l = d.toLocal();
+    return '${l.day.toString().padLeft(2, '0')}/'
+        '${l.month.toString().padLeft(2, '0')}/${l.year}';
   }
 
   void _putHistoricoStatusEmVenda({
@@ -5452,6 +5571,19 @@ class VendaRepository {
       } else {
         venda.dataEntregaMarcada = null;
       }
+      final cargas = CargasEntregaCodec.decode(venda.cargasEntregaJson);
+      final atual = CargasEntregaHelper.cargaAtual(cargas);
+      if (atual != null) {
+        venda.cargasEntregaJson = CargasEntregaCodec.encode([
+          for (final c in cargas)
+            c.numero == atual.numero
+                ? c.copyWith(
+                    data: venda.dataEntregaMarcada,
+                    limparData: venda.dataEntregaMarcada == null,
+                  )
+                : c,
+        ]);
+      }
       _db.vendaBox.put(venda);
     });
     _notificarRedeAposEscrita(vendaId: vendaId);
@@ -5553,6 +5685,11 @@ class VendaRepository {
         }
         return venda;
       }
+      final cargas = CargasEntregaCodec.decode(venda.cargasEntregaJson);
+      if (!venda.cargaSaiu && cargas.any((c) => c.entregue)) {
+        // Reenvio da baixa de uma carga ja concluida (a proxima nem saiu).
+        return venda;
+      }
       EntregaStatusTransicao.garantirPermitida(venda.statusEntrega, 'entregue');
       final anterior = statusAnterior.trim().isNotEmpty
           ? statusAnterior.trim()
@@ -5567,7 +5704,7 @@ class VendaRepository {
       _putHistoricoStatusEmVenda(
         venda: venda,
         statusAnterior: anterior,
-        statusNovo: 'entregue',
+        statusNovo: venda.statusEntrega,
         usuario: usuarioLogin,
       );
       final temFoto = fotoPathLocal.trim().isNotEmpty ||

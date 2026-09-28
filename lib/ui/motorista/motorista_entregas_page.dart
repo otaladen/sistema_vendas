@@ -14,6 +14,8 @@ import '../../domain/entrega_venda_helper.dart';
 import '../../domain/entrega_baixa_motorista_visao.dart';
 import '../../domain/entrega_baixa_pendente.dart';
 import '../../domain/entrega_filtro_util.dart';
+import '../../domain/entregas/carga_atual_venda.dart';
+import '../../domain/entregas/cargas_entrega.dart';
 import '../../domain/entregas/loja_origem_mercadoria.dart';
 import '../../domain/entregas/buscar_na_loja.dart';
 import '../../domain/entregas/rota_motorista_sequencia.dart';
@@ -246,8 +248,8 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
             n > 1
                 ? 'Confirma que a carga já saiu e você está em rota com '
                     '$n pedidos desta viagem?'
-                : 'Confirma que a carga do pedido ${venda.numeroOrcamento} '
-                    'já saiu e você está em rota?',
+                : 'Confirma que a carga do pedido ${venda.numeroOrcamento}'
+                    '${_sufixoCarga(venda)} já saiu e você está em rota?',
           ),
           actions: [
             TextButton(
@@ -368,7 +370,14 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Entrega ${venda.numeroOrcamento} concluida.')),
+        SnackBar(
+          content: Text(
+            _mensagemEntregaConcluida(
+              venda,
+              widget.vendaRepository.obterPorId(venda.id) as Venda?,
+            ),
+          ),
+        ),
       );
       _carregar();
     } catch (e) {
@@ -398,7 +407,7 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Entrega ${venda.numeroOrcamento} gravada. '
+            'Entrega ${venda.numeroOrcamento}${_sufixoCarga(venda)} gravada. '
             'Aguardando Sync com o PC servidor.',
           ),
         ),
@@ -750,6 +759,24 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
     }
   }
 
+  String _sufixoCarga(Venda venda) {
+    final rotulo = CargaAtualVenda.rotulo(venda);
+    return rotulo == null ? '' : ' ($rotulo)';
+  }
+
+  String _mensagemEntregaConcluida(Venda antes, Venda? depois) {
+    final rotulo = CargaAtualVenda.rotulo(antes);
+    final proxima = depois == null ? null : CargaAtualVenda.atual(depois);
+    if (rotulo == null || proxima == null) {
+      return 'Entrega ${antes.numeroOrcamento} concluida.';
+    }
+    final dia = proxima.data == null
+        ? 'sem data'
+        : DateFormat('dd/MM').format(proxima.data!);
+    return 'Pedido ${antes.numeroOrcamento}: $rotulo entregue. '
+        'Proxima viagem: carga ${proxima.numero} ($dia).';
+  }
+
   String _rotuloStatus(String s) {
     switch (s) {
       case 'roteirizada':
@@ -976,6 +1003,8 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                               ),
                             ),
                             Text(nomeCliente),
+                            if (CargaAtualVenda.atual(v) != null)
+                              _AvisoCargaMotorista(venda: v),
                             const SizedBox(height: 4),
                             Text(v.enderecoEntrega),
                             if (telUri != null || waUri != null) ...[
@@ -1047,7 +1076,7 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                                     visualDensity: VisualDensity.compact,
                                   ),
                                 Chip(
-                                  label: Text('Carga $prog/3'),
+                                  label: Text('Checklist $prog/3'),
                                   visualDensity: VisualDensity.compact,
                                 ),
                                 if (atrasada && !pendenteOuSync)
@@ -1142,6 +1171,66 @@ class _MotoristaEntregasPageState extends State<MotoristaEntregasPage> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// Destaca que o pedido vai em varias viagens e so a carga atual deve subir.
+class _AvisoCargaMotorista extends StatelessWidget {
+  const _AvisoCargaMotorista({required this.venda});
+
+  final Venda venda;
+
+  @override
+  Widget build(BuildContext context) {
+    final cargas = CargaAtualVenda.cargas(venda);
+    final atual = CargaAtualVenda.atual(venda);
+    if (atual == null) return const SizedBox.shrink();
+    final seguintes =
+        cargas.where((c) => c.pendente && c.numero > atual.numero).toList();
+    final CargaEntrega? proxima = seguintes.isEmpty ? null : seguintes.first;
+    final String detalhe;
+    if (proxima == null) {
+      detalhe = 'Ultima viagem deste pedido.';
+    } else {
+      final dia = proxima.data == null
+          ? 'sem data'
+          : DateFormat('dd/MM').format(proxima.data!);
+      detalhe = 'Leve so os itens desta carga. '
+          'Proxima viagem: carga ${proxima.numero} ($dia).';
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.local_shipping_outlined,
+            size: 18,
+            color: scheme.onTertiaryContainer,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Carga ${atual.numero} de ${cargas.length}. ',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(text: detalhe),
+                ],
+              ),
+              style: TextStyle(color: scheme.onTertiaryContainer),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

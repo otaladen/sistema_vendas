@@ -411,7 +411,7 @@
     },
     {
       "id": "3:1373149988303506096",
-      "lastPropertyId": "71:2129533980183763586",
+      "lastPropertyId": "72:1942812125760673226",
       "name": "Venda",
       "properties": [
         {
@@ -782,6 +782,11 @@
           "indexId": "89:4261387862428198274",
           "type": 6,
           "flags": 8
+        },
+        {
+          "id": "72:1942812125760673226",
+          "name": "cargasEntregaJson",
+          "type": 9
         }
       ],
       "relations": []

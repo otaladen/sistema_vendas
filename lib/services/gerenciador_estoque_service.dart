@@ -5,6 +5,8 @@ import '../data/produto_busca_util.dart';
 import '../domain/complemento_entrega_codec.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/entregas/buscar_na_loja.dart';
+import '../domain/entregas/carga_atual_venda.dart';
+import '../domain/entregas/cargas_entrega.dart';
 import '../domain/entregas/carreto_saida_produto_orfao.dart';
 import '../domain/entregas/loja_origem_mercadoria.dart';
 import '../domain/item_venda_produto_orfao.dart';
@@ -705,6 +707,23 @@ class GerenciadorEstoqueService {
     return LojaOrigemMercadoria.ehLocal(origem) ? qTotal : 0;
   }
 
+  /// [quantidadeItemParaEstoqueCarreto] recortado para a carga atual
+  /// (venda dividida em varias viagens). Sem plano = linha inteira.
+  static int quantidadeCarretoCargaAtual(Venda venda, ItemVenda item) =>
+      CargaAtualVenda.limitarEstoque(
+        venda,
+        item,
+        quantidadeItemParaEstoqueCarreto(item),
+      );
+
+  /// [quantidadeFisicaDestaLojaCarreto] recortado para a carga atual.
+  static int quantidadeFisicaCargaAtual(Venda venda, ItemVenda item) =>
+      CargaAtualVenda.limitarEstoque(
+        venda,
+        item,
+        quantidadeFisicaDestaLojaCarreto(venda, item),
+      );
+
   void validarEstoqueAntesDespachoCarreto(
     Venda venda, {
     bool permitirVendaSemEstoque = true,
@@ -713,7 +732,7 @@ class GerenciadorEstoqueService {
     if (!venda.carretoReservaAteSaida || forcarSaidaRomaneio) return;
     final porProduto = <int, ({int q, String nome})>{};
     for (final item in venda.itens) {
-      final q = quantidadeItemParaEstoqueCarreto(item);
+      final q = quantidadeCarretoCargaAtual(venda, item);
       if (q <= 0) continue;
       if (_itemProdutoOrfao(item)) continue;
       final pid = _produtoIdDoItem(item);
@@ -733,7 +752,7 @@ class GerenciadorEstoqueService {
 
     final fisicoPorProduto = <int, int>{};
     for (final item in venda.itens) {
-      final qFisico = quantidadeFisicaDestaLojaCarreto(venda, item);
+      final qFisico = quantidadeFisicaCargaAtual(venda, item);
       if (qFisico <= 0) continue;
       final pid = item.produtoOuNull?.id ?? _produtoIdDoItem(item);
       if (pid <= 0) continue;
@@ -788,7 +807,7 @@ class GerenciadorEstoqueService {
     final falhas = <String>[];
     final semBaixa = <CarretoSaidaProdutoOrfaoLinha>[];
     for (final item in venda.itens) {
-      final q = quantidadeItemParaEstoqueCarreto(item);
+      final q = quantidadeCarretoCargaAtual(venda, item);
       if (q <= 0) continue;
       if (forcarSaidaRomaneio) {
         semBaixa.add(
@@ -810,7 +829,7 @@ class GerenciadorEstoqueService {
         );
         continue;
       }
-      final qFisico = quantidadeFisicaDestaLojaCarreto(venda, item);
+      final qFisico = quantidadeFisicaCargaAtual(venda, item);
       final origemKardex = qFisico <= 0
           ? LojaOrigemMercadoria.outraLoja
           : (qFisico < q
@@ -899,7 +918,7 @@ class GerenciadorEstoqueService {
   }) {
     final falhas = <String>[];
     for (final item in itens) {
-      final q = quantidadeFisicaDestaLojaCarreto(venda, item);
+      final q = quantidadeFisicaCargaAtual(venda, item);
       if (q <= 0) continue;
       final Produto produto;
       try {
@@ -953,7 +972,7 @@ class GerenciadorEstoqueService {
     required Iterable<ItemVenda> itens,
   }) {
     for (final item in itens) {
-      final q = quantidadeFisicaDestaLojaCarreto(venda, item);
+      final q = quantidadeFisicaCargaAtual(venda, item);
       if (q <= 0) continue;
       final produto = _produtoAtualDoItem(item);
       final antes = _snap(produto);
@@ -985,8 +1004,8 @@ class GerenciadorEstoqueService {
     required String complementoEntregaJson,
   }) {
     for (final item in venda.itens) {
-      var q = quantidadeItemParaEstoqueCarreto(item);
-      var qFisico = quantidadeFisicaDestaLojaCarreto(venda, item);
+      var q = quantidadeCarretoCargaAtual(venda, item);
+      var qFisico = quantidadeFisicaCargaAtual(venda, item);
       if (q <= 0 && qFisico <= 0) continue;
       if (venda.statusEntrega == 'entregue_complemento_pendente' &&
           complementoEntregaJson.trim().isNotEmpty) {
@@ -1238,6 +1257,49 @@ class GerenciadorEstoqueService {
             produto.estoqueReservado = novo;
             alterou = true;
           }
+        }
+      } else if (tipo == EntregaVendaHelper.tipoEntregaLoja &&
+          venda.carretoReservaAteSaida &&
+          CargaAtualVenda.atual(venda) != null) {
+        // Plano de cargas: fisico volta so do que ja saiu; reserva libera so
+        // o que ainda nao saiu.
+        final itens = List<ItemVenda>.from(venda.itens);
+        final atual = CargaAtualVenda.atual(venda)!;
+        bool saiu(CargaEntrega c) =>
+            c.entregue || (c.numero == atual.numero && venda.cargaSaiu);
+        final fSaiu = CargaAtualVenda.fracaoPorItem(
+              venda,
+              itens,
+              incluir: saiu,
+            )?[item.id] ??
+            0;
+        final fNaoSaiu = CargaAtualVenda.fracaoPorItem(
+              venda,
+              itens,
+              incluir: (c) => !saiu(c),
+            )?[item.id] ??
+            0;
+        final qFisico =
+            (quantidadeFisicaDestaLojaCarreto(venda, item) * fSaiu).round();
+        if (qFisico > 0) {
+          produto.estoqueReal += qFisico;
+          if (produto.controlaLoteValidade) {
+            _fefo.devolverConsumos(
+              produto,
+              LoteConsumoSnapshot.decodeList(item.loteConsumosJson),
+            );
+          }
+          alterou = true;
+        }
+        var qReserva = (item.quantidadeUnidadeEstoque * fNaoSaiu).round();
+        final maxReserva = quantidadeItemParaEstoqueCarreto(item);
+        if (qReserva > maxReserva) qReserva = maxReserva;
+        final r = produto.estoqueReservado;
+        final teto = r < 0 ? 0 : r;
+        final novo = (r - qReserva).clamp(0, teto).toInt();
+        if (novo != produto.estoqueReservado) {
+          produto.estoqueReservado = novo;
+          alterou = true;
         }
       } else if (tipo == EntregaVendaHelper.tipoEntregaLoja &&
           venda.carretoReservaAteSaida) {

@@ -1,4 +1,5 @@
 import '../../domain/entrega_venda_helper.dart';
+import '../../domain/entregas/carga_atual_venda.dart';
 import '../../domain/entregas/romaneio_carga_merge.dart';
 import '../../model/item_venda.dart';
 import '../../model/venda.dart';
@@ -25,6 +26,7 @@ class LinhaPendenciaEntregaRelatorio {
     required this.statusEntrega,
     this.dataEntregaMarcada,
     this.vendedor = '',
+    this.cargaRotulo = '',
   });
 
   final int vendaId;
@@ -38,6 +40,9 @@ class LinhaPendenciaEntregaRelatorio {
   final String statusEntrega;
   final DateTime? dataEntregaMarcada;
   final String vendedor;
+
+  /// "Carga 2/3" quando o pedido tem plano de cargas.
+  final String cargaRotulo;
 }
 
 String rotuloTipoPendenciaEntrega(String tipo) {
@@ -76,6 +81,12 @@ List<LinhaPendenciaEntregaRelatorio> montarLinhasPendenciaEntrega(
       v,
       resolver: itensDaVenda,
     );
+    final fracaoCargasPendentes = CargaAtualVenda.fracaoPorItem(
+      v,
+      itens,
+      incluir: (c) => c.pendente,
+    );
+    final cargaRotulo = CargaAtualVenda.rotulo(v) ?? '';
     for (final item in itens) {
       final tipoItem = EntregaVendaHelper.tipoEfetivoItem(item);
       var qtd = 0;
@@ -86,6 +97,16 @@ List<LinhaPendenciaEntregaRelatorio> montarLinhasPendenciaEntrega(
         if (qtd <= 0) {
           qtd = item.quantidadeAindaNoCarretoAntesSaida;
         }
+      }
+      if (fracaoCargasPendentes != null &&
+          fracaoCargasPendentes.containsKey(item.id)) {
+        qtd = CargaAtualVenda.limitar(
+          venda: v,
+          item: item,
+          quantidade: qtd,
+          base: item.quantidade,
+          fracoes: fracaoCargasPendentes,
+        );
       }
       if (qtd <= 0) continue;
 
@@ -129,6 +150,9 @@ List<LinhaPendenciaEntregaRelatorio> montarLinhasPendenciaEntrega(
           statusEntrega: v.statusEntrega,
           dataEntregaMarcada: v.dataEntregaMarcada?.toLocal(),
           vendedor: vendedor,
+          cargaRotulo: tipoLinha == EntregaVendaHelper.tipoEntregaLoja
+              ? cargaRotulo
+              : '',
         ),
       );
     }

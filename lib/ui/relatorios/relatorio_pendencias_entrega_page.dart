@@ -120,6 +120,7 @@ class _RelatorioPendenciasEntregaPageState
           'Data venda',
           'Data marcada',
           'Vendedor',
+          'Carga',
         ],
         ..._linhas.map(
           (l) => [
@@ -135,6 +136,7 @@ class _RelatorioPendenciasEntregaPageState
                 ? _fmtData.format(l.dataEntregaMarcada!)
                 : '',
             l.vendedor,
+            l.cargaRotulo,
           ],
         ),
       ];
@@ -251,7 +253,8 @@ class _RelatorioPendenciasEntregaPageState
                             subtitle: Text(
                               '${l.produto} · '
                               '${rotuloTipoPendenciaEntrega(l.tipo)} · '
-                              '${_nfInt.format(l.quantidadePendente)} un.\n'
+                              '${_nfInt.format(l.quantidadePendente)} un.'
+                              '${l.cargaRotulo.isEmpty ? '' : ' · ${l.cargaRotulo} em andamento'}\n'
                               '${_fmtData.format(l.dataVenda)}'
                               '${l.vendedor.isEmpty ? '' : ' · ${l.vendedor}'}',
                             ),

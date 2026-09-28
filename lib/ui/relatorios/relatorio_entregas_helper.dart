@@ -1,4 +1,25 @@
+import '../../domain/entregas/carga_atual_venda.dart';
 import '../../model/venda.dart';
+
+/// Viagens previstas no pedido (1 sem plano de cargas).
+int relatorioViagensTotal(Venda venda) {
+  final cargas = CargaAtualVenda.cargas(venda);
+  return cargas.isEmpty ? 1 : cargas.length;
+}
+
+int relatorioViagensFeitas(Venda venda) {
+  final cargas = CargaAtualVenda.cargas(venda);
+  if (cargas.isNotEmpty) return cargas.where((c) => c.entregue).length;
+  final s = venda.statusEntrega;
+  return s == 'entregue' || s == 'entregue_complemento_pendente' ? 1 : 0;
+}
+
+/// "Carga 2/3", "3 cargas" (todas entregues) ou vazio sem plano.
+String relatorioRotuloCargas(Venda venda) {
+  final cargas = CargaAtualVenda.cargas(venda);
+  if (cargas.isEmpty) return '';
+  return CargaAtualVenda.rotulo(venda) ?? '${cargas.length} cargas';
+}
 
 bool relatorioEntregaStatusFinalizado(String status) {
   return status == 'entregue' || status == 'cancelada';

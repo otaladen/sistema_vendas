@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../model/venda.dart';
+import 'entregas/carga_atual_venda.dart';
 
 /// Dados minimos da NF-e 55 para rotulos (evita acoplar UI ao store).
 class VendaDocumentoNfe55Resumo {
@@ -279,14 +280,21 @@ abstract final class VendaDocumentoRotuloHelper {
       '#${badgeNumeroCurto(venda)}';
 
   static String rotuloPedidoEntrega(Venda venda) =>
-      'Pedido ${hashIdentificadorEntrega(venda)}';
+      'Pedido ${hashIdentificadorEntrega(venda)}${_sufixoCarga(venda)}';
 
   static String tituloItensPedidoEntrega(
     Venda venda, {
     bool paraEntrega = false,
   }) {
     final id = hashIdentificadorEntrega(venda);
-    return paraEntrega ? 'Itens para entrega $id' : 'Itens do pedido $id';
+    return paraEntrega
+        ? 'Itens para entrega $id${_sufixoCarga(venda)}'
+        : 'Itens do pedido $id';
+  }
+
+  static String _sufixoCarga(Venda venda) {
+    final r = CargaAtualVenda.rotulo(venda);
+    return r == null ? '' : ' · $r';
   }
 
   /// Busca por numero na aba Entregas (controle, orcamento legado, id interno).

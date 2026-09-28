@@ -46,6 +46,7 @@ class Venda {
     this.caminhaoEntrega = '',
     this.lojaOrigemMercadoria = '',
     this.complementoEntregaJson = '',
+    this.cargasEntregaJson = '',
     this.nfceChaveAcesso = '',
     this.nfceNumero = '',
     this.nfceSerie = '',
@@ -162,6 +163,11 @@ class Venda {
   /// JSON: lista de itens em falta na ida (`ComplementoEntregaCodec`).
   /// Usado com [statusEntrega] `entregue_complemento_pendente` ou pendencia em aberto.
   String complementoEntregaJson;
+
+  /// JSON: plano de cargas quando o carreto precisa de mais de uma viagem
+  /// (`CargasEntregaCodec`). Vazio = uma unica carga (dados da propria venda).
+  /// [dataEntregaMarcada] acompanha a primeira carga ainda pendente.
+  String cargasEntregaJson;
 
   /// Chave de acesso da NFC-e emitida para esta venda (apos pagamento no caixa).
   String nfceChaveAcesso;

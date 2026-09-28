@@ -2,6 +2,7 @@ import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
+import 'entregas/carga_atual_venda.dart';
 import 'produto_embalagem.dart';
 import 'quantidade_venda_util.dart';
 
@@ -320,10 +321,10 @@ class EntregaVendaHelper {
     List<ItemVenda>? itens,
   }) {
     if (!itemEntraNaCargaEntrega(venda, item)) return 0;
-    if (vendaTemItensMigradosRetiradaParaCarreto(venda, itens: itens)) {
-      return item.quantidadeParaExibicaoEntrega(true);
-    }
-    return item.quantidadeParaExibicaoEntrega(false);
+    final bruto = vendaTemItensMigradosRetiradaParaCarreto(venda, itens: itens)
+        ? item.quantidadeParaExibicaoEntrega(true)
+        : item.quantidadeParaExibicaoEntrega(false);
+    return CargaAtualVenda.limitarArmazenada(venda, item, bruto, itens: itens);
   }
 
   /// Produto da linha (ToOne ou [obterProduto] no terminal leve / motorista).
@@ -565,6 +566,8 @@ class EntregaVendaHelper {
     if (vendas.length >= 2 && vendas.first.grupoEntregaFreteId > 0) {
       return 'g:${vendas.first.grupoEntregaFreteId}';
     }
+    final carga = CargaAtualVenda.atual(vendas.first);
+    if (carga != null) return 's:${vendas.first.id}:c${carga.numero}';
     return 's:${vendas.first.id}';
   }
 
