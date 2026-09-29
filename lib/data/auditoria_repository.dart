@@ -4,7 +4,6 @@ import '../domain/auditoria_catalogo.dart';
 import '../model/auditoria_evento.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
-import 'sync/sync_write_trigger.dart';
 
 class AuditoriaFiltro {
   const AuditoriaFiltro({
@@ -51,8 +50,7 @@ class AuditoriaRepository {
           ? ''
           : jsonEncode(detalhes),
     );
-    final id = _db.auditoriaEventoBox.put(evento);
-    notificarAlteracaoParaRede(entidade: 'auditoria_evento', entidadeId: id);
+    _db.auditoriaEventoBox.put(evento);
   }
 
   List<AuditoriaEvento> listar({AuditoriaFiltro filtro = const AuditoriaFiltro()}) {
@@ -187,10 +185,7 @@ class AuditoriaRepository {
           .query(AuditoriaEvento_.dataHora.lessThan(corteMs))
           .build();
       try {
-        final ids = q.findIds();
-        if (ids.isEmpty) return 0;
-        _db.auditoriaEventoBox.removeMany(ids);
-        return ids.length;
+        return q.remove();
       } finally {
         q.close();
       }

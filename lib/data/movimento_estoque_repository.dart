@@ -2,8 +2,8 @@ import '../domain/estoque/tipo_movimento_estoque.dart';
 import '../model/movimento_estoque.dart';
 import '../model/produto.dart';
 import '../objectbox.g.dart';
+import '../services/resumo_diario_produto_service.dart';
 import 'objectbox.dart';
-import 'sync/sync_write_trigger.dart';
 
 /// Persistencia do kardex de estoque.
 class MovimentoEstoqueRepository {
@@ -40,14 +40,16 @@ class MovimentoEstoqueRepository {
       usuarioLogin: usuarioLogin.trim(),
     );
     linha.produto.targetId = produto.id;
-    final id = _db.movimentoEstoqueBox.put(linha);
-    notificarAlteracaoParaRede(entidade: 'movimento_estoque', entidadeId: id);
+    _db.movimentoEstoqueBox.put(linha);
+    ResumoDiarioProdutoService(_db).registrarMovimentoFisico(
+      produtoId: produto.id,
+      quando: linha.registradoEm,
+      tipoNome: tipo.name,
+      deltaFisico: deltaFisico,
+    );
   }
 
-  List<MovimentoEstoque> listarPorProduto(
-    int produtoId, {
-    int limite = 200,
-  }) {
+  List<MovimentoEstoque> listarPorProduto(int produtoId, {int limite = 200}) {
     if (produtoId <= 0) return const [];
     final q = _db.movimentoEstoqueBox
         .query(MovimentoEstoque_.produto.equals(produtoId))

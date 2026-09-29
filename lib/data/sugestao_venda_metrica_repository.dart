@@ -3,7 +3,6 @@ import '../domain/sugestao_venda_ranking.dart';
 import '../model/sugestao_venda_metrica_evento.dart';
 import '../objectbox.g.dart';
 import 'objectbox.dart';
-import 'sync/sync_write_trigger.dart';
 
 class SugestaoVendaMetricaRepository {
   SugestaoVendaMetricaRepository(this._db);
@@ -101,9 +100,22 @@ class SugestaoVendaMetricaRepository {
     _db.store.runInTransaction(TxMode.write, () {
       _box.put(evento);
     });
-    notificarAlteracaoParaRede(
-      entidade: 'sugestao_venda_metrica',
-      entidadeId: 0,
-    );
+  }
+
+  /// Apaga eventos anteriores ao inicio do dia de corte. Usa [Query.remove].
+  int purgarAnterioresA(int diasRetencao) {
+    if (diasRetencao <= 0) return 0;
+    final hoje = DateTime.now();
+    final limiteLocal = DateTime(hoje.year, hoje.month, hoje.day)
+        .subtract(Duration(days: diasRetencao));
+    final corteMs = limiteLocal.toUtc().millisecondsSinceEpoch;
+    final q = _box
+        .query(SugestaoVendaMetricaEvento_.dataHora.lessThan(corteMs))
+        .build();
+    try {
+      return _db.store.runInTransaction(TxMode.write, q.remove);
+    } finally {
+      q.close();
+    }
   }
 }

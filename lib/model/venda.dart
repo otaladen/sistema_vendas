@@ -118,6 +118,7 @@ class Venda {
   String prioridadeEntrega;
   String janelaEntrega;
   @Property(type: PropertyType.dateUtc)
+  @Index()
   DateTime? dataEntregaMarcada;
   bool cargaSeparada;
   bool cargaCarregada;
@@ -137,6 +138,7 @@ class Venda {
   DateTime? canceladaEm;
 
   @Property(type: PropertyType.dateUtc)
+  @Index()
   DateTime? finalizadaEm;
 
   /// Orcamento filho (somente frete) pendente no caixa; zerado apos pagamento.

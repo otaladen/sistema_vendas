@@ -4,7 +4,9 @@ import '../domain/fornecedor_entrada_nfe_indice.dart';
 import '../domain/produto_embalagem.dart';
 import '../model/produto.dart';
 import '../services/compras_preditivas_service.dart';
+import '../services/resumo_diario_produto_service.dart';
 import 'objectbox.dart';
+import 'venda_periodo_query.dart';
 import 'sync/sync_entity_codec.dart';
 
 /// Linha do relatorio de sugestao de reposicao (somente leitura / exportacao).
@@ -56,33 +58,33 @@ class LinhaSugestaoCompra {
   final List<String> fornecedoresNfe;
 
   static Map<String, dynamic> toApiMap(LinhaSugestaoCompra l) => {
-        'produto': SyncEntityCodec.produtoParaMap(l.produto),
-        'consumoNoPeriodoUnidades': l.consumoNoPeriodoUnidades,
-        'mediaUnidadesPorDia': l.mediaUnidadesPorDia,
-        'diasCoberturaComEstoqueAtual': l.diasCoberturaComEstoqueAtual,
-        'ultimaEntradaNfe': l.ultimaEntradaNfe?.toUtc().toIso8601String(),
-        'quantidadeSugerida': l.quantidadeSugerida,
-        'pontoPedido': l.pontoPedido,
-        'estoqueCritico': l.estoqueCritico,
-        'quantidadeSugeridaPorPp': l.quantidadeSugeridaPorPp,
-        'alertaPorEstoqueSeguranca': l.alertaPorEstoqueSeguranca,
-        'fornecedorUltimaNfe': l.fornecedorUltimaNfe,
-        'fornecedoresNfe': l.fornecedoresNfe,
-      };
+    'produto': SyncEntityCodec.produtoParaMap(l.produto),
+    'consumoNoPeriodoUnidades': l.consumoNoPeriodoUnidades,
+    'mediaUnidadesPorDia': l.mediaUnidadesPorDia,
+    'diasCoberturaComEstoqueAtual': l.diasCoberturaComEstoqueAtual,
+    'ultimaEntradaNfe': l.ultimaEntradaNfe?.toUtc().toIso8601String(),
+    'quantidadeSugerida': l.quantidadeSugerida,
+    'pontoPedido': l.pontoPedido,
+    'estoqueCritico': l.estoqueCritico,
+    'quantidadeSugeridaPorPp': l.quantidadeSugeridaPorPp,
+    'alertaPorEstoqueSeguranca': l.alertaPorEstoqueSeguranca,
+    'fornecedorUltimaNfe': l.fornecedorUltimaNfe,
+    'fornecedoresNfe': l.fornecedoresNfe,
+  };
 
   static LinhaSugestaoCompra? fromApiMap(Map<String, dynamic> m) {
     final prodRaw = m['produto'];
     if (prodRaw is! Map) return null;
-    final produto =
-        SyncEntityCodec.produtoDeMap(Map<String, dynamic>.from(prodRaw));
+    final produto = SyncEntityCodec.produtoDeMap(
+      Map<String, dynamic>.from(prodRaw),
+    );
     return LinhaSugestaoCompra(
       produto: produto,
       consumoNoPeriodoUnidades:
           (m['consumoNoPeriodoUnidades'] as num?)?.toInt() ?? 0,
-      mediaUnidadesPorDia:
-          (m['mediaUnidadesPorDia'] as num?)?.toDouble() ?? 0,
-      diasCoberturaComEstoqueAtual:
-          (m['diasCoberturaComEstoqueAtual'] as num?)?.toDouble(),
+      mediaUnidadesPorDia: (m['mediaUnidadesPorDia'] as num?)?.toDouble() ?? 0,
+      diasCoberturaComEstoqueAtual: (m['diasCoberturaComEstoqueAtual'] as num?)
+          ?.toDouble(),
       ultimaEntradaNfe: DateTime.tryParse(
         (m['ultimaEntradaNfe'] ?? '').toString(),
       ),
@@ -125,34 +127,18 @@ class SugestaoCompraRepository {
   }) {
     final dias = diasPeriodoConsumo <= 0 ? 1 : diasPeriodoConsumo;
     final cobertura = diasCoberturaAlvo <= 0 ? 30 : diasCoberturaAlvo;
-    final fim = DateTime.now().toUtc();
-    final inicio = fim.subtract(Duration(days: dias));
+    final agora = DateTime.now().toUtc();
 
-    final consumoPorProduto = <int, int>{};
-    for (final iv in _db.itemVendaBox.getAll()) {
-      final v = iv.venda.target;
-      final p = iv.produto.target;
-      if (v == null || p == null) continue;
-      if (v.status != 'finalizada' || v.cancelada) continue;
-      final vd = v.data.toUtc();
-      if (vd.isBefore(inicio) || vd.isAfter(fim)) continue;
-      consumoPorProduto.update(
-        p.id,
-        (x) => x + iv.quantidade,
-        ifAbsent: () => iv.quantidade,
-      );
-    }
+    final janela = VendaPeriodoQuery.janelaUtcAteAgora(dias, agora: agora);
+    final consumoPorProduto = ResumoDiarioProdutoService(
+      _db,
+    ).consumoBrutoEntre(janela.inicio, janela.fim);
 
     final ultimaEntrada = <int, DateTime>{};
-    for (final h in _db.historicoEntradaBox.getAll()) {
+    for (final h in VendaPeriodoQuery.historicoEntradaAte(_db, agora)) {
       final pid = h.produto.targetId;
       if (pid == 0) continue;
-      final d = h.dataEmissao.toUtc();
-      ultimaEntrada.update(
-        pid,
-        (prev) => d.isAfter(prev) ? d : prev,
-        ifAbsent: () => d,
-      );
+      ultimaEntrada.putIfAbsent(pid, () => h.dataEmissao.toUtc());
     }
 
     final comprasSvc = ComprasPreditivasService(_db, diasHistoricoVendas: dias);
@@ -165,8 +151,10 @@ class SugestaoCompraRepository {
       if (!pr.ativo) continue;
 
       final vendido = consumoPorProduto[pr.id] ?? 0;
-      final vendidoExibicao =
-          ProdutoEmbalagem.valorEstoqueExibicao(pr, vendido);
+      final vendidoExibicao = ProdutoEmbalagem.valorEstoqueExibicao(
+        pr,
+        vendido,
+      );
       final mediaHistorico = vendidoExibicao / dias;
       final mediaPersistida = pr.vendaMediaDiariaExibicao;
       final media = mediaPersistida > 0 ? mediaPersistida : mediaHistorico;
@@ -207,9 +195,8 @@ class SugestaoCompraRepository {
         if (!criticoPp && !abaixoMinimoForn) continue;
       } else if (apenasComSugestaoOuRisco) {
         final abaixoMinimo = livre <= minimo;
-        final giroBaixo = media > 1e-9 &&
-            diasCobertura != null &&
-            diasCobertura < cobertura;
+        final giroBaixo =
+            media > 1e-9 && diasCobertura != null && diasCobertura < cobertura;
         if (!abaixoMinimo && !giroBaixo && !criticoPp && qtdSugerida <= 0) {
           continue;
         }
@@ -252,7 +239,10 @@ class SugestaoCompraRepository {
 
   FornecedorEntradaNfeIndice indiceFornecedoresNfe() {
     final lancamentos = <FornecedorEntradaNfeLancamento>[];
-    for (final h in _db.historicoEntradaBox.getAll()) {
+    for (final h in VendaPeriodoQuery.historicoEntradaAte(
+      _db,
+      DateTime.now().toUtc(),
+    )) {
       final pid = h.produto.targetId;
       final nome = h.nomeFornecedor.trim();
       if (pid <= 0 || nome.isEmpty) continue;

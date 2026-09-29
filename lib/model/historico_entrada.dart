@@ -29,6 +29,7 @@ class HistoricoEntrada {
   String chaveAcesso;
 
   @Property(type: PropertyType.dateUtc)
+  @Index()
   DateTime dataEmissao;
 
   String nomeFornecedor;

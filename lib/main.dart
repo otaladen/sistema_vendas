@@ -47,7 +47,8 @@ import 'data/venda_repository.dart';
 import 'data/vendedor_repository.dart';
 import 'model/usuario_sistema.dart';
 import 'services/auditoria_registrar.dart';
-import 'services/auditoria_retencao_service.dart';
+import 'services/rotina_limpeza_service.dart';
+import 'services/resumo_diario_produto_service.dart';
 import 'services/entrega_pod_retencao_service.dart';
 import 'services/lan_servidor_bootstrap.dart';
 import 'services/lan_servidor_headless_service.dart';
@@ -108,8 +109,9 @@ Future<void> main(List<String> args) async {
       }
 
       final appConfigRepository = AppConfigRepository();
-      final configuracoesService =
-          ConfiguracoesService.registrar(appConfigRepository);
+      final configuracoesService = ConfiguracoesService.registrar(
+        appConfigRepository,
+      );
       await LoteValidadeConfigStore.carregar();
       var empresaCfg = await configuracoesService.inicializarNaAbertura(
         terminalLeve: false,
@@ -160,10 +162,12 @@ Future<void> main(List<String> args) async {
       await FiscalReconciliacaoStartup.executarSeConfigurado(
         objectBox: objectBox,
       );
-      await EstoqueDiagnosticoStartup.executarSePossivel(
-        objectBox: objectBox,
-      );
-      await AuditoriaRetencaoService.aplicarSeConfigurado(
+      await EstoqueDiagnosticoStartup.executarSePossivel(objectBox: objectBox);
+      if (!widget.terminalLeve) {
+        ResumoDiarioProdutoService(objectBox).backfillSeVazio();
+      }
+      await RotinaLimpezaService.aplicar(
+        db: objectBox,
         configRepository: configuracoesService.repository,
         auditoriaRepository: auditoriaRepository,
       );
@@ -190,8 +194,7 @@ Future<void> main(List<String> args) async {
       // SyncService/LanSyncScheduler: so aparelho mobile em modo local (sem rede).
       SyncService? syncService;
       LanSyncScheduler? lanSyncScheduler;
-      if (!Platform.isWindows &&
-          (Platform.isAndroid || Platform.isIOS)) {
+      if (!Platform.isWindows && (Platform.isAndroid || Platform.isIOS)) {
         syncService = SyncService(
           objectBox: objectBox,
           configRepository: configuracoesService.repository,
@@ -222,7 +225,8 @@ Future<void> _executarMigracaoMotoristaEntrega({
   required ObjectBox objectBox,
   required AppConfigRepository configRepository,
 }) async {
-  final jaConcluida = await configRepository.migracaoMotoristaEntregaConcluida();
+  final jaConcluida = await configRepository
+      .migracaoMotoristaEntregaConcluida();
   if (jaConcluida) return;
   final vendaRepository = VendaRepository(objectBox);
   vendaRepository.migrarMotoristaEntregaLegado();
@@ -233,7 +237,8 @@ Future<void> _executarMigracaoSkuZerosEsquerda({
   required ObjectBox objectBox,
   required AppConfigRepository configRepository,
 }) async {
-  final jaConcluida = await configRepository.migracaoSkuZerosEsquerdaConcluida();
+  final jaConcluida = await configRepository
+      .migracaoSkuZerosEsquerdaConcluida();
   if (jaConcluida) return;
   ProdutoRepository(objectBox).migrarSkuZerosEsquerdaLegado();
   await configRepository.marcarMigracaoSkuZerosEsquerdaConcluida();
@@ -243,8 +248,8 @@ Future<void> _executarMigracaoCadastroDuplicados({
   required ObjectBox objectBox,
   required AppConfigRepository configRepository,
 }) async {
-  final jaConcluida =
-      await configRepository.migracaoCadastroDuplicadosConcluida();
+  final jaConcluida = await configRepository
+      .migracaoCadastroDuplicadosConcluida();
   if (jaConcluida) return;
   try {
     final r = await CadastroDuplicadosLimpeza.executar(objectBox);
@@ -262,11 +267,9 @@ Future<void> _tentarSincronizarHorarioSistemaNoInicio() async {
     return;
   }
   try {
-    await Process.run(
-      'w32tm',
-      ['/resync'],
-      runInShell: true,
-    ).timeout(const Duration(seconds: 4));
+    await Process.run('w32tm', [
+      '/resync',
+    ], runInShell: true).timeout(const Duration(seconds: 4));
   } catch (_) {}
 }
 
@@ -587,7 +590,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       });
       return;
     }
-    final urlInvalidaMobile = ServidorConfigService.validarUrlParaDispositivo(url);
+    final urlInvalidaMobile = ServidorConfigService.validarUrlParaDispositivo(
+      url,
+    );
     if (urlInvalidaMobile != null) {
       if (!mounted) return;
       setState(() {
@@ -697,7 +702,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     NfeImportadaApiRepository,
     RecadoLojaApiRepository,
     FornecedorApiRepository,
-  ) _criarReposTerminal(LanApiClient client) {
+  )
+  _criarReposTerminal(LanApiClient client) {
     final produtoApi = ProdutoApiRepository(client);
     final clienteApi = ClienteApiRepository(client);
     final vendaApi = VendaApiRepository(client);
@@ -798,15 +804,33 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       ]);
       await Future.wait([
         opcional('titulos', () => vendaApi.hidratarTitulos()),
-        opcional('pendenciasFiscais', () => vendaApi.hidratarPendenciasFiscais()),
-        opcional('funcionarios', () => funcionarioApi?.hidratar() ?? Future.value()),
-        opcional('motoristas', () => motoristaApi?.hidratar() ?? Future.value()),
-        opcional('contasPagar', () => contaPagarApi?.hidratar() ?? Future.value()),
+        opcional(
+          'pendenciasFiscais',
+          () => vendaApi.hidratarPendenciasFiscais(),
+        ),
+        opcional(
+          'funcionarios',
+          () => funcionarioApi?.hidratar() ?? Future.value(),
+        ),
+        opcional(
+          'motoristas',
+          () => motoristaApi?.hidratar() ?? Future.value(),
+        ),
+        opcional(
+          'contasPagar',
+          () => contaPagarApi?.hidratar() ?? Future.value(),
+        ),
         opcional('kits', () => kitApi?.hidratar() ?? Future.value()),
         opcional('promocoes', () => promoApi?.hidratar() ?? Future.value()),
-        opcional('listaCompra', () => listaCompraApi?.hidratar() ?? Future.value()),
+        opcional(
+          'listaCompra',
+          () => listaCompraApi?.hidratar() ?? Future.value(),
+        ),
         opcional('recados', () => recadoLojaApi?.hidratar() ?? Future.value()),
-        opcional('fornecedores', () => fornecedorApi?.hidratar() ?? Future.value()),
+        opcional(
+          'fornecedores',
+          () => fornecedorApi?.hidratar() ?? Future.value(),
+        ),
         opcional('usuarios', () async {
           await _usuarioApi?.listarTodos(forcar: true);
         }),
@@ -853,10 +877,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         final revision = _produtoRevisionPendente;
         _produtoIdsApiPendentes = const [];
         _produtoRevisionPendente = null;
-        unawaited(_atualizarCatalogoProdutoApi(
-          ids: produtoIds,
-          revision: revision,
-        ));
+        unawaited(
+          _atualizarCatalogoProdutoApi(ids: produtoIds, revision: revision),
+        );
       });
       if (ent == 'produto' || ent == 'estoque') {
         // Nao mistura com a fila generica.
@@ -891,10 +914,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  void _processarEventoApi(
-    String ent, {
-    List<int>? produtoIdsOverride,
-  }) {
+  void _processarEventoApi(String ent, {List<int>? produtoIdsOverride}) {
     Future<void> safe(Future<void>? f) async {
       if (f == null) return;
       try {
@@ -915,8 +935,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     } else if (ent == 'conferencia_carga') {
       // ConferenciaCargaConsolidadaLista escuta o hub e recarrega o escopo.
     } else if (ent == 'produto' || ent == 'estoque' || ent == 'lote_produto') {
-      final ids = produtoIdsOverride ??
-          LanApiEventHub.instance.ultimaEntidadeIds;
+      final ids =
+          produtoIdsOverride ?? LanApiEventHub.instance.ultimaEntidadeIds;
       unawaited(
         _atualizarCatalogoProdutoApi(
           ids: ids,
@@ -1050,9 +1070,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ),
       );
     }
-    if (_terminalPrecisaConfig ||
-        _usuarioApi == null ||
-        _apiClient == null) {
+    if (_terminalPrecisaConfig || _usuarioApi == null || _apiClient == null) {
       return TerminalConfigPage(
         configuracoesService: widget.configuracoesService,
         onLogout: () => unawaited(_sair()),
@@ -1165,11 +1183,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       home: widget.terminalLeve
           ? _buildTerminalRoot()
           : (_usuarioLogado == null
-              ? LoginPage(
-                  usuarioRepository: _usuarioRepository,
-                  onLoginSuccess: _entrar,
-                )
-              : _buildHomeLogado()),
+                ? LoginPage(
+                    usuarioRepository: _usuarioRepository,
+                    onLoginSuccess: _entrar,
+                  )
+                : _buildHomeLogado()),
     );
   }
 }

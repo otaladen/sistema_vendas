@@ -29,7 +29,6 @@ abstract final class SyncPriorityCatalogo {
   static const alta = <String>{
     'venda',
     'orcamento', // alias de auditoria/legado; sync usa entity venda
-    'movimento_estoque',
     'lote_produto',
     'titulo_receber',
     'recebimento_fiado',
@@ -66,10 +65,8 @@ abstract final class SyncPriorityCatalogo {
     'promocao',
     'reajuste_preco',
     'empresa_config',
-    'auditoria_evento',
     'item_lista_compra',
     'produto_sugestao_venda',
-    'sugestao_venda_metrica',
   };
 
   static SyncPrioridade de(String? entity) {

@@ -46,6 +46,7 @@ import 'model/reajuste_preco_item.dart';
 import 'model/recado_loja.dart';
 import 'model/recebimento_fiado.dart';
 import 'model/registro_devolucao.dart';
+import 'model/resumo_diario_produto.dart';
 import 'model/sessao_inventario.dart';
 import 'model/sugestao_venda_metrica_evento.dart';
 import 'model/titulo_receber.dart';
@@ -680,7 +681,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(21, 1443390632023298621),
         name: 'dataEntregaMarcada',
         type: 10,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(93, 923347013210784582),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(22, 5697294450906106750),
@@ -938,7 +940,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(65, 7538825013182930492),
         name: 'finalizadaEm',
         type: 10,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(94, 3103591444124190896),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(66, 4773505673133219361),
@@ -2150,7 +2153,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(4, 1679461900419267543),
         name: 'dataEmissao',
         type: 10,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(90, 4527298702146123877),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(5, 4392565453608919279),
@@ -3308,7 +3312,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(12, 7970734927993251108),
         name: 'registradoEm',
         type: 10,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(91, 103373935389955848),
       ),
       obx_int.ModelProperty(
         id: const obx_int.IdUid(13, 7424392575387537870),
@@ -3704,7 +3709,8 @@ final _entities = <obx_int.ModelEntity>[
         id: const obx_int.IdUid(9, 4496581284718317239),
         name: 'dataHora',
         type: 10,
-        flags: 0,
+        flags: 8,
+        indexId: const obx_int.IdUid(92, 885749045280057831),
       ),
     ],
     relations: <obx_int.ModelRelation>[],
@@ -4342,6 +4348,66 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(42, 2883901813322600720),
+    name: 'ResumoDiarioProduto',
+    lastPropertyId: const obx_int.IdUid(8, 584820109838804491),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 1497155438710934550),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 1679744941902815209),
+        name: 'produtoId',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 385660929329972820),
+        name: 'data',
+        type: 10,
+        flags: 8,
+        indexId: const obx_int.IdUid(95, 5197589353928907507),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 1077631862138286899),
+        name: 'chaveDia',
+        type: 9,
+        flags: 2080,
+        indexId: const obx_int.IdUid(96, 2501529500777054827),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 2733380689017645778),
+        name: 'quantidadeVendida',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 238836189177701084),
+        name: 'valorTotalVendido',
+        type: 8,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 8198177702751732342),
+        name: 'quantidadeDevolvida',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 584820109838804491),
+        name: 'quantidadeEntrada',
+        type: 6,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -4387,8 +4453,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(41, 1697472292442925530),
-    lastIndexId: const obx_int.IdUid(89, 4261387862428198274),
+    lastEntityId: const obx_int.IdUid(42, 2883901813322600720),
+    lastIndexId: const obx_int.IdUid(96, 2501529500777054827),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -9866,6 +9932,88 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    ResumoDiarioProduto: obx_int.EntityDefinition<ResumoDiarioProduto>(
+      model: _entities[41],
+      toOneRelations: (ResumoDiarioProduto object) => [],
+      toManyRelations: (ResumoDiarioProduto object) => {},
+      getId: (ResumoDiarioProduto object) => object.id,
+      setId: (ResumoDiarioProduto object, int id) {
+        object.id = id;
+      },
+      objectToFB: (ResumoDiarioProduto object, fb.Builder fbb) {
+        final chaveDiaOffset = fbb.writeString(object.chaveDia);
+        fbb.startTable(9);
+        fbb.addInt64(0, object.id);
+        fbb.addInt64(1, object.produtoId);
+        fbb.addInt64(2, object.data.millisecondsSinceEpoch);
+        fbb.addOffset(3, chaveDiaOffset);
+        fbb.addInt64(4, object.quantidadeVendida);
+        fbb.addFloat64(5, object.valorTotalVendido);
+        fbb.addInt64(6, object.quantidadeDevolvida);
+        fbb.addInt64(7, object.quantidadeEntrada);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final idParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final produtoIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          6,
+          0,
+        );
+        final dataParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 8, 0),
+          isUtc: true,
+        );
+        final chaveDiaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final quantidadeVendidaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          0,
+        );
+        final valorTotalVendidoParam = const fb.Float64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          14,
+          0,
+        );
+        final quantidadeDevolvidaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          16,
+          0,
+        );
+        final quantidadeEntradaParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          18,
+          0,
+        );
+        final object = ResumoDiarioProduto(
+          id: idParam,
+          produtoId: produtoIdParam,
+          data: dataParam,
+          chaveDia: chaveDiaParam,
+          quantidadeVendida: quantidadeVendidaParam,
+          valorTotalVendido: valorTotalVendidoParam,
+          quantidadeDevolvida: quantidadeDevolvidaParam,
+          quantidadeEntrada: quantidadeEntradaParam,
+        );
+
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -13112,4 +13260,50 @@ class CaixaAuditoriaEvento_ {
   static final detalhesJson = obx.QueryStringProperty<CaixaAuditoriaEvento>(
     _entities[40].properties[8],
   );
+}
+
+/// [ResumoDiarioProduto] entity fields to define ObjectBox queries.
+class ResumoDiarioProduto_ {
+  /// See [ResumoDiarioProduto.id].
+  static final id = obx.QueryIntegerProperty<ResumoDiarioProduto>(
+    _entities[41].properties[0],
+  );
+
+  /// See [ResumoDiarioProduto.produtoId].
+  static final produtoId = obx.QueryIntegerProperty<ResumoDiarioProduto>(
+    _entities[41].properties[1],
+  );
+
+  /// See [ResumoDiarioProduto.data].
+  static final data = obx.QueryDateProperty<ResumoDiarioProduto>(
+    _entities[41].properties[2],
+  );
+
+  /// See [ResumoDiarioProduto.chaveDia].
+  static final chaveDia = obx.QueryStringProperty<ResumoDiarioProduto>(
+    _entities[41].properties[3],
+  );
+
+  /// See [ResumoDiarioProduto.quantidadeVendida].
+  static final quantidadeVendida =
+      obx.QueryIntegerProperty<ResumoDiarioProduto>(
+        _entities[41].properties[4],
+      );
+
+  /// See [ResumoDiarioProduto.valorTotalVendido].
+  static final valorTotalVendido = obx.QueryDoubleProperty<ResumoDiarioProduto>(
+    _entities[41].properties[5],
+  );
+
+  /// See [ResumoDiarioProduto.quantidadeDevolvida].
+  static final quantidadeDevolvida =
+      obx.QueryIntegerProperty<ResumoDiarioProduto>(
+        _entities[41].properties[6],
+      );
+
+  /// See [ResumoDiarioProduto.quantidadeEntrada].
+  static final quantidadeEntrada =
+      obx.QueryIntegerProperty<ResumoDiarioProduto>(
+        _entities[41].properties[7],
+      );
 }

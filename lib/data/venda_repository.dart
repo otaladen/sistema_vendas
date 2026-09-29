@@ -46,6 +46,7 @@ import '../domain/troca_diferenca_caixa.dart';
 import 'promocao_repository.dart';
 import '../services/auditoria_registrar.dart';
 import '../services/compras_preditivas_service.dart';
+import '../services/resumo_diario_produto_service.dart';
 import '../services/gerenciador_estoque_service.dart';
 import '../model/item_venda.dart';
 import '../model/historico_entrega.dart';
@@ -1806,6 +1807,7 @@ class VendaRepository {
       clienteId,
       inicio: inicio,
       fim: fim,
+      limit: null,
     );
     var compras = 0;
     var qtd = 0;
@@ -1832,29 +1834,67 @@ class VendaRepository {
     );
   }
 
+  /// Compras finalizadas do cliente, da mais recente para a mais antiga.
+  ///
+  /// [limit] padrao 50 para a lista da UI. Passe null para o periodo inteiro
+  /// (totais e resumo do PDV).
   List<Venda> listarComprasFinalizadasPorCliente(
     int clienteId, {
     DateTime? inicio,
     DateTime? fim,
+    int? limit = 50,
   }) {
+    if (clienteId <= 0) return const [];
     final inicioUtc = inicio?.toUtc();
     final fimUtc = fim?.toUtc();
-    return listarTodas()
-        .where(
-          (venda) =>
-              venda.status == 'finalizada' &&
-              !venda.cancelada &&
-              venda.cliente.targetId == clienteId &&
-              (inicioUtc == null || !venda.data.toUtc().isBefore(inicioUtc)) &&
-              (fimUtc == null || !venda.data.toUtc().isAfter(fimUtc)),
+    var cond = Venda_.cliente
+        .equals(clienteId)
+        .and(Venda_.status.equals('finalizada'))
+        .and(Venda_.cancelada.equals(false));
+    if (inicioUtc != null && fimUtc != null) {
+      cond = cond.and(
+        Venda_.finalizadaEm.betweenDate(inicioUtc, fimUtc).or(
+              Venda_.finalizadaEm.isNull().and(
+                    Venda_.data.betweenDate(inicioUtc, fimUtc),
+                  ),
+            ),
+      );
+    } else if (inicioUtc != null) {
+      cond = cond.and(
+        Venda_.finalizadaEm.greaterOrEqualDate(inicioUtc).or(
+              Venda_.finalizadaEm.isNull().and(
+                    Venda_.data.greaterOrEqualDate(inicioUtc),
+                  ),
+            ),
+      );
+    } else if (fimUtc != null) {
+      cond = cond.and(
+        Venda_.finalizadaEm.lessOrEqualDate(fimUtc).or(
+              Venda_.finalizadaEm.isNull().and(
+                    Venda_.data.lessOrEqualDate(fimUtc),
+                  ),
+            ),
+      );
+    }
+    final query = _db.vendaBox
+        .query(cond)
+        .order(
+          Venda_.finalizadaEm,
+          flags: Order.descending | Order.nullsLast,
         )
-        .toList()
-      ..sort((a, b) => b.data.compareTo(a.data));
+        .build();
+    try {
+      if (limit != null && limit > 0) query.limit = limit;
+      return query.find();
+    } finally {
+      query.close();
+    }
   }
 
   double totalGastoCliente(int clienteId) {
     return listarComprasFinalizadasPorCliente(
       clienteId,
+      limit: null,
     ).fold<double>(0, (total, venda) => total + venda.total);
   }
 
@@ -2367,6 +2407,7 @@ class VendaRepository {
         item.venda.target = venda;
         _db.itemVendaBox.put(item);
       }
+      ResumoDiarioProdutoService(_db).registrarVendaFinalizada(venda, itens);
 
       return vendaId;
     });
@@ -3287,6 +3328,7 @@ class VendaRepository {
         permitirVendaSemEstoque: permitirVendaSemEstoque,
         itens: itens,
       );
+      ResumoDiarioProdutoService(_db).registrarVendaFinalizada(venda, itens);
 
       // Garante que "leva agora" realmente saiu do fisico (nao ficou so reservado).
       for (final item in itens) {
@@ -6549,6 +6591,9 @@ class VendaRepository {
       }
 
       _estoque.estornarEstoqueAoCancelarVenda(venda);
+      if (venda.status == 'finalizada') {
+        ResumoDiarioProdutoService(_db).estornarVendaFinalizada(venda, itens);
+      }
 
       venda.cancelada = true;
       venda.motivoCancelamento = motivoLimpo;

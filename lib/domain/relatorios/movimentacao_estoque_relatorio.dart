@@ -1,6 +1,7 @@
 import '../../domain/estoque/tipo_movimento_estoque.dart';
 import '../../model/movimento_estoque.dart';
 import '../../model/produto.dart';
+import '../../model/resumo_diario_produto.dart';
 
 export '../../domain/estoque/tipo_movimento_estoque.dart'
     show TipoMovimentoEstoque;
@@ -17,12 +18,7 @@ enum FiltroNaturezaMovimentacaoEstoque {
 }
 
 /// Agrupamento do resumo de movimentacao.
-enum AgrupamentoMovimentacaoEstoque {
-  produto,
-  categoria,
-  subcategoria,
-  marca,
-}
+enum AgrupamentoMovimentacaoEstoque { produto, categoria, subcategoria, marca }
 
 /// Linha resumida por produto ou grupo.
 class ResumoMovimentacaoEstoqueLinha {
@@ -34,6 +30,7 @@ class ResumoMovimentacaoEstoqueLinha {
     this.entradas = 0,
     this.saidas = 0,
     this.cancelamentos = 0,
+    this.devolucoes = 0,
     this.saldoInicial = 0,
     this.saldoFinal = 0,
     this.movimentos = 0,
@@ -46,6 +43,9 @@ class ResumoMovimentacaoEstoqueLinha {
   int entradas;
   int saidas;
   int cancelamentos;
+
+  /// Devolução ao cliente vinda do agregado diário. O kardex deixa isto em zero.
+  int devolucoes;
   int saldoInicial;
   int saldoFinal;
   int movimentos;
@@ -195,8 +195,7 @@ List<ResumoMovimentacaoEstoqueLinha> agregarMovimentacaoEstoque({
     final produto = produtosPorId[pid] ?? m.produto.target;
     if (produto != null && somenteAtivos && !produto.ativo) return false;
     return true;
-  }).toList()
-    ..sort((a, b) => a.registradoEm.compareTo(b.registradoEm));
+  }).toList()..sort((a, b) => a.registradoEm.compareTo(b.registradoEm));
 
   for (final m in filtrados) {
     final pid = m.produto.targetId;
@@ -232,6 +231,56 @@ List<ResumoMovimentacaoEstoqueLinha> agregarMovimentacaoEstoque({
 
   final lista = map.values.toList();
   lista.sort((a, b) => b.movimentos.compareTo(a.movimentos));
+  return lista;
+}
+
+/// Resumo do período a partir do agregado diário (vendas, devoluções e entradas).
+///
+/// Não preenche saldo nem cancelamento: isso continua no kardex linha a linha.
+List<ResumoMovimentacaoEstoqueLinha> agregarResumoDiarioProduto({
+  required List<ResumoDiarioProduto> resumos,
+  required Map<int, Produto> produtosPorId,
+  required AgrupamentoMovimentacaoEstoque agrupamento,
+  int? produtoIdFiltro,
+  bool somenteAtivos = true,
+}) {
+  final map = <String, ResumoMovimentacaoEstoqueLinha>{};
+  for (final resumo in resumos) {
+    if (produtoIdFiltro != null && resumo.produtoId != produtoIdFiltro) {
+      continue;
+    }
+    if (resumo.quantidadeEntrada == 0 &&
+        resumo.quantidadeVendida == 0 &&
+        resumo.quantidadeDevolvida == 0) {
+      continue;
+    }
+    final produto = produtosPorId[resumo.produtoId];
+    if (produto != null && somenteAtivos && !produto.ativo) continue;
+    final chave = chaveAgrupamentoMovimentacao(
+      produto,
+      agrupamento: agrupamento,
+    );
+    final linha = map.putIfAbsent(
+      chave,
+      () => ResumoMovimentacaoEstoqueLinha(
+        chave: chave,
+        rotulo: rotuloAgrupamentoMovimentacao(
+          produto,
+          agrupamento: agrupamento,
+        ),
+        produtoId: agrupamento == AgrupamentoMovimentacaoEstoque.produto
+            ? (produto?.id ?? resumo.produtoId)
+            : 0,
+        codigo: produto?.codigoInterno ?? '',
+      ),
+    );
+    linha.entradas += resumo.quantidadeEntrada;
+    linha.saidas += resumo.quantidadeVendida;
+    linha.devolucoes += resumo.quantidadeDevolvida;
+    linha.movimentos += 1;
+  }
+  final lista = map.values.toList();
+  lista.sort((a, b) => b.saidas.compareTo(a.saidas));
   return lista;
 }
 

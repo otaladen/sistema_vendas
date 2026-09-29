@@ -40,6 +40,7 @@ class MovimentoEstoque {
   String usuarioLogin;
 
   @Property(type: PropertyType.dateUtc)
+  @Index()
   DateTime registradoEm;
 
   final produto = ToOne<Produto>();

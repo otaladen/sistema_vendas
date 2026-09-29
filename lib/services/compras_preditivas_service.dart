@@ -2,6 +2,8 @@ import 'package:objectbox/objectbox.dart';
 
 import '../data/objectbox.dart';
 import '../data/ponto_pedido_api_dto.dart';
+import '../data/venda_periodo_query.dart';
+import 'resumo_diario_produto_service.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_estoque_sync.dart';
 import '../model/produto.dart';
@@ -38,10 +40,7 @@ class ComprasPreditivasService {
 
   /// Dias desde o cadastro do produto.
   int diasDesdeCadastro(Produto produto) {
-    return DateTime.now()
-        .toUtc()
-        .difference(produto.criadoEm.toUtc())
-        .inDays;
+    return DateTime.now().toUtc().difference(produto.criadoEm.toUtc()).inDays;
   }
 
   /// Giro confiavel: cadastro maduro (>= [diasMinimosCadastroParaGiro]) e media > 0.
@@ -63,14 +62,8 @@ class ComprasPreditivasService {
 
   /// Valor exibido como "ponto de pedido" (PP ou limiar de seguranca).
   /// Sempre na unidade de venda ([Produto.estoqueExibicao]), nunca em raw.
-  double calcularPontoPedidoExibicao(
-    Produto produto, {
-    int? consumoNoPeriodo,
-  }) {
-    if (temGiroVendaConfiavel(
-      produto,
-      consumoNoPeriodo: consumoNoPeriodo,
-    )) {
+  double calcularPontoPedidoExibicao(Produto produto, {int? consumoNoPeriodo}) {
+    if (temGiroVendaConfiavel(produto, consumoNoPeriodo: consumoNoPeriodo)) {
       final media = _mediaDiariaExibicao(
         produto,
         consumoNoPeriodo: consumoNoPeriodo,
@@ -99,10 +92,7 @@ class ComprasPreditivasService {
   }
 
   /// Media diaria na unidade de venda (m²/CX/UN).
-  double _mediaDiariaExibicao(
-    Produto produto, {
-    int? consumoNoPeriodo,
-  }) {
+  double _mediaDiariaExibicao(Produto produto, {int? consumoNoPeriodo}) {
     if (consumoNoPeriodo != null && consumoNoPeriodo > 0) {
       final dias = diasHistoricoVendas <= 0 ? 1 : diasHistoricoVendas;
       return ProdutoEmbalagem.valorEstoqueExibicao(produto, consumoNoPeriodo) /
@@ -115,10 +105,7 @@ class ComprasPreditivasService {
   }
 
   /// `true` se estoque atual (unidade de venda) atingiu ou ficou abaixo do limiar.
-  bool verificarEstoqueCritico(
-    Produto produto, {
-    int? consumoNoPeriodo,
-  }) {
+  bool verificarEstoqueCritico(Produto produto, {int? consumoNoPeriodo}) {
     final estoque = produto.estoqueExibicao;
     final limiar = calcularPontoPedidoExibicao(
       produto,
@@ -127,31 +114,14 @@ class ComprasPreditivasService {
     return estoque <= limiar + 1e-9;
   }
 
-  /// Monta consumo por produto em uma unica passagem (60 dias).
+  /// Monta consumo por produto na janela (padrao 60 dias), ja filtrada no ObjectBox.
   Map<int, int> montarConsumoPorProdutoNoPeriodo({int? dias}) {
-    final janela = dias ?? diasHistoricoVendas;
-    final diasJanela = janela <= 0 ? 1 : janela;
-    final fim = DateTime.now().toUtc();
-    final inicio = fim.subtract(Duration(days: diasJanela));
-
-    final consumo = <int, int>{};
-    for (final item in _db.itemVendaBox.getAll()) {
-      final produtoId = item.produto.targetId;
-      if (produtoId == 0) continue;
-      final venda = item.venda.target;
-      if (venda == null) continue;
-      if (venda.status != 'finalizada' || venda.cancelada) continue;
-      final dataVenda = venda.data.toUtc();
-      if (dataVenda.isBefore(inicio) || dataVenda.isAfter(fim)) continue;
-      final qtd = item.quantidade - item.quantidadeDevolvida;
-      if (qtd <= 0) continue;
-      consumo.update(
-        produtoId,
-        (x) => x + qtd,
-        ifAbsent: () => qtd,
-      );
-    }
-    return consumo;
+    final janela = VendaPeriodoQuery.janelaUtcAteAgora(
+      dias ?? diasHistoricoVendas,
+    );
+    return ResumoDiarioProdutoService(
+      _db,
+    ).consumoLiquidoEntre(janela.inicio, janela.fim);
   }
 
   double mediaDiariaFromConsumo(Map<int, int> consumo, int produtoId) {
@@ -215,7 +185,9 @@ class ComprasPreditivasService {
   }
 
   /// Mapa produtoId -> critico PP (para listagem na tela Estoque).
-  Map<int, bool> mapaProdutosAtivosCriticos({Map<int, int>? consumoPrecalculado}) {
+  Map<int, bool> mapaProdutosAtivosCriticos({
+    Map<int, int>? consumoPrecalculado,
+  }) {
     final consumo = consumoPrecalculado ?? montarConsumoPorProdutoNoPeriodo();
     final mapa = <int, bool>{};
     for (final produto in _db.produtoBox.getAll()) {
@@ -265,10 +237,7 @@ class ComprasPreditivasService {
       items.add(
         PontoPedidoApiItem(
           produtoId: produto.id,
-          critico: verificarEstoqueCritico(
-            produto,
-            consumoNoPeriodo: bruto,
-          ),
+          critico: verificarEstoqueCritico(produto, consumoNoPeriodo: bruto),
           pontoPedido: calcularPontoPedidoExibicao(
             produto,
             consumoNoPeriodo: bruto,

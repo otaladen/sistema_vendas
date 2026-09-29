@@ -37,5 +37,6 @@ class SugestaoVendaMetricaEvento {
   String usuarioLogin;
 
   @Property(type: PropertyType.dateUtc)
+  @Index()
   DateTime dataHora;
 }

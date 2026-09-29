@@ -265,6 +265,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         clienteId,
         inicio: desde,
         fim: ate,
+        limit: null,
       );
       final total = compras.length;
       final totalValor = compras.fold<double>(0, (s, v) => s + v.total);

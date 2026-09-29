@@ -14,6 +14,7 @@ import '../model/cliente.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
 import '../model/movimento_estoque.dart';
+import '../model/resumo_diario_produto.dart';
 import '../model/lote_produto.dart';
 import '../model/fechamento_rh_funcionario.dart';
 import '../model/funcionario.dart';
@@ -45,8 +46,12 @@ import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../objectbox.g.dart';
 import 'objectbox_lifecycle_hub.dart';
+import 'objectbox_tamanho.dart';
 
 class ObjectBox {
+  /// Teto do arquivo LMDB (`data.mdb`). ObjectBox mede em KB: 16 GB.
+  static const int maxDbSizeInKb = 16 * 1024 * 1024;
+
   ObjectBox._create(this.store) {
     _inicializarBoxes();
   }
@@ -71,6 +76,7 @@ class ObjectBox {
   late Box<VinculoFornecedorProduto> vinculoFornecedorProdutoBox;
   late Box<HistoricoEntrada> historicoEntradaBox;
   late Box<MovimentoEstoque> movimentoEstoqueBox;
+  late Box<ResumoDiarioProduto> resumoDiarioProdutoBox;
   late Box<LoteProduto> loteProdutoBox;
   late Box<NfeImportadaRegistro> nfeImportadaRegistroBox;
   late Box<KitOrcamento> kitOrcamentoBox;
@@ -117,6 +123,7 @@ class ObjectBox {
     vinculoFornecedorProdutoBox = Box<VinculoFornecedorProduto>(store);
     historicoEntradaBox = Box<HistoricoEntrada>(store);
     movimentoEstoqueBox = Box<MovimentoEstoque>(store);
+    resumoDiarioProdutoBox = Box<ResumoDiarioProduto>(store);
     loteProdutoBox = Box<LoteProduto>(store);
     nfeImportadaRegistroBox = Box<NfeImportadaRegistro>(store);
     kitOrcamentoBox = Box<KitOrcamento>(store);
@@ -140,6 +147,10 @@ class ObjectBox {
     sessaoInventarioBox = Box<SessaoInventario>(store);
     itemInventarioBox = Box<ItemInventario>(store);
   }
+
+  /// Tamanho atual de `data.mdb` em megabytes (1 MB = 1024 * 1024 bytes).
+  double get tamanhoDataMdbMb =>
+      ObjectBoxTamanho.dataMdbEmMb(storeDirectoryPath);
 
   /// True enquanto o backup fecha o banco, ou se o store ja morreu.
   bool get leituraIndisponivel {
@@ -171,7 +182,10 @@ class ObjectBox {
   Future<void> reabrirAposCopiaDeArquivos() async {
     if (!store.isClosed()) return;
     try {
-      store = await openStore(directory: storeDirectoryPath);
+      store = await openStore(
+        directory: storeDirectoryPath,
+        maxDBSizeInKB: maxDbSizeInKb,
+      );
       _inicializarBoxes();
       ObjectBoxLifecycleHub.notificarStoreReaberta();
     } catch (e, st) {
@@ -186,8 +200,9 @@ class ObjectBox {
         : await getApplicationDocumentsDirectory();
     final objectBoxDir = Directory(p.join(baseDir.path, 'objectbox'));
     final productImagesDir = Directory(p.join(baseDir.path, 'product_images'));
-    final funcionarioImagesDir =
-        Directory(p.join(baseDir.path, 'funcionario_images'));
+    final funcionarioImagesDir = Directory(
+      p.join(baseDir.path, 'funcionario_images'),
+    );
     if (!objectBoxDir.existsSync()) {
       objectBoxDir.createSync(recursive: true);
     }
@@ -198,7 +213,10 @@ class ObjectBox {
       funcionarioImagesDir.createSync(recursive: true);
     }
 
-    final store = await openStore(directory: objectBoxDir.path);
+    final store = await openStore(
+      directory: objectBoxDir.path,
+      maxDBSizeInKB: maxDbSizeInKb,
+    );
     final instance = ObjectBox._create(store);
     instance.productImagesDir = productImagesDir;
     instance.funcionarioImagesDir = funcionarioImagesDir;
@@ -211,10 +229,7 @@ class ObjectBox {
     if (!directory.existsSync()) {
       directory.createSync(recursive: true);
     }
-    final store = Store(
-      getObjectBoxModel(),
-      directory: directory.path,
-    );
+    final store = Store(getObjectBoxModel(), directory: directory.path);
     final instance = ObjectBox._create(store);
     instance.productImagesDir = directory;
     instance.funcionarioImagesDir = directory;

@@ -36,6 +36,7 @@ import 'sync_dirty_outbox.dart';
 import 'sync_entity_codec.dart';
 import 'sync_entity_codec_operacional.dart';
 import 'sync_entity_codec_extras.dart';
+import 'sync_escopo_balcao.dart';
 
 /// Monta push e aplica pull para todas as entidades de negocio.
 class SyncFullSync {
@@ -87,10 +88,16 @@ class SyncFullSync {
   Future<List<Map<String, dynamic>>> montarMutacoes({
     bool evitarSnapshotCompleto = false,
   }) async {
+    for (final entity in SyncEscopoBalcao.foraDoSyncContinuo) {
+      await SyncDirtyOutbox.removerVarios(entity: entity);
+    }
     // Copia tipada: evita List<Map<String, Object>> vinda do outbox de deletes.
     final m = <Map<String, dynamic>>[
       ...await SyncDeleteOutbox.mutacoesParaPush(),
-    ];
+    ]..removeWhere(
+        (item) =>
+            SyncEscopoBalcao.estaForaDoSyncContinuo('${item['entity']}'),
+      );
     final revision = await SyncCursorStorage().carregarUltimaRevision();
     final bootstrap =
         await SyncDirtyOutbox.precisaBootstrap() || revision == 0;
@@ -172,14 +179,11 @@ class SyncFullSync {
     'empresa_config',
     'usuarios_sistema',
     'caixa_sessoes',
-    'movimento_estoque',
     'lote_produto',
     'conta_pagar',
     'reajuste_preco',
-    'auditoria_evento',
     'item_lista_compra',
     'produto_sugestao_venda',
-    'sugestao_venda_metrica',
     'recado_loja',
   ];
 
@@ -187,6 +191,7 @@ class SyncFullSync {
     List<Map<String, dynamic>> m,
     String entity,
   ) async {
+    if (SyncEscopoBalcao.estaForaDoSyncContinuo(entity)) return;
     switch (entity) {
       case 'fornecedor_nfe':
         for (final f in _db.fornecedorNfeBox.getAll()) {
@@ -455,6 +460,7 @@ class SyncFullSync {
     String entity,
     int localId,
   ) async {
+    if (SyncEscopoBalcao.estaForaDoSyncContinuo(entity)) return;
     if (localId <= 0 && entity != 'empresa_config') return;
     switch (entity) {
       case 'fornecedor_nfe':
@@ -765,6 +771,7 @@ class SyncFullSync {
     final entity = ch['entity'] as String?;
     final op = ch['op'] as String?;
     if (entity == null || op == null) return;
+    if (SyncEscopoBalcao.estaForaDoSyncContinuo(entity)) return;
 
     if (op == 'delete') {
       final id = (ch['entityId'] as num?)?.toInt() ?? 0;

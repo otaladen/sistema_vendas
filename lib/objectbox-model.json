@@ -532,7 +532,9 @@
         {
           "id": "21:1443390632023298621",
           "name": "dataEntregaMarcada",
-          "type": 10
+          "indexId": "93:923347013210784582",
+          "type": 10,
+          "flags": 8
         },
         {
           "id": "22:5697294450906106750",
@@ -747,7 +749,9 @@
         {
           "id": "65:7538825013182930492",
           "name": "finalizadaEm",
-          "type": 10
+          "indexId": "94:3103591444124190896",
+          "type": 10,
+          "flags": 8
         },
         {
           "id": "66:4773505673133219361",
@@ -1778,7 +1782,9 @@
         {
           "id": "4:1679461900419267543",
           "name": "dataEmissao",
-          "type": 10
+          "indexId": "90:4527298702146123877",
+          "type": 10,
+          "flags": 8
         },
         {
           "id": "5:4392565453608919279",
@@ -2751,7 +2757,9 @@
         {
           "id": "12:7970734927993251108",
           "name": "registradoEm",
-          "type": 10
+          "indexId": "91:103373935389955848",
+          "type": 10,
+          "flags": 8
         },
         {
           "id": "13:7424392575387537870",
@@ -3090,7 +3098,9 @@
         {
           "id": "9:4496581284718317239",
           "name": "dataHora",
-          "type": 10
+          "indexId": "92:885749045280057831",
+          "type": 10,
+          "flags": 8
         }
       ],
       "relations": []
@@ -3635,10 +3645,63 @@
         }
       ],
       "relations": []
+    },
+    {
+      "id": "42:2883901813322600720",
+      "lastPropertyId": "8:584820109838804491",
+      "name": "ResumoDiarioProduto",
+      "properties": [
+        {
+          "id": "1:1497155438710934550",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1679744941902815209",
+          "name": "produtoId",
+          "type": 6
+        },
+        {
+          "id": "3:385660929329972820",
+          "name": "data",
+          "indexId": "95:5197589353928907507",
+          "type": 10,
+          "flags": 8
+        },
+        {
+          "id": "4:1077631862138286899",
+          "name": "chaveDia",
+          "indexId": "96:2501529500777054827",
+          "type": 9,
+          "flags": 2080
+        },
+        {
+          "id": "5:2733380689017645778",
+          "name": "quantidadeVendida",
+          "type": 6
+        },
+        {
+          "id": "6:238836189177701084",
+          "name": "valorTotalVendido",
+          "type": 8
+        },
+        {
+          "id": "7:8198177702751732342",
+          "name": "quantidadeDevolvida",
+          "type": 6
+        },
+        {
+          "id": "8:584820109838804491",
+          "name": "quantidadeEntrada",
+          "type": 6
+        }
+      ],
+      "relations": []
     }
   ],
-  "lastEntityId": "41:1697472292442925530",
-  "lastIndexId": "89:4261387862428198274",
+  "lastEntityId": "42:2883901813322600720",
+  "lastIndexId": "96:2501529500777054827",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,

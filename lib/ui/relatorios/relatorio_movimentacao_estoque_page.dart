@@ -10,6 +10,7 @@ import '../../data/sync/sync_entity_codec_operacional.dart';
 import '../../domain/estoque/movimento_estoque_helper.dart';
 import '../../model/movimento_estoque.dart';
 import '../../domain/relatorios/movimentacao_estoque_relatorio.dart';
+import '../../services/resumo_diario_produto_service.dart';
 import '../../model/produto.dart';
 import '../widgets/produto_busca_input.dart';
 import 'relatorio_export_util.dart';
@@ -46,6 +47,7 @@ class _RelatorioMovimentacaoEstoquePageState
       FiltroNaturezaMovimentacaoEstoque.todas;
   bool _somenteAtivos = true;
   bool _modoDetalhe = false;
+  bool _resumoPeloAgregado = false;
   Produto? _produtoFiltro;
 
   List<ResumoMovimentacaoEstoqueLinha> _resumo = [];
@@ -67,17 +69,21 @@ class _RelatorioMovimentacaoEstoquePageState
   Produto? _resolverProdutoPorTexto(String texto) {
     final t = texto.trim();
     if (t.isEmpty) return null;
-    final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
-      t,
-      somenteAtivos: false,
-    ) as Produto?;
+    final porBarras =
+        widget.produtoRepository.resolverLeitorCodigoBarras(
+              t,
+              somenteAtivos: false,
+            )
+            as Produto?;
     if (porBarras != null) return porBarras;
-    final hits = (widget.produtoRepository.pesquisarPadraoPdv(
-      t,
-      limite: 20,
-      somenteAtivos: false,
-    ) as List)
-        .cast<Produto>();
+    final hits =
+        (widget.produtoRepository.pesquisarPadraoPdv(
+                  t,
+                  limite: 20,
+                  somenteAtivos: false,
+                )
+                as List)
+            .cast<Produto>();
     if (hits.isEmpty) return null;
     if (hits.length == 1) return hits.first;
     final lower = t.toLowerCase();
@@ -90,16 +96,19 @@ class _RelatorioMovimentacaoEstoquePageState
   Iterable<Produto> _sugestoesProduto(String texto) {
     final t = texto.trim();
     if (t.isEmpty) return const Iterable<Produto>.empty();
-    final porBarras = widget.produtoRepository.resolverLeitorCodigoBarras(
-      t,
-      somenteAtivos: false,
-    ) as Produto?;
+    final porBarras =
+        widget.produtoRepository.resolverLeitorCodigoBarras(
+              t,
+              somenteAtivos: false,
+            )
+            as Produto?;
     if (porBarras != null) return [porBarras];
     return (widget.produtoRepository.pesquisarPadraoPdv(
-      t,
-      limite: 40,
-      somenteAtivos: false,
-    ) as List)
+              t,
+              limite: 40,
+              somenteAtivos: false,
+            )
+            as List)
         .cast<Produto>();
   }
 
@@ -111,9 +120,9 @@ class _RelatorioMovimentacaoEstoquePageState
   void _confirmarBuscaProduto(String texto) {
     final p = _resolverProdutoPorTexto(texto);
     if (p == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Produto nao encontrado.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Produto nao encontrado.')));
       return;
     }
     _aplicarProduto(p);
@@ -125,6 +134,31 @@ class _RelatorioMovimentacaoEstoquePageState
 
   Future<void> _carregarAsync(LimitesPeriodo limites) async {
     if (!mounted) return;
+    final db = widget.objectBox;
+    final usarAgregado =
+        db != null &&
+        !_modoDetalhe &&
+        _natureza == FiltroNaturezaMovimentacaoEstoque.todas;
+    if (usarAgregado) {
+      final linhas = ResumoDiarioProdutoService(
+        db,
+      ).listarEntre(limites.$1, limites.$2);
+      final resumo = agregarResumoDiarioProduto(
+        resumos: linhas,
+        produtosPorId: _produtosPorId,
+        agrupamento: _agrupamento,
+        produtoIdFiltro: _produtoFiltro?.id,
+        somenteAtivos: _somenteAtivos,
+      );
+      if (!mounted) return;
+      setState(() {
+        _limites = limites;
+        _resumo = resumo;
+        _detalhes = [];
+        _resumoPeloAgregado = true;
+      });
+      return;
+    }
     List<MovimentoEstoque> movimentos;
     if (_movRepo != null) {
       movimentos = _movRepo!.listarPorPeriodo(
@@ -139,6 +173,7 @@ class _RelatorioMovimentacaoEstoquePageState
         setState(() {
           _resumo = [];
           _detalhes = [];
+          _resumoPeloAgregado = false;
         });
         return;
       }
@@ -154,9 +189,9 @@ class _RelatorioMovimentacaoEstoquePageState
             .toList(growable: false);
       } on LanApiException catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Movimentacao: $e')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Movimentacao: $e')));
         }
         movimentos = const [];
       } catch (_) {
@@ -184,63 +219,67 @@ class _RelatorioMovimentacaoEstoquePageState
       _limites = limites;
       _resumo = resumo;
       _detalhes = detalhes;
+      _resumoPeloAgregado = false;
     });
   }
 
   int get _totalEntradas => _resumo.fold(0, (s, l) => s + l.entradas);
   int get _totalSaidas => _resumo.fold(0, (s, l) => s + l.saidas);
+  int get _totalDevolucoes => _resumo.fold(0, (s, l) => s + l.devolucoes);
 
   List<List<String>> _linhasCsvResumo() => [
-        [
-          'Grupo',
-          'Codigo',
-          'Entradas',
-          'Saidas',
-          'Cancelamentos',
-          'Saldo inicial',
-          'Saldo final',
-          'Movimentos',
-        ],
-        ..._resumo.map(
-          (l) => [
-            l.rotulo,
-            l.codigo,
-            '${l.entradas}',
-            '${l.saidas}',
-            '${l.cancelamentos}',
-            '${l.saldoInicial}',
-            '${l.saldoFinal}',
-            '${l.movimentos}',
-          ],
-        ),
-      ];
+    [
+      'Grupo',
+      'Codigo',
+      'Entradas',
+      'Saidas',
+      if (_resumoPeloAgregado) 'Devolucoes',
+      'Cancelamentos',
+      'Saldo inicial',
+      'Saldo final',
+      'Movimentos',
+    ],
+    ..._resumo.map(
+      (l) => [
+        l.rotulo,
+        l.codigo,
+        '${l.entradas}',
+        '${l.saidas}',
+        if (_resumoPeloAgregado) '${l.devolucoes}',
+        '${l.cancelamentos}',
+        '${l.saldoInicial}',
+        '${l.saldoFinal}',
+        '${l.movimentos}',
+      ],
+    ),
+  ];
 
   List<List<String>> _linhasCsvDetalhe() => [
-        [
-          'Data',
-          'Produto',
-          'Tipo',
-          'Delta fisico',
-          'Delta reserva',
-          'Saldo',
-          'Documento',
-          'Motivo',
-          'Usuario',
-        ],
-        ..._detalhes.map(
-          (l) => [
-            _fmtDataHora.format(l.registradoEm),
-            l.nomeProduto,
-            MovimentoEstoqueHelper.rotuloTipo(l.tipoMovimento),
-            '${l.deltaFisico}',
-            '${l.deltaReserva}',
-            '${l.saldoFisicoDepois}',
-            l.documentoReferencia,
-            l.motivo,
-            l.usuarioLogin,
-          ],
-        ),
-      ];
+    [
+      'Data',
+      'Produto',
+      'Tipo',
+      'Delta fisico',
+      'Delta reserva',
+      'Saldo',
+      'Documento',
+      'Motivo',
+      'Usuario',
+    ],
+    ..._detalhes.map(
+      (l) => [
+        _fmtDataHora.format(l.registradoEm),
+        l.nomeProduto,
+        MovimentoEstoqueHelper.rotuloTipo(l.tipoMovimento),
+        '${l.deltaFisico}',
+        '${l.deltaReserva}',
+        '${l.saldoFisicoDepois}',
+        l.documentoReferencia,
+        l.motivo,
+        l.usuarioLogin,
+      ],
+    ),
+  ];
 
   List<String> _paginasPdf() {
     if (_limites == null) return [];
@@ -354,19 +393,20 @@ class _RelatorioMovimentacaoEstoquePageState
                 onSelected: _aplicarProduto,
                 fieldViewBuilder:
                     (context, controller, focusNode, onFieldSubmitted) {
-                  return TextField(
-                    controller: controller,
-                    focusNode: focusNode,
-                    decoration: produtoBuscaInputDecoration(
-                      labelText: 'Produto (opcional)',
-                      hintText: 'Filtrar um produto',
-                      isDense: true,
-                    ),
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => _confirmarBuscaProduto(controller.text),
-                    onEditingComplete: onFieldSubmitted,
-                  );
-                },
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        decoration: produtoBuscaInputDecoration(
+                          labelText: 'Produto (opcional)',
+                          hintText: 'Filtrar um produto',
+                          isDense: true,
+                        ),
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) =>
+                            _confirmarBuscaProduto(controller.text),
+                        onEditingComplete: onFieldSubmitted,
+                      );
+                    },
               ),
               if (_produtoFiltro != null)
                 Align(
@@ -386,51 +426,55 @@ class _RelatorioMovimentacaoEstoquePageState
                 children: [
                   SizedBox(
                     width: 180,
-                    child: DropdownButtonFormField<AgrupamentoMovimentacaoEstoque>(
-                      key: ValueKey(_agrupamento),
-                      initialValue: _agrupamento,
-                      decoration: const InputDecoration(
-                        labelText: 'Agrupar por',
-                        isDense: true,
-                      ),
-                      items: AgrupamentoMovimentacaoEstoque.values
-                          .map(
-                            (a) => DropdownMenuItem(
-                              value: a,
-                              child: Text(_rotuloAgrupamento(a)),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _agrupamento = v);
-                        if (lim != null) _carregar(lim);
-                      },
-                    ),
+                    child:
+                        DropdownButtonFormField<AgrupamentoMovimentacaoEstoque>(
+                          key: ValueKey(_agrupamento),
+                          initialValue: _agrupamento,
+                          decoration: const InputDecoration(
+                            labelText: 'Agrupar por',
+                            isDense: true,
+                          ),
+                          items: AgrupamentoMovimentacaoEstoque.values
+                              .map(
+                                (a) => DropdownMenuItem(
+                                  value: a,
+                                  child: Text(_rotuloAgrupamento(a)),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setState(() => _agrupamento = v);
+                            if (lim != null) _carregar(lim);
+                          },
+                        ),
                   ),
                   SizedBox(
                     width: 180,
-                    child: DropdownButtonFormField<FiltroNaturezaMovimentacaoEstoque>(
-                      key: ValueKey(_natureza),
-                      initialValue: _natureza,
-                      decoration: const InputDecoration(
-                        labelText: 'Tipo',
-                        isDense: true,
-                      ),
-                      items: FiltroNaturezaMovimentacaoEstoque.values
-                          .map(
-                            (n) => DropdownMenuItem(
-                              value: n,
-                              child: Text(_rotuloNatureza(n)),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _natureza = v);
-                        if (lim != null) _carregar(lim);
-                      },
-                    ),
+                    child:
+                        DropdownButtonFormField<
+                          FiltroNaturezaMovimentacaoEstoque
+                        >(
+                          key: ValueKey(_natureza),
+                          initialValue: _natureza,
+                          decoration: const InputDecoration(
+                            labelText: 'Tipo',
+                            isDense: true,
+                          ),
+                          items: FiltroNaturezaMovimentacaoEstoque.values
+                              .map(
+                                (n) => DropdownMenuItem(
+                                  value: n,
+                                  child: Text(_rotuloNatureza(n)),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setState(() => _natureza = v);
+                            if (lim != null) _carregar(lim);
+                          },
+                        ),
                   ),
                   FilterChip(
                     label: const Text('Mostrar inativos'),
@@ -464,10 +508,15 @@ class _RelatorioMovimentacaoEstoquePageState
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Entradas: ${_nfInt.format(_totalEntradas)} · '
-                        'Saidas: ${_nfInt.format(_totalSaidas)} · '
-                        '${_modoDetalhe ? _detalhes.length : _resumo.length} '
-                        'linha(s)',
+                        _resumoPeloAgregado
+                            ? 'Entradas: ${_nfInt.format(_totalEntradas)} · '
+                                  'Vendidas: ${_nfInt.format(_totalSaidas)} · '
+                                  'Devolucoes: ${_nfInt.format(_totalDevolucoes)} · '
+                                  '${_resumo.length} linha(s)'
+                            : 'Entradas: ${_nfInt.format(_totalEntradas)} · '
+                                  'Saidas: ${_nfInt.format(_totalSaidas)} · '
+                                  '${_modoDetalhe ? _detalhes.length : _resumo.length} '
+                                  'linha(s)',
                       ),
                     ],
                   ),
@@ -476,64 +525,69 @@ class _RelatorioMovimentacaoEstoquePageState
           Expanded(
             child: vazio
                 ? const Center(
-                    child: Text('Nenhuma movimentacao no periodo com estes filtros.'),
+                    child: Text(
+                      'Nenhuma movimentacao no periodo com estes filtros.',
+                    ),
                   )
                 : _modoDetalhe
-                    ? ListView.separated(
-                        itemCount: _detalhes.length,
-                        separatorBuilder: (_, index) =>
-                            const Divider(height: 1),
-                        itemBuilder: (context, i) {
-                          final l = _detalhes[i];
-                          return ListTile(
-                            dense: true,
-                            title: Text(
-                              '${l.codigoProduto.isNotEmpty ? "${l.codigoProduto} — " : ""}'
-                              '${l.nomeProduto}',
-                            ),
-                            subtitle: Text(
-                              '${_fmtDataHora.format(l.registradoEm)} · '
-                              '${MovimentoEstoqueHelper.rotuloTipo(l.tipoMovimento)} · '
-                              'Fisico ${MovimentoEstoqueHelper.formatarDelta(l.deltaFisico)} · '
-                              'Saldo ${l.saldoFisicoDepois}'
-                              '${l.documentoReferencia.isNotEmpty ? " · ${l.documentoReferencia}" : ""}'
-                              '${l.motivo.isNotEmpty ? " · ${l.motivo}" : ""}',
-                            ),
-                          );
-                        },
-                      )
-                    : ListView.separated(
-                        itemCount: _resumo.length,
-                        separatorBuilder: (_, index) =>
-                            const Divider(height: 1),
-                        itemBuilder: (context, i) {
-                          final l = _resumo[i];
-                          return ListTile(
-                            title: Text(l.rotulo),
-                            subtitle: Text(
-                              'Entr. ${_nfInt.format(l.entradas)} · '
-                              'Said. ${_nfInt.format(l.saidas)} · '
-                              'Canc. ${_nfInt.format(l.cancelamentos)} · '
-                              'Saldo ${_nfInt.format(l.saldoInicial)} → '
-                              '${_nfInt.format(l.saldoFinal)} · '
-                              '${l.movimentos} mov.',
-                            ),
-                            onTap: l.produtoId > 0
-                                ? () {
-                                    final p = _produtosPorId[l.produtoId];
-                                    if (p == null) return;
-                                    setState(() {
-                                      _produtoFiltro = p;
-                                      _modoDetalhe = true;
-                                      _agrupamento =
-                                          AgrupamentoMovimentacaoEstoque.produto;
-                                    });
-                                    if (lim != null) _carregar(lim);
-                                  }
-                                : null,
-                          );
-                        },
-                      ),
+                ? ListView.separated(
+                    itemCount: _detalhes.length,
+                    separatorBuilder: (_, index) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final l = _detalhes[i];
+                      return ListTile(
+                        dense: true,
+                        title: Text(
+                          '${l.codigoProduto.isNotEmpty ? "${l.codigoProduto} — " : ""}'
+                          '${l.nomeProduto}',
+                        ),
+                        subtitle: Text(
+                          '${_fmtDataHora.format(l.registradoEm)} · '
+                          '${MovimentoEstoqueHelper.rotuloTipo(l.tipoMovimento)} · '
+                          'Fisico ${MovimentoEstoqueHelper.formatarDelta(l.deltaFisico)} · '
+                          'Saldo ${l.saldoFisicoDepois}'
+                          '${l.documentoReferencia.isNotEmpty ? " · ${l.documentoReferencia}" : ""}'
+                          '${l.motivo.isNotEmpty ? " · ${l.motivo}" : ""}',
+                        ),
+                      );
+                    },
+                  )
+                : ListView.separated(
+                    itemCount: _resumo.length,
+                    separatorBuilder: (_, index) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final l = _resumo[i];
+                      return ListTile(
+                        title: Text(l.rotulo),
+                        subtitle: Text(
+                          _resumoPeloAgregado
+                              ? 'Entr. ${_nfInt.format(l.entradas)} · '
+                                    'Vend. ${_nfInt.format(l.saidas)} · '
+                                    'Dev. ${_nfInt.format(l.devolucoes)} · '
+                                    '${l.movimentos} dia(s)'
+                              : 'Entr. ${_nfInt.format(l.entradas)} · '
+                                    'Said. ${_nfInt.format(l.saidas)} · '
+                                    'Canc. ${_nfInt.format(l.cancelamentos)} · '
+                                    'Saldo ${_nfInt.format(l.saldoInicial)} → '
+                                    '${_nfInt.format(l.saldoFinal)} · '
+                                    '${l.movimentos} mov.',
+                        ),
+                        onTap: l.produtoId > 0
+                            ? () {
+                                final p = _produtosPorId[l.produtoId];
+                                if (p == null) return;
+                                setState(() {
+                                  _produtoFiltro = p;
+                                  _modoDetalhe = true;
+                                  _agrupamento =
+                                      AgrupamentoMovimentacaoEstoque.produto;
+                                });
+                                if (lim != null) _carregar(lim);
+                              }
+                            : null,
+                      );
+                    },
+                  ),
           ),
         ],
       ),

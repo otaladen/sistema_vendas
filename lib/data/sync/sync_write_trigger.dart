@@ -10,6 +10,7 @@ import 'estoque_local_refresh_hub.dart';
 import 'lan_sync_scheduler.dart';
 import 'sync_delete_outbox.dart';
 import 'sync_dirty_outbox.dart';
+import 'sync_escopo_balcao.dart';
 import 'sync_priority.dart';
 import 'sync_refresh_hub.dart';
 
@@ -48,6 +49,7 @@ void notificarAlteracaoParaRede({
   List<int>? entidadeIds,
 }) {
   if (_silenciarNotificacaoRede) return;
+  if (SyncEscopoBalcao.estaForaDoSyncContinuo(entidade)) return;
 
   if (_propagarViaLanApiServidor()) {
     final e = entidade?.trim();
@@ -128,6 +130,7 @@ void registrarDeleteParaRede(
   int? localId,
 }) {
   if (_silenciarNotificacaoRede) return;
+  if (SyncEscopoBalcao.estaForaDoSyncContinuo(entity)) return;
 
   if (_propagarViaLanApiServidor()) {
     final e = entity.trim();
