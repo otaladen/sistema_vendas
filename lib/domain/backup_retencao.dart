@@ -34,3 +34,38 @@ class BackupRetencaoOpcoes {
     }
   }
 }
+
+/// Quantos backups completos (com fotos) guardar. Independente dos leves.
+class BackupRetencaoCompletosOpcoes {
+  BackupRetencaoCompletosOpcoes._();
+
+  static const ilimitada = 0;
+  static const copias2 = 2;
+  static const copias4 = 4;
+  static const copias8 = 8;
+
+  static const valoresPermitidos = [ilimitada, copias2, copias4, copias8];
+
+  static int normalizar(int? copias) {
+    if (copias == null) return copias4;
+    if (valoresPermitidos.contains(copias)) return copias;
+    if (copias <= 0) return ilimitada;
+    if (copias <= 3) return copias2;
+    if (copias <= 6) return copias4;
+    return copias8;
+  }
+
+  static String rotulo(int copias) {
+    switch (normalizar(copias)) {
+      case ilimitada:
+        return 'Manter todos os completos';
+      case copias2:
+        return 'Manter ultimos 2 completos';
+      case copias8:
+        return 'Manter ultimos 8 completos';
+      case copias4:
+      default:
+        return 'Manter ultimos 4 completos';
+    }
+  }
+}

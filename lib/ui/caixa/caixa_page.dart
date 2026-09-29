@@ -33,6 +33,7 @@ import '../shell/app_shell_aba_visibilidade.dart';
 import '../../domain/auditoria_catalogo.dart';
 import '../../domain/cliente_busca_util.dart';
 import '../../domain/caixa/caixa_divergencia_autorizacao.dart';
+import '../../domain/caixa/caixa_sangria_regra.dart';
 import '../../domain/caixa_troco_dinheiro_helper.dart';
 import '../../domain/entrega_venda_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
@@ -2118,6 +2119,29 @@ class _CaixaPageState extends State<CaixaPage>
     }
   }
 
+  Future<bool> _credencialSupervisorCaixa(String login, String senha) async {
+    final usuario = await _usuarioRepository.autenticar(login, senha);
+    return usuario != null &&
+        usuario.ativo &&
+        (usuario.admin || usuario.podeFinanceiro);
+  }
+
+  Future<bool> _autorizarSupervisorCaixa(String mensagem) async {
+    if (!mounted) return false;
+    final confirmar = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (_) {
+        return AutorizacaoSupervisorCaixaDialog(
+          mensagem: mensagem,
+          validarCredenciais: _credencialSupervisorCaixa,
+        );
+      },
+    );
+    return confirmar == true;
+  }
+
   Future<bool> _autorizarSupervisorSeNecessario(double diferencaTotal) async {
     final config = await widget.configuracoesService.carregarEfetiva();
     final limiteAtual =
@@ -2143,12 +2167,7 @@ class _CaixaPageState extends State<CaixaPage>
           mensagem:
               'Divergencia acima de ${_formatarMoeda(limiteAtual)}. '
               'Informe credenciais de supervisor/administrador.',
-          validarCredenciais: (login, senha) async {
-            final usuario = await _usuarioRepository.autenticar(login, senha);
-            return usuario != null &&
-                usuario.ativo &&
-                (usuario.admin || usuario.podeFinanceiro);
-          },
+          validarCredenciais: _credencialSupervisorCaixa,
           aoCredencialNegada: () => _registrarAuditoriaCaixa(
             'fechamento_negado_divergencia',
             detalhes: {
@@ -2828,6 +2847,16 @@ class _CaixaPageState extends State<CaixaPage>
     }
     if (_movimentoCaixaEmAndamento) return;
     setState(() => _movimentoCaixaEmAndamento = true);
+    final config = await widget.configuracoesService.carregarEfetiva();
+    if (!mounted) {
+      _movimentoCaixaEmAndamento = false;
+      return;
+    }
+    final saldoGaveta =
+        suprimento ? null : _montarLeituraParcialLocal().dinheiroGaveta;
+    final limiteSangria = CaixaSangriaRegra.normalizarLimiteSemSupervisor(
+      config.caixaSangriaLimiteSemSupervisor,
+    );
     _ResultadoMovimentoCaixa? resultado;
     try {
       resultado = await showDialog<_ResultadoMovimentoCaixa>(
@@ -2837,6 +2866,22 @@ class _CaixaPageState extends State<CaixaPage>
           return _DialogoSangriaSuprimento(
             suprimento: suprimento,
             parseValor: _parseValor,
+            saldoGaveta: saldoGaveta,
+            limiteSangriaSemSupervisor: limiteSangria,
+            autorizarSangriaAcimaDoTeto: (valor) async {
+              final ok = await _autorizarSupervisorCaixa(
+                'Sangria de ${_formatarMoeda(valor)} acima do teto '
+                '(${_formatarMoeda(limiteSangria)}). '
+                'Informe credenciais de supervisor.',
+              );
+              if (ok) {
+                await _registrarAuditoriaCaixa(
+                  AuditoriaAcao.sangriaAutorizadaSupervisor,
+                  detalhes: {'valor': valor, 'teto': limiteSangria},
+                );
+              }
+              return ok;
+            },
             registrar: (valor) => _registrarMovimentacaoAtomica(
               suprimento: suprimento,
               valor: valor,
@@ -2881,8 +2926,6 @@ class _CaixaPageState extends State<CaixaPage>
     if (!mounted) return;
     final tipo = suprimento ? 'Suprimento' : 'Sangria';
     final tipoArquivo = suprimento ? 'suprimento' : 'sangria';
-    final config = await widget.configuracoesService.carregarEfetiva();
-    if (!mounted) return;
     CaixaFeedback.sucesso(context, '$tipo de ${_formatarMoeda(valor)} registrado.');
     await mostrarFluxoImpressaoCupomVenda(
       context,
@@ -5956,6 +5999,20 @@ class _CaixaPageState extends State<CaixaPage>
   }
 
   Future<void> _testarGavetaManual() async {
+    final config = await widget.configuracoesService.carregarEfetiva();
+    if (!mounted) return;
+    if (config.caixaGavetaSemVendaExigeSenha) {
+      final ok = await _autorizarSupervisorCaixa(
+        'Abrir a gaveta sem uma venda exige login de supervisor '
+        '(administrador ou financeiro).',
+      );
+      if (!ok) return;
+      await _registrarAuditoriaCaixa(
+        AuditoriaAcao.gavetaAbertaManual,
+        detalhes: {'operador': _operadorCaixa},
+      );
+    }
+    if (!mounted) return;
     final r = await _gaveta.testarAbrir();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -10051,6 +10108,9 @@ class _DialogoSangriaSuprimento extends StatefulWidget {
     required this.registrarDestinoCalculadora,
     required this.liberarDestinoCalculadora,
     required this.abrirCalculadoraComDestino,
+    this.saldoGaveta,
+    this.limiteSangriaSemSupervisor = 0,
+    this.autorizarSangriaAcimaDoTeto,
   });
 
   final bool suprimento;
@@ -10059,6 +10119,9 @@ class _DialogoSangriaSuprimento extends StatefulWidget {
   final void Function(TextEditingController destino) registrarDestinoCalculadora;
   final void Function(TextEditingController destino) liberarDestinoCalculadora;
   final void Function(TextEditingController destino) abrirCalculadoraComDestino;
+  final double? saldoGaveta;
+  final double limiteSangriaSemSupervisor;
+  final Future<bool> Function(double valor)? autorizarSangriaAcimaDoTeto;
 
   @override
   State<_DialogoSangriaSuprimento> createState() =>
@@ -10091,6 +10154,40 @@ class _DialogoSangriaSuprimentoState extends State<_DialogoSangriaSuprimento> {
     if (valor <= 0) {
       setState(() => _erro = 'Informe um valor valido.');
       return;
+    }
+    if (!widget.suprimento) {
+      final recusa = CaixaSangriaRegra.mensagemSaldoInsuficiente(
+        valor: valor,
+        dinheiroGaveta: widget.saldoGaveta ?? 0,
+      );
+      if (recusa != null) {
+        setState(() => _erro = recusa);
+        return;
+      }
+      if (CaixaSangriaRegra.exigeSupervisor(
+        valor: valor,
+        limiteSemSupervisor: widget.limiteSangriaSemSupervisor,
+      )) {
+        final obs = _obsController.text.trim();
+        if (obs.isEmpty) {
+          setState(
+            () => _erro =
+                'Informe o motivo da sangria acima do teto na observacao.',
+          );
+          return;
+        }
+        final autorizar = widget.autorizarSangriaAcimaDoTeto;
+        if (autorizar == null) {
+          setState(() => _erro = 'Sangria acima do teto nao autorizada.');
+          return;
+        }
+        final ok = await autorizar(valor);
+        if (!mounted) return;
+        if (!ok) {
+          setState(() => _erro = 'Supervisor nao autorizou a sangria.');
+          return;
+        }
+      }
     }
     setState(() {
       _salvando = true;
@@ -10159,6 +10256,17 @@ class _DialogoSangriaSuprimentoState extends State<_DialogoSangriaSuprimento> {
                     ),
                   ],
                 ),
+                if (!widget.suprimento && widget.saldoGaveta != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Dinheiro esperado na gaveta: R\$ '
+                    '${widget.saldoGaveta!.toStringAsFixed(2).replaceAll('.', ',')}. '
+                    'Acima de R\$ '
+                    '${widget.limiteSangriaSemSupervisor.toStringAsFixed(2).replaceAll('.', ',')} '
+                    'pede supervisor e motivo.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
                 const SizedBox(height: 10),
                 TextField(
                   controller: _obsController,

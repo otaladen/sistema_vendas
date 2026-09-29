@@ -163,9 +163,7 @@ Future<void> main(List<String> args) async {
         objectBox: objectBox,
       );
       await EstoqueDiagnosticoStartup.executarSePossivel(objectBox: objectBox);
-      if (!widget.terminalLeve) {
-        ResumoDiarioProdutoService(objectBox).backfillSeVazio();
-      }
+      ResumoDiarioProdutoService(objectBox).backfillSeVazio();
       await RotinaLimpezaService.aplicar(
         db: objectBox,
         configRepository: configuracoesService.repository,

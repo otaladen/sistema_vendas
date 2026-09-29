@@ -15,12 +15,16 @@ class BackupHistoricoItem {
     required this.valido,
     required this.pastaRaiz,
     this.escopo = LocalBackupEscopo.completo,
+    this.tamanhoPastaKb = 0,
   });
 
   final Directory pasta;
   final DateTime criadoEm;
   final LocalBackupTipo? tipo;
   final double tamanhoBancoKb;
+
+  /// Pasta inteira do backup. 0 em copias antigas ate a medicao preencher.
+  final double tamanhoPastaKb;
   final String empresa;
   final bool valido;
   final String pastaRaiz;
@@ -34,6 +38,14 @@ class BackupHistoricoItem {
 
   String get rotuloEscopo => escopo.rotulo;
 
-  String get tamanhoFormatado =>
-      LocalBackupValidation.formatarTamanhoKb(tamanhoBancoKb);
+  String get tamanhoFormatado {
+    final pasta = tamanhoPastaKb;
+    final banco = tamanhoBancoKb;
+    if (pasta > 0 && banco > 0 && pasta > banco * 1.15) {
+      return '${LocalBackupValidation.formatarTamanhoKb(pasta)} '
+          '(banco ${LocalBackupValidation.formatarTamanhoKb(banco)})';
+    }
+    if (pasta > 0) return LocalBackupValidation.formatarTamanhoKb(pasta);
+    return LocalBackupValidation.formatarTamanhoKb(banco);
+  }
 }

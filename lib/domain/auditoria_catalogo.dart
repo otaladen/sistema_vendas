@@ -43,6 +43,8 @@ class AuditoriaAcao {
   static const fechamentoCaixa = 'fechamento_caixa';
   static const suprimentoCaixa = 'suprimento';
   static const sangriaCaixa = 'sangria';
+  static const sangriaAutorizadaSupervisor = 'sangria_autorizada_supervisor';
+  static const gavetaAbertaManual = 'gaveta_aberta_manual';
   static const fechamentoNegado = 'fechamento_negado';
   static const limparManual = 'limpar_manual';
   static const retencaoAutomatica = 'retencao_automatica';
@@ -130,6 +132,10 @@ String auditoriaRotuloAcao(String acao) {
       return 'Suprimento de caixa';
     case AuditoriaAcao.sangriaCaixa:
       return 'Sangria de caixa';
+    case AuditoriaAcao.sangriaAutorizadaSupervisor:
+      return 'Sangria autorizada por supervisor';
+    case AuditoriaAcao.gavetaAbertaManual:
+      return 'Gaveta aberta sem venda';
     case AuditoriaAcao.fechamentoNegado:
       return 'Fechamento negado';
     case AuditoriaAcao.limparManual:

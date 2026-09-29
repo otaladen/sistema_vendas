@@ -265,28 +265,35 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   Offset _obraCalculadoraPdvOffset = Offset.zero;
   bool _calculadoraPdvPosicionada = false;
   bool _obraCalculadoraPdvPosicionada = false;
-  int _obraCalcTijoloProdutoId = 0;
-  int _obraCalcCimentoProdutoId = 0;
-  int _obraCalcAreiaProdutoId = 0;
-  int _obraCalcPisoProdutoId = 0;
-  double _obraCalcPerdaPadraoPct = 10;
-  double _obraCalcPerdaRebocoPct = 15;
-  double _obraCalcPerdaPisoPct = 10;
-  double _obraCalcEspessuraRebocoMm = 20;
-  double _obraCalcEspessuraContrapisoMm = 30;
-  double _obraCalcM2PorCaixaPiso = 1.44;
-  bool _obraCalcGeminiParseAtivo = false;
-  String _obraCalcTemplatesJson = '[]';
-  int _obraCalcBritaProdutoId = 0;
-  int _obraCalcTelhaProdutoId = 0;
-  int _obraCalcFerroProdutoId = 0;
-  double _obraCalcEspessuraLajeMm = 100;
-  double _obraCalcPerdaLajePct = 10;
-  double _obraCalcPerdaFundacaoPct = 10;
-  double _obraCalcPerdaTelhadoPct = 10;
-  double _obraCalcTelhasPorM2 = 16;
-  double _obraCalcInclinacaoTelhadoPct = 30;
-  bool _obraCalcUsarSubstitutoEstoqueZero = true;
+  /// Vale enquanto `_carregarConfiguracaoVendaSemEstoque` nao responde. Vem do
+  /// proprio EmpresaConfig para nao divergir do que a loja tem gravado.
+  static const _configPadrao = EmpresaConfig();
+
+  int _obraCalcTijoloProdutoId = _configPadrao.obraCalcTijoloProdutoId;
+  int _obraCalcCimentoProdutoId = _configPadrao.obraCalcCimentoProdutoId;
+  int _obraCalcAreiaProdutoId = _configPadrao.obraCalcAreiaProdutoId;
+  int _obraCalcPisoProdutoId = _configPadrao.obraCalcPisoProdutoId;
+  double _obraCalcPerdaPadraoPct = _configPadrao.obraCalcPerdaPadraoPct;
+  double _obraCalcPerdaRebocoPct = _configPadrao.obraCalcPerdaRebocoPct;
+  double _obraCalcPerdaPisoPct = _configPadrao.obraCalcPerdaPisoPct;
+  double _obraCalcEspessuraRebocoMm = _configPadrao.obraCalcEspessuraRebocoMm;
+  double _obraCalcEspessuraContrapisoMm =
+      _configPadrao.obraCalcEspessuraContrapisoMm;
+  double _obraCalcM2PorCaixaPiso = _configPadrao.obraCalcM2PorCaixaPiso;
+  bool _obraCalcGeminiParseAtivo = _configPadrao.obraCalcGeminiParseAtivo;
+  String _obraCalcTemplatesJson = _configPadrao.obraCalcTemplatesJson;
+  int _obraCalcBritaProdutoId = _configPadrao.obraCalcBritaProdutoId;
+  int _obraCalcTelhaProdutoId = _configPadrao.obraCalcTelhaProdutoId;
+  int _obraCalcFerroProdutoId = _configPadrao.obraCalcFerroProdutoId;
+  double _obraCalcEspessuraLajeMm = _configPadrao.obraCalcEspessuraLajeMm;
+  double _obraCalcPerdaLajePct = _configPadrao.obraCalcPerdaLajePct;
+  double _obraCalcPerdaFundacaoPct = _configPadrao.obraCalcPerdaFundacaoPct;
+  double _obraCalcPerdaTelhadoPct = _configPadrao.obraCalcPerdaTelhadoPct;
+  double _obraCalcTelhasPorM2 = _configPadrao.obraCalcTelhasPorM2;
+  double _obraCalcInclinacaoTelhadoPct =
+      _configPadrao.obraCalcInclinacaoTelhadoPct;
+  bool _obraCalcUsarSubstitutoEstoqueZero =
+      _configPadrao.obraCalcUsarSubstitutoEstoqueZero;
 
   /// Produtos usados recentemente nesta sessao (consulta vazia).
   final List<int> _produtosRecentesPdv = [];
@@ -357,8 +364,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   bool get _pdvClienteAusente =>
       _clienteSelecionadoId == null || _clienteSelecionadoId! <= 0;
 
-  /// Retirada futura sempre exige cliente (reserva / identificacao).
-  bool get _pdvExigeClientePorRetiradaFutura => _carrinhoTemItemRetiradaFutura;
+  /// Retirada futura exige cliente para identificar quem retira a reserva.
+  /// Configuravel em Configuracoes > Ponto de venda.
+  bool get _pdvExigeClientePorRetiradaFutura =>
+      _pdvExigirClienteRetiradaFutura && _carrinhoTemItemRetiradaFutura;
 
   /// Carreto exige cliente, exceto cotacao sem cadastro (Consumidor Final).
   bool get _pdvExigeClientePorCarreto =>
@@ -368,8 +377,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _pdvExigeClientePorCarreto || _pdvExigeClientePorRetiradaFutura;
 
   String get _motivoClienteObrigatorioPdv {
-    final carreto = _carrinhoTemItemCarreto;
-    final futura = _carrinhoTemItemRetiradaFutura;
+    final carreto = _pdvExigeClientePorCarreto;
+    final futura = _pdvExigeClientePorRetiradaFutura;
     if (carreto && futura) return 'carreto / retirada futura';
     if (carreto) return 'carreto';
     if (futura) return 'retirada futura';
@@ -791,17 +800,22 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   /// Cotacao com carreto: frete estimado sem endereco/agenda obrigatorios.
   bool _entregaSomenteCotacao = false;
-  bool _permitirVendaSemEstoque = false;
-  double _maxDescontoPercentualPdv = 15;
-  bool _pdvExigirVendedor = false;
-  bool _pdvBloqueioVendedor = false;
-  bool _pdvBloqueioVendedorAposOrcamento = false;
-  int _pdvBloqueioInatividadeMinutos = 0;
+  bool _permitirVendaSemEstoque = _configPadrao.permitirVendaSemEstoque;
+  double _maxDescontoPercentualPdv = _configPadrao.maxDescontoPercentualPdv;
+  bool _pdvExigirVendedor = _configPadrao.pdvExigirVendedor;
+  bool _pdvBloqueioVendedor = _configPadrao.pdvBloqueioVendedor;
+  bool _pdvBloqueioVendedorAposOrcamento =
+      _configPadrao.pdvBloqueioVendedorAposOrcamento;
+  int _pdvBloqueioInatividadeMinutos =
+      _configPadrao.pdvBloqueioVendedorInatividadeMinutos;
   bool _solicitandoBloqueioVendedorPdv = false;
   Timer? _timerInatividadeVendedorPdv;
-  bool _pdvBalcaoRapido = true;
-  bool _pdvCheckoutDireto = true;
-  bool _pdvPularDialogOrcamentoSalvo = true;
+  bool _pdvBalcaoRapido = _configPadrao.pdvBalcaoRapido;
+  bool _pdvCheckoutDireto = _configPadrao.pdvCheckoutDireto;
+  bool _pdvPularDialogOrcamentoSalvo =
+      _configPadrao.pdvPularDialogOrcamentoSalvo;
+  bool _pdvExigirClienteRetiradaFutura =
+      _configPadrao.pdvExigirClienteRetiradaFutura;
 
   /// `percentual` | `valor` — desconto sempre limitado ao configurado (% sobre subtotal).
   String _tipoDescontoPdV = 'percentual';
@@ -1049,6 +1063,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _pdvBalcaoRapido = config.pdvBalcaoRapido;
       _pdvCheckoutDireto = config.pdvCheckoutDireto;
       _pdvPularDialogOrcamentoSalvo = config.pdvPularDialogOrcamentoSalvo;
+      _pdvExigirClienteRetiradaFutura = config.pdvExigirClienteRetiradaFutura;
       _maxDescontoPercentualPdv = widget.usuarioLogado
           .tetoDescontoPercentualPdv(config.maxDescontoPercentualPdv);
       _obraCalcTijoloProdutoId = config.obraCalcTijoloProdutoId;

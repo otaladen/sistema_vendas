@@ -32,6 +32,30 @@ class AgendaCarretoOcupacaoMes {
 
   int quantidadeDoDia(DateTime dia) => quantidadePorDia[chaveDia(dia)] ?? 0;
 
+  /// Remove orcamento, pagamento pendente, cancelada e estornada.
+  ///
+  /// Recalcula o totalizador do dia para bater com a lista lateral e com
+  /// a aba Entregas (somente venda faturada ainda em aberto).
+  AgendaCarretoOcupacaoMes somenteVendasFaturadas() {
+    final filtrados = itens
+        .where(AgendaCarretoOcupacaoHelper.itemRepresentaVendaFaturada)
+        .toList(growable: false);
+    final qtd = <String, int>{};
+    for (final item in filtrados) {
+      qtd.update(item.dataChave, (n) => n + 1, ifAbsent: () => 1);
+    }
+    final igual = filtrados.length == itens.length &&
+        qtd.length == quantidadePorDia.length &&
+        qtd.entries.every((e) => quantidadePorDia[e.key] == e.value);
+    if (igual) return this;
+    return AgendaCarretoOcupacaoMes(
+      ano: ano,
+      mes: mes,
+      quantidadePorDia: qtd,
+      itens: filtrados,
+    );
+  }
+
   static DateTime soDia(DateTime d) {
     final l = d.toLocal();
     return DateTime(l.year, l.month, l.day);
@@ -403,14 +427,30 @@ abstract final class AgendaCarretoOcupacaoHelper {
     return out;
   }
 
+  /// Venda faturada com carreto ainda em aberto.
+  ///
+  /// A mesma populacao da aba Entregas: ignora orcamento, pagamento
+  /// pendente, cancelada e estornada. Entrega ja realizada ou cancelada
+  /// tambem nao ocupa a cor do dia.
   static bool contaNaAgenda(Venda venda) {
     if (venda.cancelada) return false;
     if (venda.dataEntregaMarcada == null) return false;
-    final st = venda.status.trim().toLowerCase();
-    if (st != 'finalizada' && st != 'orcamento') return false;
-    if (EntregaFiltroUtil.ehConcluidaNaAgenda(venda.statusEntrega)) return false;
-    return EntregaVendaHelper.vendaTemItensCarreto(venda) ||
-        venda.tipoEntrega == EntregaVendaHelper.tipoEntregaLoja ||
-        venda.tipoEntrega == EntregaVendaHelper.tipoMisto;
+    if (venda.status.trim().toLowerCase() != 'finalizada') return false;
+    if (EntregaFiltroUtil.ehConcluidaNaAgenda(venda.statusEntrega)) {
+      return false;
+    }
+    final tipo = venda.tipoEntrega.trim();
+    if (tipo != EntregaVendaHelper.tipoEntregaLoja &&
+        tipo != EntregaVendaHelper.tipoMisto) {
+      return false;
+    }
+    return EntregaVendaHelper.vendaTemItensCarreto(venda);
+  }
+
+  /// Item ja serializado (API/calendario): descarta orcamento e estorno.
+  static bool itemRepresentaVendaFaturada(AgendaCarretoOcupacaoItem item) {
+    if (item.ehOrcamento) return false;
+    final st = item.status.trim().toLowerCase();
+    return st != 'orcamento' && st != 'cancelada' && st != 'estornada';
   }
 }

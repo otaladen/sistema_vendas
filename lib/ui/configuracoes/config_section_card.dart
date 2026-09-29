@@ -9,6 +9,8 @@ class ConfigSectionCard extends StatelessWidget {
     this.subtitle,
     required this.child,
     this.trailing,
+    this.resumo,
+    this.destacado = false,
   });
 
   final IconData icon;
@@ -16,6 +18,12 @@ class ConfigSectionCard extends StatelessWidget {
   final String? subtitle;
   final Widget child;
   final Widget? trailing;
+
+  /// Chips com o estado atual do bloco, logo abaixo do titulo.
+  final Widget? resumo;
+
+  /// Realca a borda: usado em blocos que controlam margem ou antifraude.
+  final bool destacado;
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +36,10 @@ class ConfigSectionCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: scheme.outlineVariant.withValues(alpha: 0.55),
+          color: destacado
+              ? scheme.primary.withValues(alpha: 0.5)
+              : scheme.outlineVariant.withValues(alpha: 0.55),
+          width: destacado ? 1.4 : 1,
         ),
       ),
       child: Padding(
@@ -73,9 +84,13 @@ class ConfigSectionCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (trailing != null) trailing!,
+                ?trailing,
               ],
             ),
+            if (resumo != null) ...[
+              const SizedBox(height: 12),
+              resumo!,
+            ],
             const SizedBox(height: 18),
             child,
           ],

@@ -18,7 +18,8 @@ class BackupPosExecucaoService {
 
     await BackupRetencaoService.aplicar(
       pastaRaiz: pastaRaizPrimaria,
-      maxCopias: config.backupRetencaoMaxCopias,
+      maxCopiasLeves: config.backupRetencaoMaxCopias,
+      maxCopiasCompletos: config.backupRetencaoCompletos,
     );
 
     if (config.backupSegundoDestinoAtivo) {
@@ -32,6 +33,7 @@ class BackupPosExecucaoService {
           pastaBackup: pastaBackup,
           pastaRaizSecundaria: dirSec,
           maxCopias: config.backupRetencaoMaxCopias,
+          maxCopiasCompletos: config.backupRetencaoCompletos,
         );
       }
     }

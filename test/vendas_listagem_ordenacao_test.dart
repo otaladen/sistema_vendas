@@ -127,6 +127,52 @@ void main() {
       expect(resultado[2].id, 1133);
     });
 
+    test('id interno diferente do controle nao entra na busca do numero visivel', () {
+      final nota = _venda(id: 50, controle: 1255, data: recente);
+      final outroId = _venda(
+        id: 1255,
+        controle: 1190,
+        nfceNumero: '60711',
+        data: antiga,
+      );
+
+      final resultado = ListagemVendasBuscaRelevancia.somenteCorrespondenciasExatas(
+        [nota, outroId],
+        textoBusca: '1255',
+      );
+
+      expect(resultado.map((v) => v.id).toList(), [50]);
+    });
+
+    test('numero puro descarta NFC-e parcial e outras vendas', () {
+      final controle = _venda(id: 10, controle: 1255, data: antiga);
+      final nfceExata = _venda(
+        id: 11,
+        controle: 11,
+        nfceNumero: '0001255',
+        data: recente,
+      );
+      final nfceParcial = _venda(
+        id: 12,
+        controle: 12,
+        nfceNumero: '11255',
+        data: maisRecente,
+      );
+      final outra = _venda(
+        id: 13,
+        controle: 1190,
+        nfceNumero: '60711',
+        data: recente,
+      );
+
+      final resultado = ListagemVendasBuscaRelevancia.somenteCorrespondenciasExatas(
+        [controle, nfceExata, nfceParcial, outra],
+        textoBusca: '1255',
+      );
+
+      expect(resultado.map((v) => v.id).toList(), [10, 11]);
+    });
+
     test('busca nao numerica nao reordena a lista filtrada', () {
       final a = _venda(id: 2, data: maisRecente);
       final b = _venda(id: 1, data: antiga);

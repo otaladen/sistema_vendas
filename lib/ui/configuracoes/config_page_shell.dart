@@ -9,11 +9,15 @@ class ConfigPageShell extends StatelessWidget {
     required this.secaoAtual,
     required this.onSecaoChanged,
     required this.child,
+    this.conteudoAmplo = false,
   });
 
   final int secaoAtual;
   final ValueChanged<int> onSecaoChanged;
   final Widget child;
+
+  /// Libera a area de conteudo para duas colunas de cartoes.
+  final bool conteudoAmplo;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +28,7 @@ class ConfigPageShell extends StatelessWidget {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Configuracoes'),
+            const Text('Configurações'),
             Text(
               secao.titulo,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -49,7 +53,12 @@ class ConfigPageShell extends StatelessWidget {
                   extended: constraints.maxWidth >= 1080,
                 ),
                 const VerticalDivider(width: 1),
-                Expanded(child: _ConfigContentArea(child: child)),
+                Expanded(
+                  child: _ConfigContentArea(
+                    amplo: conteudoAmplo,
+                    child: child,
+                  ),
+                ),
               ],
             );
           }
@@ -61,7 +70,9 @@ class ConfigPageShell extends StatelessWidget {
                 onSecaoChanged: onSecaoChanged,
               ),
               const Divider(height: 1),
-              Expanded(child: _ConfigContentArea(child: child)),
+              Expanded(
+                child: _ConfigContentArea(amplo: conteudoAmplo, child: child),
+              ),
             ],
           );
         },
@@ -150,20 +161,32 @@ class _ConfigSecaoChips extends StatelessWidget {
 }
 
 class _ConfigContentArea extends StatelessWidget {
-  const _ConfigContentArea({required this.child});
+  const _ConfigContentArea({required this.child, this.amplo = false});
 
   final Widget child;
+  final bool amplo;
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: ConfigSecoes.maxLarguraConteudo,
-        ),
-        child: child,
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = amplo
+            ? ConfigSecoes.maxLarguraConteudoAmplo
+            : ConfigSecoes.maxLarguraConteudo;
+        final largura = constraints.maxWidth > maxW
+            ? maxW
+            : constraints.maxWidth;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: largura,
+            height: constraints.maxHeight.isFinite
+                ? constraints.maxHeight
+                : null,
+            child: child,
+          ),
+        );
+      },
     );
   }
 }

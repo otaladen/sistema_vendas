@@ -14,7 +14,7 @@ class ConfiguracoesScope extends InheritedWidget {
 
   static ConfiguracoesService of(BuildContext context) {
     final service = maybeOf(context);
-    assert(service != null, 'ConfiguracoesScope nao encontrado na arvore.');
+    assert(service != null, 'ConfiguracoesScope não encontrado na árvore.');
     return service!;
   }
 

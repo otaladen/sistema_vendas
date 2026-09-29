@@ -23,42 +23,6 @@ abstract final class CategoriaImportacaoMapper {
     'importacao',
   };
 
-  static const _aliasesCategoria = <String, String>{
-    'hidraulica': 'Hidraulica',
-    'hidraulico': 'Hidraulica',
-    'eletrica': 'Eletrica',
-    'eletrico': 'Eletrica',
-    'ferragens': 'Ferragens',
-    'ferramentas': 'Ferramentas',
-    'tintas': 'Tintas e Acessorios',
-    'tintaseacessorios': 'Tintas e Acessorios',
-    'cimento': 'Cimento e Argamassas',
-    'cimentoeargamassas': 'Cimento e Argamassas',
-    'argamassa': 'Cimento e Argamassas',
-    'telhas': 'Telhas e Cobertura',
-    'telhasecobertura': 'Telhas e Cobertura',
-    'cobertura': 'Telhas e Cobertura',
-    'alvenaria': 'Estrutural e Alvenaria',
-    'estrutural': 'Estrutural e Alvenaria',
-    'estruturalealvenaria': 'Estrutural e Alvenaria',
-    'madeiras': 'Madeiras e Chapas',
-    'madeirasechapas': 'Madeiras e Chapas',
-    'pisos': 'Pisos e Revestimentos',
-    'pisoserevestimentos': 'Pisos e Revestimentos',
-    'revestimentos': 'Pisos e Revestimentos',
-    'loucas': 'Loucas e Metais',
-    'loucasemetais': 'Loucas e Metais',
-    'metais': 'Loucas e Metais',
-    'impermeabilizacao': 'Impermeabilizacao e Quimicos',
-    'impermeabilizacaoequimicos': 'Impermeabilizacao e Quimicos',
-    'quimicos': 'Impermeabilizacao e Quimicos',
-    'jardinagem': 'Jardinagem e Externo',
-    'jardinagemeexterno': 'Jardinagem e Externo',
-    'forros': 'Forros e Divisorias',
-    'forrosedivisorias': 'Forros e Divisorias',
-    'drywall': 'Forros e Divisorias',
-  };
-
   static CategoriaImportacaoResult resolver({
     String familia = '',
     String grupo = '',
@@ -71,8 +35,8 @@ abstract final class CategoriaImportacaoMapper {
 
     for (final candidato in [g, f, sg]) {
       if (candidato.isEmpty) continue;
-      final alias = _aliasesCategoria[_norm(candidato)];
-      if (alias != null && _catalogo.containsKey(alias)) {
+      final alias = ProdutoCategoriasCatalogo.resolverCategoria(candidato);
+      if (alias != null && alias != ProdutoCategoriasCatalogo.outros) {
         final sub = _resolverSubcategoria(alias, sg) ??
             _resolverSubcategoria(alias, g) ??
             _resolverSubcategoria(alias, f);
@@ -96,17 +60,11 @@ abstract final class CategoriaImportacaoMapper {
       }
     }
 
-    for (final entry in _catalogo.entries) {
-      if (entry.key == ProdutoCategoriasCatalogo.outros) continue;
-      for (final sub in entry.value) {
-        if (_match(sg, sub) || _match(g, sub) || _match(f, sub)) {
-          return CategoriaImportacaoResult(
-            categoria: entry.key,
-            subcategoria: sub,
-          );
-        }
-      }
-    }
+    final porSubExata = _buscarPorSubcategoria(f, g, sg, exata: true);
+    if (porSubExata != null) return porSubExata;
+
+    final porSub = _buscarPorSubcategoria(f, g, sg, exata: false);
+    if (porSub != null) return porSub;
 
     final porPalavra = _porPalavrasChave('$g $f $sg');
     if (porPalavra != null) {
@@ -148,15 +106,49 @@ abstract final class CategoriaImportacaoMapper {
     return t;
   }
 
-  static String _norm(String s) => s
-      .toLowerCase()
-      .replaceAll(RegExp(r'[áàâãä]'), 'a')
-      .replaceAll(RegExp(r'[éèêë]'), 'e')
-      .replaceAll(RegExp(r'[íìîï]'), 'i')
-      .replaceAll(RegExp(r'[óòôõö]'), 'o')
-      .replaceAll(RegExp(r'[úùûü]'), 'u')
-      .replaceAll(RegExp(r'[ç]'), 'c')
-      .replaceAll(RegExp(r'[^a-z0-9]'), '');
+  static String _norm(String s) => ProdutoCategoriasCatalogo.normalizar(s);
+
+  static CategoriaImportacaoResult? _buscarPorSubcategoria(
+    String familia,
+    String grupo,
+    String subgrupo, {
+    required bool exata,
+  }) {
+    CategoriaImportacaoResult? melhor;
+    var melhorScore = -1.0;
+    for (final entry in _catalogo.entries) {
+      if (entry.key == ProdutoCategoriasCatalogo.outros) continue;
+      for (final sub in entry.value) {
+        for (final candidato in [subgrupo, grupo, familia]) {
+          if (candidato.isEmpty) continue;
+          final score = _scoreSub(candidato, sub, exata: exata);
+          if (score <= melhorScore) continue;
+          melhorScore = score;
+          melhor = CategoriaImportacaoResult(
+            categoria: entry.key,
+            subcategoria: sub,
+          );
+        }
+      }
+    }
+    return melhor;
+  }
+
+  /// 1 em igualdade. Em aproximacao, so aceita textos bem proximos
+  /// para nao puxar "Gesso" para "Gesso em Po" nem "Cola" para "Argamassa Colante".
+  static double _scoreSub(String a, String b, {required bool exata}) {
+    final na = _norm(a);
+    final nb = _norm(b);
+    if (na.isEmpty || nb.isEmpty) return -1;
+    if (na == nb) return exata ? 1 : -1;
+    if (exata) return -1;
+    if (!na.contains(nb) && !nb.contains(na)) return -1;
+    final menor = na.length < nb.length ? na.length : nb.length;
+    final maior = na.length > nb.length ? na.length : nb.length;
+    final ratio = menor / maior;
+    if (ratio < 0.72) return -1;
+    return ratio;
+  }
 
   static bool _match(String a, String b) {
     if (a.isEmpty || b.isEmpty) return false;
@@ -286,7 +278,7 @@ abstract final class CategoriaImportacaoMapper {
         t.contains('silicone') ||
         t.contains('vedante')) {
       cat = 'Impermeabilizacao e Quimicos';
-    } else if (t.contains('ferramenta') || t.contains('epi')) {
+    } else if (t.contains('ferramenta')) {
       cat = 'Ferramentas';
     } else if (t.contains('mangueira') || t.contains('jardim')) {
       cat = 'Jardinagem e Externo';
@@ -294,6 +286,48 @@ abstract final class CategoriaImportacaoMapper {
         t.contains('forro') ||
         t.contains('gesso')) {
       cat = 'Forros e Divisorias';
+    } else if (t.contains('lampada') ||
+        t.contains('refletor') ||
+        t.contains('plafon') ||
+        t.contains('fita de led') ||
+        t.contains('spot')) {
+      cat = 'Iluminacao';
+    } else if (t.contains('ventilador') ||
+        t.contains('exaustor') ||
+        t.contains('ar condicionado') ||
+        t.contains('aquecedor')) {
+      cat = 'Climatizacao';
+    } else if (t.contains('epi') ||
+        t.contains('capacete') ||
+        t.contains('respirador') ||
+        t.contains('bota de seguranca') ||
+        t.contains('protetor auricular')) {
+      cat = 'EPIs e Seguranca';
+    } else if (t.contains('lixa') ||
+        t.contains('disco de corte') ||
+        t.contains('broca') ||
+        t.contains('serra copo') ||
+        t.contains('eletrodo')) {
+      cat = 'Abrasivos e Corte';
+    } else if (t.contains('alambrado') ||
+        t.contains('arame farpado') ||
+        t.contains('mourao') ||
+        t.contains('concertina') ||
+        t.contains('tela soldada')) {
+      cat = 'Telas, Cercas e Alambrados';
+    } else if (t.contains('fita crepe') ||
+        t.contains('veda rosca') ||
+        t.contains('cola branca') ||
+        t.contains('adesivo')) {
+      cat = 'Colas, Fitas e Vedacao';
+    } else if (t.contains('4x2') || t.contains('4x4')) {
+      cat = 'Eletrica';
+    } else if (t.contains('porta') ||
+        t.contains('janela') ||
+        t.contains('vidro') ||
+        t.contains('basculante') ||
+        t.contains('espelho')) {
+      cat = 'Portas, Janelas e Vidros';
     }
 
     if (cat == null) return null;

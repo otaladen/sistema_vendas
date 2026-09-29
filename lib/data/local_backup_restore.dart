@@ -97,6 +97,30 @@ Future<CadastroProdutosImportResumo?> restaurarDadosLocais({
     return null;
   }
 
+  if (escopo == LocalBackupEscopo.semImagens) {
+    report(0.12, 'Preservando fotos deste PC… 12%');
+    await limparDiretorioDestinoRestauracao(
+      destinoBase,
+      preservarNomes: nomesPastasImagemNoBackup,
+    );
+    await copiarComProgresso(
+      origem: origemDados,
+      destino: destinoBase,
+      inicio: 0.18,
+      fim: 0.88,
+      rotulo: 'Restaurando banco e configuracoes',
+    );
+    LocalBackupValidation.validarDadosAplicacao(destinoBase);
+    if (LocalBackupPreferenciasService.existeNaPasta(pastaBackupSelecionada)) {
+      report(0.92, 'Importando configuracoes… 92%');
+      await LocalBackupPreferenciasService.importarDaPasta(
+        pastaBackupSelecionada,
+      );
+    }
+    report(1.0, 'Restauracao concluida — 100%');
+    return null;
+  }
+
   if (LocalBackupValidation.ehPastaObjectBox(origemDados)) {
     final destinoOb = Directory(p.join(destinoBase.path, 'objectbox'));
     if (destinoOb.existsSync()) {

@@ -23,14 +23,14 @@ class ConfigEscopoBanner extends StatelessWidget {
     final loja = tipo == ConfigEscopoTipo.lojaServidor;
 
     final titulo = loja
-        ? 'Configuracoes da Loja (Servidor)'
-        : 'Configuracoes deste Terminal (Dispositivo Atual)';
+        ? 'Configurações da Loja (Servidor)'
+        : 'Configurações deste Terminal (Dispositivo Atual)';
 
     final subtitulo = loja
         ? (terminalLeve
-            ? 'Sincronizadas do PC servidor. Alteracoes aqui exigem permissao no servidor ou refletem leitura da API.'
-            : 'Compartilhadas com todos os terminais da rede (empresa, fiscal, politicas de venda e estilo do cupom).')
-        : 'Salvas apenas neste computador: impressora, bobina, margens fisicas e auto-impressao no PDV.';
+            ? 'Sincronizadas do PC servidor. Alterações aqui exigem permissão no servidor ou refletem leitura da API.'
+            : 'Compartilhadas com todos os terminais da rede (empresa, fiscal, políticas de venda e estilo do cupom).')
+        : 'Salvas apenas neste computador: impressora, bobina, margens físicas e auto-impressão no PDV.';
 
     final bg = loja
         ? scheme.primaryContainer.withValues(alpha: 0.35)

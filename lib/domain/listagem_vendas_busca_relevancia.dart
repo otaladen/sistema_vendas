@@ -4,9 +4,10 @@ import 'venda_finalizacao_caixa_helper.dart';
 
 /// Prioridade de busca numerica na Listagem de Vendas.
 ///
-/// 0 = match exato do Controle / ID da venda (topo).
-/// 1 = match exato do numero de documento (NFC-e / NF-e).
-/// 2 = demais ocorrencias (contem a sequencia), desempatadas por data desc.
+/// Digitos puros (ex.: `1255`) mostram so o numero visivel na listagem:
+/// 0 = coluna # (controle interno).
+/// 1 = NFC-e / NF-e autorizada, inclusive com zeros a esquerda.
+/// O id interno do banco nao conta quando o controle exibido e outro.
 abstract final class ListagemVendasBuscaRelevancia {
   ListagemVendasBuscaRelevancia._();
 
@@ -25,6 +26,23 @@ abstract final class ListagemVendasBuscaRelevancia {
     final t = textoBusca.trim();
     if (t.isEmpty || !_somenteDigitos.hasMatch(t)) return null;
     return int.tryParse(t);
+  }
+
+  /// Controle, ID ou numero fiscal iguais a [textoBusca].
+  static bool correspondeExato(Venda venda, String textoBusca) {
+    final n = numeroBusca(textoBusca);
+    if (n == null) return false;
+    return _controleExato(venda, n) || _documentoExato(venda, n);
+  }
+
+  /// Remove vendas que so contem a sequencia (chave, produto, numero parcial).
+  /// Sem busca numerica, devolve [vendas].
+  static List<Venda> somenteCorrespondenciasExatas(
+    List<Venda> vendas, {
+    required String textoBusca,
+  }) {
+    if (numeroBusca(textoBusca) == null) return vendas;
+    return vendas.where((v) => correspondeExato(v, textoBusca)).toList();
   }
 
   static int score(Venda venda, String textoBusca) {
@@ -61,15 +79,15 @@ abstract final class ListagemVendasBuscaRelevancia {
 
   static bool _controleExato(Venda venda, int n) {
     if (n <= 0) return false;
-    if (venda.id == n) return true;
-    if (venda.numeroControle > 0 && venda.numeroControle == n) return true;
     final interno = VendaDocumentoRotuloHelper.numeroControleInterno(venda);
-    return interno > 0 && interno == n;
+    if (interno > 0) return interno == n;
+    return venda.id == n;
   }
 
   static bool _documentoExato(Venda venda, int n) {
-    return _numeroDocumentoIgual(venda.nfceNumero, n) ||
-        _numeroDocumentoIgual(venda.nfeNumero, n);
+    if (_numeroDocumentoIgual(venda.nfceNumero, n)) return true;
+    if (!venda.nfe55Autorizada) return false;
+    return _numeroDocumentoIgual(venda.nfeNumero, n);
   }
 
   static bool _numeroDocumentoIgual(String bruto, int n) {

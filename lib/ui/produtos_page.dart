@@ -11,6 +11,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'theme/app_semantic_helper.dart';
+import 'widgets/seletor_categoria_produto.dart';
 import '../data/api/lan_api_client.dart';
 import '../data/api/lista_compra_api_repository.dart';
 import '../data/lista_compra_repository.dart';
@@ -263,6 +264,7 @@ class _ProdutosPageState extends State<ProdutosPage>
   bool _nomeImpressaoVinculadoAoNome = true;
   bool _mostrarNomeImpressao = false;
   bool _mostrarApelidos = false;
+  bool _painelPontoPedidoExpandido = false;
   final _formKey = GlobalKey<FormState>();
   final _formFiscalKey = GlobalKey<FormState>();
   bool _tentouSalvar = false;
@@ -1062,6 +1064,41 @@ class _ProdutosPageState extends State<ProdutosPage>
     final semantic = context.semanticColors;
     final cs = theme.colorScheme;
 
+    if (!_painelPontoPedidoExpandido) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              tooltip:
+                  'Quando pedir de novo? Toque para ver o ponto de pedido deste produto.',
+              onPressed: () =>
+                  setState(() => _painelPontoPedidoExpandido = true),
+              icon: Icon(
+                Icons.help_outline,
+                size: 22,
+                color: critico ? semantic.errorFg : cs.primary,
+              ),
+            ),
+            if (critico)
+              Flexible(
+                child: Text(
+                  'Estoque no ou abaixo do ponto de pedido.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: semantic.errorFg,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -1091,12 +1128,19 @@ class _ProdutosPageState extends State<ProdutosPage>
               ),
               TextButton.icon(
                 onPressed: () => _abrirAjudaEstoquePontoPedido(context),
-                icon: const Icon(Icons.help_outline, size: 18),
+                icon: const Icon(Icons.menu_book_outlined, size: 18),
                 label: const Text('Como funciona?'),
                 style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Ocultar',
+                onPressed: () =>
+                    setState(() => _painelPontoPedidoExpandido = false),
+                icon: const Icon(Icons.expand_less),
               ),
             ],
           ),
@@ -1295,6 +1339,78 @@ class _ProdutosPageState extends State<ProdutosPage>
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return lista.take(16).toList();
     return lista.where((m) => m.toLowerCase().contains(q)).take(16).toList();
+  }
+
+  String? _rotuloCategoriaSelecionada() {
+    final categoria = _categoriaSelecionada;
+    if (categoria == null || categoria.trim().isEmpty) return null;
+    final setor = ProdutoCategoriasCatalogo.setorDe(categoria);
+    if (setor == null || setor == 'Geral') return categoria;
+    return '$setor · $categoria';
+  }
+
+  Future<void> _abrirSeletorClassificacao() async {
+    final resultado = await showSeletorCategoriaProduto(
+      context,
+      categoriaAtual: _categoriaSelecionada,
+      subcategoriaAtual: _subcategoriaSelecionada,
+    );
+    if (!mounted || resultado == null) return;
+    setState(() {
+      final mudouCategoria = _categoriaSelecionada != resultado.categoria;
+      _categoriaSelecionada = resultado.categoria;
+      if (resultado.categoria == _categoriaOutros) {
+        _subcategoriaSelecionada = null;
+        if (mudouCategoria) {
+          _subcategoriaLivreController.clear();
+        }
+      } else {
+        _subcategoriaSelecionada = resultado.subcategoria;
+        _subcategoriaLivreController.clear();
+      }
+    });
+  }
+
+  Widget _campoSelecaoClassificacao({
+    required BuildContext context,
+    required String rotulo,
+    required String? valor,
+    required String? Function(String?) validator,
+    required Key fieldKey,
+    String hint = 'Selecione',
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _erpFieldLabel(rotulo, context),
+        FormField<String>(
+          key: fieldKey,
+          initialValue: valor,
+          validator: validator,
+          builder: (state) {
+            return InkWell(
+              onTap: _abrirSeletorClassificacao,
+              borderRadius: BorderRadius.circular(8),
+              child: InputDecorator(
+                decoration: _erpInputDecoration(
+                  context,
+                  hint: hint,
+                ).copyWith(
+                  errorText: state.errorText,
+                  suffixIcon: const Icon(Icons.arrow_drop_down),
+                ),
+                isEmpty: valor == null || valor.trim().isEmpty,
+                child: Text(
+                  valor ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
   }
 
   Widget _buildCampoMarcaClassificacao(BuildContext context) {
@@ -2104,6 +2220,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       _nomeImpressaoVinculadoAoNome = true;
       _mostrarNomeImpressao = false;
       _mostrarApelidos = false;
+      _painelPontoPedidoExpandido = false;
       _modoAlvoPrecificacao = _ModoAlvoPrecificacao.markup;
       _descricaoController.clear();
       _marcaController.clear();
@@ -3852,42 +3969,12 @@ class _ProdutosPageState extends State<ProdutosPage>
   );
 
   String? _mapearCategoriaGeminiParaSistema(String categoriaGemini) {
-    const mapa = <String, String>{
-      'Hidráulica': 'Hidraulica',
-      'Elétrica': 'Eletrica',
-      'Ferramentas': 'Ferramentas',
-      'Tintas': 'Tintas e Acessorios',
-      'Ferragens': 'Ferragens',
-      'Outros': _categoriaOutros,
-    };
-    final chave = mapa[categoriaGemini.trim()] ?? _categoriaOutros;
-    if (_categoriasMateriaisConstrucao.containsKey(chave)) {
-      return chave;
-    }
-    return _categoriaOutros;
+    return ProdutoCategoriasCatalogo.resolverCategoria(categoriaGemini) ??
+        _categoriaOutros;
   }
 
-  String _montarCatalogoSubcategoriasParaGemini() {
-    const mapaGemini = <String, String>{
-      'Hidráulica': 'Hidraulica',
-      'Elétrica': 'Eletrica',
-      'Ferramentas': 'Ferramentas',
-      'Tintas': 'Tintas e Acessorios',
-      'Ferragens': 'Ferragens',
-      'Outros': _categoriaOutros,
-    };
-    final buf = StringBuffer(
-      'Catalogo da loja — use subcategoria_sugerida com o texto EXATO de uma opcao abaixo:\n',
-    );
-    for (final entry in mapaGemini.entries) {
-      final categoriaSistema = entry.value;
-      if (categoriaSistema == _categoriaOutros) continue;
-      final subs = _categoriasMateriaisConstrucao[categoriaSistema] ?? [];
-      if (subs.isEmpty) continue;
-      buf.writeln('- ${entry.key} ($categoriaSistema): ${subs.join(' | ')}');
-    }
-    return buf.toString();
-  }
+  String _montarCatalogoSubcategoriasParaGemini() =>
+      ProdutoCategoriasCatalogo.textoParaPrompt();
 
   String? _resolverSubcategoriaGemini({
     required String categoriaSistema,
@@ -5181,6 +5268,7 @@ class _ProdutosPageState extends State<ProdutosPage>
     setState(() {
       _historicoVersao++;
       _ncmConsulta.limpar();
+      _painelPontoPedidoExpandido = false;
       _produtoEmEdicaoId = produto.id;
       _codigoInternoController.text = produto.codigoInterno;
       _nomeController.text = produto.nome;
@@ -6626,117 +6714,35 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                           .category_outlined,
                                                       children: [
                                                         _erpResponsiveGrid(context, [
-                                                          Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              _erpFieldLabel(
-                                                                'Categoria',
-                                                                context,
-                                                              ),
-                                                              DropdownButtonFormField<
-                                                                String
-                                                              >(
-                                                                isDense: true,
-                                                                isExpanded:
-                                                                    true,
-                                                                initialValue:
-                                                                    _categoriaSelecionada,
-                                                                validator:
-                                                                    _validarCategoria,
-                                                                decoration:
-                                                                    _erpInputDecoration(
-                                                                      context,
-                                                                      hint:
-                                                                          'Selecione',
-                                                                    ),
-                                                                items: _categoriasMateriaisConstrucao
-                                                                    .keys
-                                                                    .map(
-                                                                      (
-                                                                        categoria,
-                                                                      ) => DropdownMenuItem<String>(
-                                                                        value:
-                                                                            categoria,
-                                                                        child: Text(
-                                                                          categoria,
-                                                                        ),
-                                                                      ),
-                                                                    )
-                                                                    .toList(),
-                                                                onChanged: (value) {
-                                                                  setState(() {
-                                                                    _categoriaSelecionada =
-                                                                        value;
-                                                                    _subcategoriaSelecionada =
-                                                                        null;
-                                                                    _subcategoriaLivreController
-                                                                        .clear();
-                                                                  });
-                                                                },
-                                                              ),
-                                                            ],
+                                                          _campoSelecaoClassificacao(
+                                                            context: context,
+                                                            rotulo: 'Categoria',
+                                                            valor: _rotuloCategoriaSelecionada(),
+                                                            validator:
+                                                                _validarCategoria,
+                                                            fieldKey: ValueKey(
+                                                              'categoria_${_categoriaSelecionada ?? 'vazio'}',
+                                                            ),
                                                           ),
-                                                          Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              _erpFieldLabel(
+                                                          _campoSelecaoClassificacao(
+                                                            context: context,
+                                                            rotulo:
                                                                 'Subcategoria',
-                                                                context,
-                                                              ),
-                                                              DropdownButtonFormField<
-                                                                String
-                                                              >(
-                                                                key: ValueKey(
-                                                                  'subcategoria_${_categoriaSelecionada ?? 'vazio'}_${_subcategoriaSelecionada ?? 'vazio'}',
-                                                                ),
-                                                                isDense: true,
-                                                                isExpanded:
-                                                                    true,
-                                                                initialValue:
-                                                                    _subcategoriaSelecionada,
-                                                                validator:
-                                                                    _validarSubcategoria,
-                                                                decoration:
-                                                                    _erpInputDecoration(
-                                                                      context,
-                                                                      hint:
-                                                                          'Selecione',
-                                                                    ),
-                                                                items:
-                                                                    (_categoriasMateriaisConstrucao[_categoriaSelecionada] ??
-                                                                            [])
-                                                                        .map(
-                                                                          (
-                                                                            subcategoria,
-                                                                          ) =>
-                                                                              DropdownMenuItem<
-                                                                                String
-                                                                              >(
-                                                                                value: subcategoria,
-                                                                                child: Text(
-                                                                                  subcategoria,
-                                                                                ),
-                                                                              ),
-                                                                        )
-                                                                        .toList(),
-                                                                onChanged:
-                                                                    _categoriaSelecionada ==
-                                                                            null ||
-                                                                        _categoriaSelecionada ==
-                                                                            _categoriaOutros
-                                                                    ? null
-                                                                    : (value) {
-                                                                        setState(() {
-                                                                          _subcategoriaSelecionada =
-                                                                              value;
-                                                                        });
-                                                                      },
-                                                              ),
-                                                            ],
+                                                            valor: _categoriaSelecionada ==
+                                                                    _categoriaOutros
+                                                                ? null
+                                                                : _subcategoriaSelecionada,
+                                                            validator: _categoriaSelecionada ==
+                                                                    _categoriaOutros
+                                                                ? (_) => null
+                                                                : _validarSubcategoria,
+                                                            fieldKey: ValueKey(
+                                                              'subcategoria_${_categoriaSelecionada ?? 'vazio'}_${_subcategoriaSelecionada ?? 'vazio'}',
+                                                            ),
+                                                            hint: _categoriaSelecionada ==
+                                                                    _categoriaOutros
+                                                                ? 'Texto livre abaixo'
+                                                                : 'Selecione',
                                                           ),
                                                           _buildCampoMarcaClassificacao(
                                                             context,

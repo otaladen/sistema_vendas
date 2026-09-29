@@ -321,6 +321,19 @@ class NfeSaidaFiscalStore {
     return null;
   }
 
+  /// IDs cuja NF-e 55 tem o numero fiscal igual a [numero] (sem a chave).
+  List<int> buscarVendaIdsPorNumeroExato(int numero) {
+    if (numero <= 0) return [];
+    final ids = <int>{};
+    for (final r in listar()) {
+      if (!r.autorizada) continue;
+      final d = r.numero.replaceAll(RegExp(r'\D'), '');
+      if (d.isEmpty || int.tryParse(d) != numero) continue;
+      if (r.vendaId > 0) ids.add(r.vendaId);
+    }
+    return ids.toList();
+  }
+
   /// IDs de vendas cuja NF-e 55 bate com numero, chave ou referencia Focus.
   List<int> buscarVendaIdsPorTexto(String texto) {
     final t = texto.trim();

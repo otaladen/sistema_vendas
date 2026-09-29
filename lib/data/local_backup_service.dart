@@ -28,12 +28,16 @@ class LocalBackupResult {
     required this.tamanhoBancoKb,
     required this.criadoEm,
     required this.escopo,
+    this.tamanhoPastaKb = 0,
     this.quantidadeProdutos,
   });
 
   final Directory pastaBackup;
   final Directory pastaDados;
   final double tamanhoBancoKb;
+
+  /// Tamanho da pasta do backup inteira (banco + fotos + manifesto).
+  final double tamanhoPastaKb;
   final DateTime criadoEm;
   final LocalBackupEscopo escopo;
   final int? quantidadeProdutos;
@@ -97,6 +101,7 @@ class LocalBackupService {
       );
       LocalBackupValidation.validarCadastroProdutos(pastaBackup);
 
+      final tamanhoPastaKb = await _kbDaPasta(pastaBackup);
       final manifest = {
         'app': 'sistema_vendas',
         'versaoApp': versaoApp,
@@ -107,6 +112,7 @@ class LocalBackupService {
         'tamanhoBancoKb': double.parse(
           resumo.tamanhoTotalKb.toStringAsFixed(2),
         ),
+        'tamanhoPastaKb': double.parse(tamanhoPastaKb.toStringAsFixed(2)),
         'quantidadeProdutos': resumo.quantidadeProdutos,
         'quantidadeFotos': resumo.quantidadeFotos,
         'pastaDados': LocalBackupCadastroProdutosService.subpasta,
@@ -128,6 +134,7 @@ class LocalBackupService {
           pastaBackup: promovida,
           pastaDados: resumo.pasta,
           tamanhoBancoKb: resumo.tamanhoTotalKb,
+          tamanhoPastaKb: tamanhoPastaKb,
           criadoEm: agora,
           escopo: escopo,
           quantidadeProdutos: resumo.quantidadeProdutos,
@@ -159,6 +166,9 @@ class LocalBackupService {
         throw Exception('Pasta objectbox nao encontrada.');
       }
 
+      final pularImagens = escopo == LocalBackupEscopo.semImagens
+          ? nomesPastasImagemNoBackup
+          : const <String>{};
       if (escopo == LocalBackupEscopo.somenteBanco) {
         report(0.22, 'Copiando banco…');
         final destinoOb = Directory(p.join(destinoDados.path, 'objectbox'));
@@ -169,13 +179,22 @@ class LocalBackupService {
           onArquivoCopiado: () => report(0.5, 'Copiando banco…'),
         );
       } else {
-        report(0.18, 'Contando arquivos…');
-        final totalArquivos = await contarArquivosRecursivo(baseDadosDir);
+        report(
+          0.18,
+          escopo == LocalBackupEscopo.semImagens
+              ? 'Contando arquivos (sem fotos)…'
+              : 'Contando arquivos…',
+        );
+        final totalArquivos = await contarArquivosRecursivo(
+          baseDadosDir,
+          ignorarNomes: pularImagens,
+        );
         report(0.22, 'Copiando dados…');
         var copiados = 0;
         await copiarDiretorioRecursivo(
           origem: baseDadosDir,
           destino: destinoDados,
+          ignorarNomes: pularImagens,
           onArquivoCopiado: totalArquivos > 0
               ? () {
                   copiados++;
@@ -201,6 +220,7 @@ class LocalBackupService {
       report(0.94, 'Gravando manifesto…');
       final checksumDataMdb =
           LocalBackupAtomic.checksumDataMdb(destinoDados);
+      final tamanhoPastaKb = await _kbDaPasta(pastaBackup);
       final manifest = {
         'app': 'sistema_vendas',
         'versaoApp': versaoApp,
@@ -209,9 +229,10 @@ class LocalBackupService {
         'escopo': escopo.manifestValue,
         'criadoEm': agora.toIso8601String(),
         'tamanhoBancoKb': double.parse(tamanhoKb.toStringAsFixed(2)),
+        'tamanhoPastaKb': double.parse(tamanhoPastaKb.toStringAsFixed(2)),
         'checksumDataMdbSha256': checksumDataMdb,
         'pastaDados': 'dados_aplicacao',
-        'incluiPreferencias': escopo == LocalBackupEscopo.completo,
+        'incluiPreferencias': escopo.incluiPreferencias,
       };
       try {
         await File(p.join(pastaBackup.path, manifestFileName)).writeAsString(
@@ -229,6 +250,7 @@ class LocalBackupService {
           pastaBackup: promovida,
           pastaDados: destinoDados,
           tamanhoBancoKb: tamanhoKb,
+          tamanhoPastaKb: tamanhoPastaKb,
           criadoEm: agora,
           escopo: escopo,
         );
@@ -249,5 +271,10 @@ class LocalBackupService {
         } catch (_) {}
       }
     }
+  }
+
+  static Future<double> _kbDaPasta(Directory pasta) async {
+    final bytes = await tamanhoDiretorioBytes(pasta);
+    return bytes / 1024.0;
   }
 }

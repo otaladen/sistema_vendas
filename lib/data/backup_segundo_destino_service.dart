@@ -15,6 +15,7 @@ class BackupSegundoDestinoService {
     required Directory pastaBackup,
     required Directory pastaRaizSecundaria,
     required int maxCopias,
+    required int maxCopiasCompletos,
   }) async {
     if (!pastaBackup.existsSync()) return;
     if (!pastaRaizSecundaria.existsSync()) {
@@ -35,7 +36,8 @@ class BackupSegundoDestinoService {
 
     await BackupRetencaoService.aplicar(
       pastaRaiz: pastaRaizSecundaria,
-      maxCopias: maxCopias,
+      maxCopiasLeves: maxCopias,
+      maxCopiasCompletos: maxCopiasCompletos,
     );
 
     AuditoriaRegistrar.registrar(

@@ -113,27 +113,30 @@ class _AgendaCarretoPdvDialogState extends State<_AgendaCarretoPdvDialog> {
     required bool incluirProdutos,
   }) async {
     final repo = widget.vendaRepository;
+    final AgendaCarretoOcupacaoMes ocupacao;
     if (repo is VendaRepository) {
-      return repo.ocupacaoAgendaCarretoMes(
+      ocupacao = repo.ocupacaoAgendaCarretoMes(
         mes,
         clienteRepository: widget.clienteRepository,
         incluirProdutos: incluirProdutos,
       );
+    } else {
+      final client = widget.lanApiClient;
+      if (client != null && client.configurado) {
+        ocupacao = await client.obterOcupacaoAgendaCarreto(
+          mes,
+          incluirProdutos: incluirProdutos,
+        );
+      } else if (repo is VendaApiRepository) {
+        ocupacao = await repo.obterOcupacaoAgendaCarretoMes(
+          mes,
+          incluirProdutos: incluirProdutos,
+        );
+      } else {
+        throw StateError('Nao foi possivel carregar a agenda de carretos.');
+      }
     }
-    final client = widget.lanApiClient;
-    if (client != null && client.configurado) {
-      return client.obterOcupacaoAgendaCarreto(
-        mes,
-        incluirProdutos: incluirProdutos,
-      );
-    }
-    if (repo is VendaApiRepository) {
-      return repo.obterOcupacaoAgendaCarretoMes(
-        mes,
-        incluirProdutos: incluirProdutos,
-      );
-    }
-    throw StateError('Nao foi possivel carregar a agenda de carretos.');
+    return ocupacao.somenteVendasFaturadas();
   }
 
   /// Preenche produtos so do dia aberto (ObjectBox local ou 2a chamada API).

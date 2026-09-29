@@ -1301,7 +1301,7 @@ class LanApiClient {
         'produtos': incluirProdutos ? '1' : '0',
       },
     );
-    return AgendaCarretoOcupacaoMes.deMap(m);
+    return AgendaCarretoOcupacaoMes.deMap(m).somenteVendasFaturadas();
   }
 
   static List<Venda> _vendasDeLista(Object? raw) {

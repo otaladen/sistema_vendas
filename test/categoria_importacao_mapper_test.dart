@@ -39,5 +39,60 @@ void main() {
       expect(r.categoria, 'Eletrica');
       expect(r.subcategoria, 'Disjuntores');
     });
+
+    test('mapeia nome curto de categoria nova', () {
+      final r = CategoriaImportacaoMapper.resolver(
+        grupo: 'Portas',
+        subgrupo: 'Janela',
+      );
+      expect(r.categoria, 'Portas, Janelas e Vidros');
+      expect(r.subcategoria, 'Janela');
+    });
+
+    test('nao confunde gesso de forro com gesso em po', () {
+      final r = CategoriaImportacaoMapper.resolver(subgrupo: 'Gesso');
+      expect(r.categoria, 'Forros e Divisorias');
+    });
+  });
+
+  group('ProdutoCategoriasCatalogo', () {
+    test('setores cobrem cada categoria uma vez', () {
+      final vistas = <String>[];
+      for (final setor in ProdutoCategoriasCatalogo.setores) {
+        expect(setor.nome.trim(), isNotEmpty);
+        for (final categoria in setor.categorias) {
+          expect(
+            ProdutoCategoriasCatalogo.materiaisConstrucao.containsKey(
+              categoria,
+            ),
+            isTrue,
+            reason: categoria,
+          );
+          expect(vistas, isNot(contains(categoria)));
+          vistas.add(categoria);
+          final subs = ProdutoCategoriasCatalogo.subcategoriasDe(categoria);
+          expect(subs.toSet().length, subs.length, reason: categoria);
+        }
+      }
+      expect(
+        vistas.toSet(),
+        ProdutoCategoriasCatalogo.materiaisConstrucao.keys.toSet(),
+      );
+    });
+
+    test('resolve acento e apelido para o nome do catalogo', () {
+      expect(
+        ProdutoCategoriasCatalogo.resolverCategoria('Hidráulica'),
+        'Hidraulica',
+      );
+      expect(
+        ProdutoCategoriasCatalogo.resolverCategoria('Tintas'),
+        'Tintas e Acessorios',
+      );
+      expect(
+        ProdutoCategoriasCatalogo.setorDe('Iluminacao'),
+        'Instalacoes',
+      );
+    });
   });
 }

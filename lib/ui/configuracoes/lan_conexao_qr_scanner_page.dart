@@ -39,7 +39,7 @@ class _LanConexaoQrScannerPageState extends State<LanConexaoQrScannerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ler QR Code de conexao')),
+      appBar: AppBar(title: const Text('Ler QR Code de conexão')),
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -53,7 +53,7 @@ class _LanConexaoQrScannerPageState extends State<LanConexaoQrScannerPage> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  'Aponte para o QR gerado em Configuracoes > Rede e terminais '
+                  'Aponte para o QR gerado em Configurações > Rede e terminais '
                   'no PC servidor.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(

@@ -1267,6 +1267,9 @@ class VendaRepository {
     if (tb.isEmpty) {
       return c;
     }
+    if (ListagemVendasBuscaRelevancia.buscaSomenteNumeros(tb)) {
+      return c & _condicaoBuscaNumericaExata(tb);
+    }
     final lower = tb.toLowerCase();
     final orPartes = <Condition<Venda>>[];
     final asInt = int.tryParse(tb.replaceAll(RegExp(r'[^0-9]'), ''));
@@ -1359,6 +1362,28 @@ class VendaRepository {
     return c & textoCond;
   }
 
+  /// Numero digitado sozinho: Controle, ID, orcamento ou NFC-e/NF-e exatos.
+  /// Nao usa chave de acesso nem nome de produto — "1255" cabe em muitas chaves.
+  Condition<Venda> _condicaoBuscaNumericaExata(String tb) {
+    final n = ListagemVendasBuscaRelevancia.numeroBusca(tb)!;
+    final orPartes = <Condition<Venda>>[
+      Venda_.id.equals(n),
+      Venda_.numeroControle.equals(n),
+      Venda_.numeroOrcamento.equals(n),
+      Venda_.nfceNumero.equals(tb),
+      Venda_.nfeNumero.equals(tb),
+      // "0001255" e outros preenchimentos com zero a esquerda.
+      Venda_.nfceNumero.contains(tb, caseSensitive: false),
+      Venda_.nfeNumero.contains(tb, caseSensitive: false),
+    ];
+    final idsNfe =
+        NfeSaidaFiscalStore(_db.storeDirectoryPath).buscarVendaIdsPorNumeroExato(n);
+    if (idsNfe.isNotEmpty) {
+      orPartes.add(Venda_.id.oneOf(idsNfe));
+    }
+    return orPartes.reduce((a, b) => a | b);
+  }
+
   List<Venda> _sanitizarListagemVendas(List<Venda> vendas) =>
       ListagemVendasDedupe.sanitizar(vendas);
 
@@ -1444,13 +1469,22 @@ class VendaRepository {
     if (VendaNfceObrigatoriaHelper.filtroFiscalListagemRequerMemoria(
       f.filtroFiscal,
     )) {
-      return _filtrarListagemFiscal(
-        _listarCandidatasListagemFiscal(f),
+      return _ordenarListagemPorBusca(
+        _filtrarListagemFiscal(
+          _listarCandidatasListagemFiscal(f),
+          f,
+        ),
         f,
       ).length;
     }
     if (f.temFiltroSessaoCaixa) {
-      return _listarListagemVendasFiltradasSessao(f).length;
+      return _ordenarListagemPorBusca(
+        _listarListagemVendasFiltradasSessao(f),
+        f,
+      ).length;
+    }
+    if (ListagemVendasBuscaRelevancia.buscaSomenteNumeros(f.textoBusca)) {
+      return listarListagemVendasCompleto(f).length;
     }
     final cond = _condicaoListagemVendas(f);
     final query = _db.vendaBox.query(cond).build();
@@ -1557,8 +1591,26 @@ class VendaRepository {
     List<Venda> vendas,
     FiltroListagemVendas f,
   ) {
+    final n = ListagemVendasBuscaRelevancia.numeroBusca(f.textoBusca);
+    final idsNfeAutorizada = n == null
+        ? const <int>{}
+        : NfeSaidaFiscalStore(_db.storeDirectoryPath)
+            .buscarVendaIdsPorNumeroExato(n)
+            .toSet();
+    final exatas = n == null
+        ? vendas
+        : vendas
+            .where(
+              (v) =>
+                  idsNfeAutorizada.contains(v.id) ||
+                  ListagemVendasBuscaRelevancia.correspondeExato(
+                    v,
+                    f.textoBusca,
+                  ),
+            )
+            .toList();
     return ListagemVendasBuscaRelevancia.ordenar(
-      vendas,
+      exatas,
       textoBusca: f.textoBusca,
     );
   }
@@ -4549,7 +4601,10 @@ class VendaRepository {
     );
   }
 
-  /// Agenda de carretos do mes (vendas + orcamentos com data marcada).
+  /// Agenda de carretos do mes (somente vendas finalizadas/faturadas).
+  ///
+  /// Orcamento, pagamento pendente, cancelada e estornada nao entram
+  /// na lista nem no totalizador do dia.
   ///
   /// [incluirProdutos]: mapeia itens (leve; usa nome ja gravado no ItemVenda).
   AgendaCarretoOcupacaoMes ocupacaoAgendaCarretoMes(
@@ -4566,7 +4621,17 @@ class VendaRepository {
 
     final query = _db.vendaBox
         .query(
-          Venda_.cancelada.equals(false).and(
+          Venda_.cancelada
+              .equals(false)
+              .and(Venda_.status.equals('finalizada'))
+              .and(
+                Venda_.tipoEntrega
+                    .equals(EntregaVendaHelper.tipoEntregaLoja)
+                    .or(
+                      Venda_.tipoEntrega.equals(EntregaVendaHelper.tipoMisto),
+                    ),
+              )
+              .and(
                 Venda_.dataEntregaMarcada
                     .greaterOrEqualDate(iniUtc)
                     .and(Venda_.dataEntregaMarcada.lessOrEqualDate(fimUtc))
@@ -4625,7 +4690,7 @@ class VendaRepository {
       mes: mes.month,
       quantidadePorDia: qtd,
       itens: itens,
-    );
+    ).somenteVendasFaturadas();
   }
 
   /// Consulta ObjectBox (carreto/misto finalizado) + filtros em memoria.

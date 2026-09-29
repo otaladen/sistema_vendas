@@ -53,7 +53,7 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
     String? erro;
     final client = _client;
     if (client == null) {
-      erro = 'Este terminal nao esta conectado a API do PC servidor.';
+      erro = 'Este terminal não está conectado à API do PC servidor.';
     } else {
       try {
         status = await client.backupRemotoStatus();
@@ -77,7 +77,7 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
 
   Future<String?> _escolherDestino(String nomeSugerido) async {
     final path = await FilePicker.platform.saveFile(
-      dialogTitle: 'Salvar copia do backup neste PC',
+      dialogTitle: 'Salvar cópia do backup neste PC',
       fileName: nomeSugerido,
       type: FileType.custom,
       allowedExtensions: const ['zip'],
@@ -101,7 +101,7 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
     try {
       await client.criarBackupRemoto();
       if (!mounted) return;
-      setState(() => _etapa = 'Salvando copia neste PC…');
+      setState(() => _etapa = 'Salvando cópia neste PC…');
       await client.baixarBackupZipParaArquivo(destino);
       await _registrarCopiaLocal(destino);
       if (!mounted) return;
@@ -139,14 +139,14 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
 
     setState(() {
       _ocupado = true;
-      _etapa = 'Baixando ultimo backup do servidor…';
+      _etapa = 'Baixando último backup do servidor…';
     });
     try {
       await client.baixarBackupZipParaArquivo(destino);
       await _registrarCopiaLocal(destino);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Copia salva neste PC:\n$destino')),
+        SnackBar(content: Text('Cópia salva neste PC:\n$destino')),
       );
       await _recarregar();
     } catch (e) {
@@ -210,15 +210,15 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
       icon: Icons.backup_outlined,
       title: 'Backup neste terminal',
       subtitle:
-          'O banco oficial fica no PC servidor. Este terminal pede a copia la '
-          'e grava um ZIP aqui — se o PC 1 falhar, voce ja tem o arquivo.',
+          'O banco oficial fica no PC servidor. Este terminal pede a cópia lá '
+          'e grava um ZIP aqui — se o PC 1 falhar, você já tem o arquivo.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Se o PC servidor ja estiver desligado, nao da para criar backup '
-            'novo. Use o ZIP ja salvo neste PC e restaure em outro computador '
-            '(Configuracoes > Backup > restaurar ZIP), virando o novo servidor.',
+            'Se o PC servidor já estiver desligado, não dá para criar backup '
+            'novo. Use o ZIP já salvo neste PC e restaure em outro computador '
+            '(Configurações > Backup > restaurar ZIP), virando o novo servidor.',
             style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
           ),
           const SizedBox(height: 12),
@@ -240,14 +240,14 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
               Text(
                 ultimoTexto == null
                     ? 'Nenhum backup completo no servidor ainda.'
-                    : 'Ultimo backup no servidor: $ultimoTexto',
+                    : 'Último backup no servidor: $ultimoTexto',
                 style: theme.textTheme.bodySmall,
               ),
               if (pdvEmUso) ...[
                 const SizedBox(height: 6),
                 Text(
-                  'PDV aberto no servidor: da para baixar o ultimo ZIP, '
-                  'mas nao criar um backup novo agora.',
+                  'PDV aberto no servidor: da para baixar o último ZIP, '
+                  'mas não criar um backup novo agora.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.tertiary,
                   ),
@@ -257,9 +257,9 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
             const SizedBox(height: 8),
             Text(
               _copiaLocalExiste
-                  ? 'Copia neste PC: ${_fmt.format(DateTime.fromMillisecondsSinceEpoch(_copiaLocalMs))} '
+                  ? 'Cópia neste PC: ${_fmt.format(DateTime.fromMillisecondsSinceEpoch(_copiaLocalMs))} '
                       '(${_fmtBytes(_copiaLocalBytes)})\n${p.basename(_copiaLocalPath)}'
-                  : 'Ainda nao ha copia salva neste terminal.',
+                  : 'Ainda não há cópia salva neste terminal.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
                 height: 1.35,
@@ -291,7 +291,7 @@ class _BackupTerminalLeveSectionState extends State<BackupTerminalLeveSection> {
                   ? null
                   : _baixarUltimo,
               icon: const Icon(Icons.download_outlined),
-              label: const Text('Salvar neste PC o ultimo backup do servidor'),
+              label: const Text('Salvar neste PC o último backup do servidor'),
             ),
             const SizedBox(height: 8),
             Align(

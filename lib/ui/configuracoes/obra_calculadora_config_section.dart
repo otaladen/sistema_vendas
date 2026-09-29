@@ -113,9 +113,9 @@ class _ObraCalculadoraConfigSectionState extends State<ObraCalculadoraConfigSect
   }
 
   String _rotuloProduto(int id) {
-    if (id <= 0) return 'Nao selecionado';
+    if (id <= 0) return 'Não selecionado';
     final p = widget.produtoRepository.obterPorId(id);
-    if (p == null) return 'Produto #$id (nao encontrado)';
+    if (p == null) return 'Produto #$id (não encontrado)';
     return '${p.nome} (#${p.id})';
   }
 
@@ -255,12 +255,12 @@ class _ObraCalculadoraConfigSectionState extends State<ObraCalculadoraConfigSect
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Produtos e parametros usados no PDV (F12): parede, reboco, piso e contrapiso.',
+          'Produtos e parâmetros usados no PDV (F12): parede, reboco, piso e contrapiso.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 8),
         _linhaProduto(
-          rotulo: 'Tijolo padrao',
+          rotulo: 'Tijolo padrão',
           produtoId: widget.tijoloProdutoId,
           onPick: (id) => widget.onChanged(tijoloProdutoId: id),
         ),
@@ -290,7 +290,7 @@ class _ObraCalculadoraConfigSectionState extends State<ObraCalculadoraConfigSect
           onPick: (id) => widget.onChanged(telhaProdutoId: id),
         ),
         _linhaProduto(
-          rotulo: 'Ferro (KG, opcional fundacao)',
+          rotulo: 'Ferro (KG, opcional fundação)',
           produtoId: widget.ferroProdutoId,
           onPick: (id) => widget.onChanged(ferroProdutoId: id),
         ),
@@ -351,7 +351,7 @@ class _ObraCalculadoraConfigSectionState extends State<ObraCalculadoraConfigSect
                 controller: _m2CaixaController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
-                  labelText: 'm² por caixa (padrao)',
+                  labelText: 'm² por caixa (padrão)',
                   isDense: true,
                 ),
                 onChanged: (v) {
@@ -417,7 +417,7 @@ class _ObraCalculadoraConfigSectionState extends State<ObraCalculadoraConfigSect
           onChanged: (v) => widget.onChanged(geminiParseAtivo: v),
           title: const Text('Interpretar texto com Gemini (opcional)'),
           subtitle: const Text(
-            'Quando o regex local nao entender, tenta Gemini so para extrair dimensoes.',
+            'Quando o regex local não entender, tenta Gemini só para extrair dimensões.',
           ),
         ),
         const Divider(height: 24),
@@ -433,13 +433,13 @@ class _ObraCalculadoraConfigSectionState extends State<ObraCalculadoraConfigSect
             TextButton.icon(
               onPressed: _importarPadroesLoja,
               icon: const Icon(Icons.download_outlined, size: 18),
-              label: const Text('Importar padroes'),
+              label: const Text('Importar padrões'),
             ),
           ],
         ),
         if (templates.isEmpty)
           Text(
-            'Nenhum template. Importe os padroes da loja ou salve no PDV.',
+            'Nenhum template. Importe os padrões da loja ou salve no PDV.',
             style: Theme.of(context).textTheme.bodySmall,
           )
         else

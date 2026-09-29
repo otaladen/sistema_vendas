@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../domain/backup_historico_item.dart';
 import '../domain/local_backup_escopo.dart';
 import 'local_backup_cadastro_produtos_service.dart';
+import 'local_backup_copy.dart';
 import 'local_backup_service.dart';
 import 'local_backup_validation.dart';
 
@@ -55,30 +56,54 @@ class BackupHistoricoService {
     var criadoEm = _dataDoNomePasta(p.basename(pasta.path));
     LocalBackupTipo? tipo;
     var tamanhoKb = 0.0;
+    var tamanhoPastaKb = 0.0;
     var empresa = '';
     var valido = false;
     var escopo = LocalBackupEscopo.completo;
+    Map<String, dynamic>? manifestMap;
 
     final manifestFile = File(
       p.join(pasta.path, LocalBackupService.manifestFileName),
     );
     if (manifestFile.existsSync()) {
       try {
-        final map = jsonDecode(manifestFile.readAsStringSync()) as Map;
-        final criadoRaw = map['criadoEm']?.toString();
-        if (criadoRaw != null && criadoRaw.isNotEmpty) {
-          criadoEm = DateTime.tryParse(criadoRaw) ?? criadoEm;
+        final map = jsonDecode(manifestFile.readAsStringSync());
+        if (map is Map) {
+          manifestMap = Map<String, dynamic>.from(map);
+          final criadoRaw = manifestMap['criadoEm']?.toString();
+          if (criadoRaw != null && criadoRaw.isNotEmpty) {
+            criadoEm = DateTime.tryParse(criadoRaw) ?? criadoEm;
+          }
+          final tipoRaw = manifestMap['tipo']?.toString();
+          if (tipoRaw == LocalBackupTipo.manual.name) {
+            tipo = LocalBackupTipo.manual;
+          } else if (tipoRaw == LocalBackupTipo.automatico.name) {
+            tipo = LocalBackupTipo.automatico;
+          }
+          tamanhoKb = (manifestMap['tamanhoBancoKb'] as num?)?.toDouble() ?? 0;
+          tamanhoPastaKb =
+              (manifestMap['tamanhoPastaKb'] as num?)?.toDouble() ?? 0;
+          empresa = manifestMap['empresa']?.toString() ?? '';
+          escopo = localBackupEscopoFromManifest(manifestMap['escopo']);
         }
-        final tipoRaw = map['tipo']?.toString();
-        if (tipoRaw == LocalBackupTipo.manual.name) {
-          tipo = LocalBackupTipo.manual;
-        } else if (tipoRaw == LocalBackupTipo.automatico.name) {
-          tipo = LocalBackupTipo.automatico;
-        }
-        tamanhoKb = (map['tamanhoBancoKb'] as num?)?.toDouble() ?? 0;
-        empresa = map['empresa']?.toString() ?? '';
-        escopo = localBackupEscopoFromManifest(map['escopo']);
       } catch (_) {}
+    }
+
+    if (tamanhoPastaKb <= 0 && pasta.existsSync()) {
+      final bytes = await tamanhoDiretorioBytes(pasta);
+      if (bytes > 0) {
+        tamanhoPastaKb = bytes / 1024.0;
+        final gravado = manifestMap;
+        if (gravado != null) {
+          gravado['tamanhoPastaKb'] =
+              double.parse(tamanhoPastaKb.toStringAsFixed(2));
+          try {
+            await manifestFile.writeAsString(
+              const JsonEncoder.withIndent('  ').convert(gravado),
+            );
+          } catch (_) {}
+        }
+      }
     }
 
     try {
@@ -112,6 +137,7 @@ class BackupHistoricoService {
       criadoEm: criadoEm,
       tipo: tipo,
       tamanhoBancoKb: tamanhoKb,
+      tamanhoPastaKb: tamanhoPastaKb,
       empresa: empresa,
       valido: valido,
       pastaRaiz: pastaRaiz,

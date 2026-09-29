@@ -1,3 +1,5 @@
+import 'produto_categorias_catalogo.dart';
+
 /// Resultado estruturado da padronizacao de produto via Gemini.
 class ProdutoPadronizadoGemini {
   const ProdutoPadronizadoGemini({
@@ -24,14 +26,10 @@ class ProdutoPadronizadoGemini {
   /// `tributado`, `isento` ou `substituicao_tributaria`.
   final String grupoTributario;
 
-  static const categoriasPermitidas = <String>[
-    'Hidráulica',
-    'Elétrica',
-    'Ferramentas',
-    'Tintas',
-    'Ferragens',
-    'Outros',
-  ];
+  static final List<String> categoriasPermitidas =
+      ProdutoCategoriasCatalogo.materiaisConstrucao.keys.toList(
+        growable: false,
+      );
 
   static const unidadesPermitidas = <String>[
     'UN',

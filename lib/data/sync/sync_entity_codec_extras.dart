@@ -650,9 +650,12 @@ class SyncEntityCodecExtras {
         'pdvExigirClienteRetiradaFutura': c.pdvExigirClienteRetiradaFutura,
         'caixaFiscalNaoBloqueante': c.caixaFiscalNaoBloqueante,
         'caixaLimiteOrcamentosPendentes': c.caixaLimiteOrcamentosPendentes,
+        'caixaSangriaLimiteSemSupervisor': c.caixaSangriaLimiteSemSupervisor,
+        'caixaGavetaSemVendaExigeSenha': c.caixaGavetaSemVendaExigeSenha,
         'backupAutomaticoAtivo': c.backupAutomaticoAtivo,
         'backupAutomaticoIntervaloMinutos': c.backupAutomaticoIntervaloMinutos,
         'backupRetencaoMaxCopias': c.backupRetencaoMaxCopias,
+        'backupRetencaoCompletos': c.backupRetencaoCompletos,
         'backupSegundoDestinoAtivo': c.backupSegundoDestinoAtivo,
         'layoutImpressaoJson': c.layoutImpressaoJson,
         'auditoriaRetencaoDias': c.auditoriaRetencaoDias,
@@ -742,6 +745,14 @@ class SyncEntityCodecExtras {
         if (v == null) return base.caixaLimiteOrcamentosPendentes;
         return v.clamp(20, 500);
       }(),
+      caixaSangriaLimiteSemSupervisor: () {
+        final v = (m['caixaSangriaLimiteSemSupervisor'] as num?)?.toDouble();
+        if (v == null) return base.caixaSangriaLimiteSemSupervisor;
+        return v.clamp(0, 999999).toDouble();
+      }(),
+      caixaGavetaSemVendaExigeSenha:
+          m['caixaGavetaSemVendaExigeSenha'] as bool? ??
+              base.caixaGavetaSemVendaExigeSenha,
       backupAutomaticoAtivo:
           m['backupAutomaticoAtivo'] as bool? ?? base.backupAutomaticoAtivo,
       backupAutomaticoIntervaloMinutos:
@@ -750,6 +761,10 @@ class SyncEntityCodecExtras {
       backupRetencaoMaxCopias: BackupRetencaoOpcoes.normalizar(
         (m['backupRetencaoMaxCopias'] as num?)?.toInt() ??
             base.backupRetencaoMaxCopias,
+      ),
+      backupRetencaoCompletos: BackupRetencaoCompletosOpcoes.normalizar(
+        (m['backupRetencaoCompletos'] as num?)?.toInt() ??
+            base.backupRetencaoCompletos,
       ),
       backupSegundoDestinoAtivo:
           m['backupSegundoDestinoAtivo'] as bool? ??

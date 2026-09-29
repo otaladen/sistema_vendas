@@ -396,11 +396,14 @@ class VendaApiRepository extends ChangeNotifier {
       filtroFiscal: 'todos',
     );
     final filtradas = ListagemVendasBuscaRelevancia.ordenar(
-      ListagemVendasDedupe.sanitizar(
-        todas.where((v) => _correspondeFiltroFiscalListagem(
-              v,
-              filtroFiscal,
-            )),
+      ListagemVendasBuscaRelevancia.somenteCorrespondenciasExatas(
+        ListagemVendasDedupe.sanitizar(
+          todas.where((v) => _correspondeFiltroFiscalListagem(
+                v,
+                filtroFiscal,
+              )),
+        ),
+        textoBusca: busca,
       ),
       textoBusca: busca,
     );
@@ -1035,16 +1038,22 @@ class VendaApiRepository extends ChangeNotifier {
         }
       }
       if (textoBusca.isNotEmpty) {
-        final id = '${v.id}';
-        final controle =
-            v.numeroControle > 0 ? '${v.numeroControle}' : '';
-        final orc =
-            v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '';
-        final cli = _nomeCliente(v.cliente.targetId).toLowerCase();
-        final hay =
-            '$id $controle $orc ${v.nfceNumero} ${v.nfeNumero} $cli'
-                .toLowerCase();
-        if (!hay.contains(textoBusca)) return false;
+        if (ListagemVendasBuscaRelevancia.buscaSomenteNumeros(textoBusca)) {
+          if (!ListagemVendasBuscaRelevancia.correspondeExato(v, textoBusca)) {
+            return false;
+          }
+        } else {
+          final id = '${v.id}';
+          final controle =
+              v.numeroControle > 0 ? '${v.numeroControle}' : '';
+          final orc =
+              v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '';
+          final cli = _nomeCliente(v.cliente.targetId).toLowerCase();
+          final hay =
+              '$id $controle $orc ${v.nfceNumero} ${v.nfeNumero} $cli'
+                  .toLowerCase();
+          if (!hay.contains(textoBusca)) return false;
+        }
       }
       return true;
     }).toList();

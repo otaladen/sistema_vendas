@@ -20,10 +20,46 @@ void main() {
     );
   });
 
-  test('automaticos excluem cadastro', () {
+  test('parse sem imagens', () {
     expect(
-      localBackupEscoposAutomaticos(),
-      isNot(contains(LocalBackupEscopo.cadastroProdutos)),
+      localBackupEscopoFromManifest('sem_imagens'),
+      LocalBackupEscopo.semImagens,
+    );
+    expect(
+      localBackupEscopoFromManifest('sem_fotos'),
+      LocalBackupEscopo.semImagens,
+    );
+  });
+
+  test('manifesto sem escopo continua completo', () {
+    expect(localBackupEscopoFromManifest(null), LocalBackupEscopo.completo);
+    expect(localBackupEscopoFromManifest(''), LocalBackupEscopo.completo);
+  });
+
+  test('automaticos colocam o banco diario primeiro e excluem cadastro', () {
+    final autos = localBackupEscoposAutomaticos();
+    expect(autos.first, LocalBackupEscopo.somenteBanco);
+    expect(autos, contains(LocalBackupEscopo.semImagens));
+    expect(autos, contains(LocalBackupEscopo.completo));
+    expect(autos, isNot(contains(LocalBackupEscopo.cadastroProdutos)));
+  });
+
+  test('retencao separa leve e completo', () {
+    expect(
+      LocalBackupEscopo.somenteBanco.classeRetencao,
+      BackupClasseRetencao.leve,
+    );
+    expect(
+      LocalBackupEscopo.semImagens.classeRetencao,
+      BackupClasseRetencao.leve,
+    );
+    expect(
+      LocalBackupEscopo.completo.classeRetencao,
+      BackupClasseRetencao.completo,
+    );
+    expect(
+      LocalBackupEscopo.cadastroProdutos.classeRetencao,
+      BackupClasseRetencao.outro,
     );
   });
 }

@@ -21,11 +21,15 @@ abstract final class ConfigSecoes {
   static const breakpointRail = 900.0;
   static const maxLarguraConteudo = 880.0;
 
+  /// Secoes com muitos cartoes usam duas colunas em monitor de balcao.
+  static const maxLarguraConteudoAmplo = 1340.0;
+  static const breakpointDuasColunas = 1120.0;
+
   static const List<ConfigSecaoInfo> todas = [
     ConfigSecaoInfo(
       id: 'empresa',
       titulo: 'Empresa',
-      descricao: 'Nome, contato e endereco',
+      descricao: 'Nome, contato e endereço',
       icon: Icons.storefront_outlined,
     ),
     ConfigSecaoInfo(
@@ -37,18 +41,18 @@ abstract final class ConfigSecoes {
     ConfigSecaoInfo(
       id: 'caixa',
       titulo: 'Caixa',
-      descricao: 'Fechamento, fila e autorizacoes',
+      descricao: 'Fechamento, fila e autorizações',
       icon: Icons.payments_outlined,
     ),
     ConfigSecaoInfo(
       id: 'fiscal',
       titulo: 'Fiscal e IA',
-      descricao: 'NFC-e, NF-e e padronizacao',
+      descricao: 'NFC-e, NF-e e padronização',
       icon: Icons.receipt_long_outlined,
     ),
     ConfigSecaoInfo(
       id: 'impressao',
-      titulo: 'Impressao',
+      titulo: 'Impressão',
       descricao: 'PDF, cupom e impressora',
       icon: Icons.print_outlined,
     ),
@@ -60,14 +64,14 @@ abstract final class ConfigSecoes {
     ),
     ConfigSecaoInfo(
       id: 'backup',
-      titulo: 'Backup e seguranca',
-      descricao: 'Copias, restauracao e protecao dos dados',
+      titulo: 'Backup e segurança',
+      descricao: 'Cópias, restauração e proteção dos dados',
       icon: Icons.backup_outlined,
     ),
     ConfigSecaoInfo(
       id: 'sistema',
       titulo: 'Sistema',
-      descricao: 'Data, hora e diagnostico',
+      descricao: 'Data, hora e diagnóstico',
       icon: Icons.schedule_outlined,
     ),
   ];

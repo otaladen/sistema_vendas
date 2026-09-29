@@ -68,6 +68,7 @@ class EmpresaConfig {
     this.backupAutomaticoIntervaloMinutos = 1440,
     this.ultimoBackupAutomaticoMs = 0,
     this.backupRetencaoMaxCopias = 15,
+    this.backupRetencaoCompletos = 4,
     this.backupSegundoDestinoAtivo = false,
     this.backupSegundoDestinoPasta = '',
     this.layoutImpressaoJson = '',
@@ -121,6 +122,12 @@ class EmpresaConfig {
     /// Caixa: maximo de orcamentos pendentes carregados na memoria.
     this.caixaLimiteOrcamentosPendentes = 120,
 
+    /// Caixa: sangria ate este valor (R$) sem supervisor. 0 = sempre pede senha.
+    this.caixaSangriaLimiteSemSupervisor = 200,
+
+    /// Caixa: botao de abrir gaveta sem venda exige login de supervisor.
+    this.caixaGavetaSemVendaExigeSenha = true,
+
     /// PDV: obriga escolher vendedor antes de enviar orcamento ao caixa.
     this.pdvExigirVendedor = false,
 
@@ -134,7 +141,7 @@ class EmpresaConfig {
     this.pdvBloqueioVendedorAposOrcamento = false,
 
     /// PDV: itens em retirada futura exigem cliente cadastrado (como carreto).
-    this.pdvExigirClienteRetiradaFutura = false,
+    this.pdvExigirClienteRetiradaFutura = true,
 
     /// Calculadora de obra (PDV): IDs de produto padrao (0 = nao configurado).
     this.obraCalcTijoloProdutoId = 0,
@@ -212,8 +219,11 @@ class EmpresaConfig {
   /// `DateTime.now().millisecondsSinceEpoch` do ultimo backup automatico bem-sucedido.
   final int ultimoBackupAutomaticoMs;
 
-  /// Quantidade maxima de pastas backup_sistema_vendas_* por pasta de destino (0 = ilimitado).
+  /// Quantidade maxima de backups leves (so banco / sem fotos) por pasta (0 = ilimitado).
   final int backupRetencaoMaxCopias;
+
+  /// Quantidade maxima de backups completos (com fotos) por pasta (0 = ilimitado).
+  final int backupRetencaoCompletos;
 
   /// Espelha cada backup na pasta [backupSegundoDestinoPasta] (rede/nuvem/servidor).
   final bool backupSegundoDestinoAtivo;
@@ -263,6 +273,8 @@ class EmpresaConfig {
   final bool pdvPularDialogOrcamentoSalvo;
   final bool caixaFiscalNaoBloqueante;
   final int caixaLimiteOrcamentosPendentes;
+  final double caixaSangriaLimiteSemSupervisor;
+  final bool caixaGavetaSemVendaExigeSenha;
   final bool pdvExigirVendedor;
   final bool pdvBloqueioVendedor;
   final int pdvBloqueioVendedorInatividadeMinutos;
@@ -326,6 +338,7 @@ class EmpresaConfig {
     int? backupAutomaticoIntervaloMinutos,
     int? ultimoBackupAutomaticoMs,
     int? backupRetencaoMaxCopias,
+    int? backupRetencaoCompletos,
     bool? backupSegundoDestinoAtivo,
     String? backupSegundoDestinoPasta,
     String? layoutImpressaoJson,
@@ -349,6 +362,8 @@ class EmpresaConfig {
     bool? pdvPularDialogOrcamentoSalvo,
     bool? caixaFiscalNaoBloqueante,
     int? caixaLimiteOrcamentosPendentes,
+    double? caixaSangriaLimiteSemSupervisor,
+    bool? caixaGavetaSemVendaExigeSenha,
     bool? pdvExigirVendedor,
     bool? pdvBloqueioVendedor,
     int? pdvBloqueioVendedorInatividadeMinutos,
@@ -417,6 +432,9 @@ class EmpresaConfig {
       backupRetencaoMaxCopias: backupRetencaoMaxCopias != null
           ? BackupRetencaoOpcoes.normalizar(backupRetencaoMaxCopias)
           : this.backupRetencaoMaxCopias,
+      backupRetencaoCompletos: backupRetencaoCompletos != null
+          ? BackupRetencaoCompletosOpcoes.normalizar(backupRetencaoCompletos)
+          : this.backupRetencaoCompletos,
       backupSegundoDestinoAtivo:
           backupSegundoDestinoAtivo ?? this.backupSegundoDestinoAtivo,
       backupSegundoDestinoPasta:
@@ -471,6 +489,11 @@ class EmpresaConfig {
       caixaLimiteOrcamentosPendentes: caixaLimiteOrcamentosPendentes != null
           ? caixaLimiteOrcamentosPendentes.clamp(20, 500)
           : this.caixaLimiteOrcamentosPendentes,
+      caixaSangriaLimiteSemSupervisor: caixaSangriaLimiteSemSupervisor != null
+          ? caixaSangriaLimiteSemSupervisor.clamp(0, 999999).toDouble()
+          : this.caixaSangriaLimiteSemSupervisor,
+      caixaGavetaSemVendaExigeSenha: caixaGavetaSemVendaExigeSenha ??
+          this.caixaGavetaSemVendaExigeSenha,
       pdvExigirVendedor: pdvExigirVendedor ?? this.pdvExigirVendedor,
       pdvBloqueioVendedor: pdvBloqueioVendedor ?? this.pdvBloqueioVendedor,
       pdvBloqueioVendedorInatividadeMinutos:
@@ -579,6 +602,8 @@ class AppConfigRepository {
       'config_ultimo_backup_manual_tamanho_kb_v1';
   static const _kBackupManualPastaPadrao = 'config_backup_manual_pasta_padrao_v1';
   static const _kBackupRetencaoMaxCopias = 'config_backup_retencao_max_copias_v1';
+  static const _kBackupRetencaoCompletos =
+      'config_backup_retencao_completos_v1';
   static const _kBackupSegundoDestinoAtivo = 'config_backup_segundo_destino_ativo_v1';
   static const _kBackupSegundoDestinoPasta = 'config_backup_segundo_destino_pasta_v1';
   static const _kBackupAoFecharAtivo = 'config_backup_ao_fechar_ativo_v1';
@@ -606,14 +631,20 @@ class AppConfigRepository {
       'config_pdv_pular_dialog_orcamento_salvo_v1';
   static const _kCaixaFiscalNaoBloqueante = 'config_caixa_fiscal_nao_bloqueante_v1';
   static const _kCaixaLimiteOrcamentos = 'config_caixa_limite_orcamentos_v1';
+  static const _kCaixaSangriaLimiteSemSupervisor =
+      'config_caixa_sangria_limite_sem_supervisor_v1';
+  static const _kCaixaGavetaSemVendaExigeSenha =
+      'config_caixa_gaveta_sem_venda_exige_senha_v1';
   static const _kPdvExigirVendedor = 'config_pdv_exigir_vendedor_v1';
   static const _kPdvBloqueioVendedor = 'config_pdv_bloqueio_vendedor_v1';
   static const _kPdvBloqueioVendedorInatividadeMinutos =
       'config_pdv_bloqueio_vendedor_inatividade_min_v1';
   static const _kPdvBloqueioVendedorAposOrcamento =
       'config_pdv_bloqueio_vendedor_apos_orcamento_v1';
+  /// v2: o valor gravado na v1 nunca chegou ao PDV (a regra era fixa em
+  /// "sempre exige cliente"). A chave nova ignora o antigo e mantem a exigencia.
   static const _kPdvExigirClienteRetiradaFutura =
-      'config_pdv_exigir_cliente_retirada_futura_v1';
+      'config_pdv_exigir_cliente_retirada_futura_v2';
   static const _kObraCalcTijoloProdutoId = 'config_obra_calc_tijolo_produto_id_v1';
   static const _kObraCalcCimentoProdutoId =
       'config_obra_calc_cimento_produto_id_v1';
@@ -691,6 +722,9 @@ class AppConfigRepository {
       backupRetencaoMaxCopias: BackupRetencaoOpcoes.normalizar(
         prefs.getInt(_kBackupRetencaoMaxCopias),
       ),
+      backupRetencaoCompletos: BackupRetencaoCompletosOpcoes.normalizar(
+        prefs.getInt(_kBackupRetencaoCompletos),
+      ),
       backupSegundoDestinoAtivo:
           prefs.getBool(_kBackupSegundoDestinoAtivo) ?? false,
       backupSegundoDestinoPasta:
@@ -730,6 +764,13 @@ class AppConfigRepository {
         if (n == null || n < 20) return 120;
         return n.clamp(20, 500);
       }(),
+      caixaSangriaLimiteSemSupervisor: () {
+        final v = prefs.getDouble(_kCaixaSangriaLimiteSemSupervisor);
+        if (v == null) return 200.0;
+        return v.clamp(0, 999999).toDouble();
+      }(),
+      caixaGavetaSemVendaExigeSenha:
+          prefs.getBool(_kCaixaGavetaSemVendaExigeSenha) ?? true,
       pdvExigirVendedor: prefs.getBool(_kPdvExigirVendedor) ?? false,
       pdvBloqueioVendedor: prefs.getBool(_kPdvBloqueioVendedor) ?? false,
       pdvBloqueioVendedorInatividadeMinutos:
@@ -737,7 +778,7 @@ class AppConfigRepository {
       pdvBloqueioVendedorAposOrcamento:
           prefs.getBool(_kPdvBloqueioVendedorAposOrcamento) ?? false,
       pdvExigirClienteRetiradaFutura:
-          prefs.getBool(_kPdvExigirClienteRetiradaFutura) ?? false,
+          prefs.getBool(_kPdvExigirClienteRetiradaFutura) ?? true,
       obraCalcTijoloProdutoId: prefs.getInt(_kObraCalcTijoloProdutoId) ?? 0,
       obraCalcCimentoProdutoId: prefs.getInt(_kObraCalcCimentoProdutoId) ?? 0,
       obraCalcAreiaProdutoId: prefs.getInt(_kObraCalcAreiaProdutoId) ?? 0,
@@ -904,6 +945,10 @@ class AppConfigRepository {
       _kBackupRetencaoMaxCopias,
       BackupRetencaoOpcoes.normalizar(config.backupRetencaoMaxCopias),
     );
+    await prefs.setInt(
+      _kBackupRetencaoCompletos,
+      BackupRetencaoCompletosOpcoes.normalizar(config.backupRetencaoCompletos),
+    );
     await prefs.setBool(
       _kBackupSegundoDestinoAtivo,
       config.backupSegundoDestinoAtivo,
@@ -943,6 +988,14 @@ class AppConfigRepository {
     await prefs.setInt(
       _kCaixaLimiteOrcamentos,
       config.caixaLimiteOrcamentosPendentes.clamp(20, 500),
+    );
+    await prefs.setDouble(
+      _kCaixaSangriaLimiteSemSupervisor,
+      config.caixaSangriaLimiteSemSupervisor.clamp(0, 999999),
+    );
+    await prefs.setBool(
+      _kCaixaGavetaSemVendaExigeSenha,
+      config.caixaGavetaSemVendaExigeSenha,
     );
     await prefs.setBool(_kPdvExigirVendedor, config.pdvExigirVendedor);
     await prefs.setBool(_kPdvBloqueioVendedor, config.pdvBloqueioVendedor);
@@ -1144,14 +1197,17 @@ class AppConfigRepository {
     await prefs.setBool(_kBackupAoFecharAtivo, ativo);
   }
 
-  /// Escopo dos backups automaticos, ao fechar e tarefa Windows (padrao: completo).
+  /// Escopo dos backups automaticos, ao fechar e tarefa Windows.
+  /// Sem preferencia gravada, o diario fica so no banco.
   Future<LocalBackupEscopo> carregarBackupAutomaticoEscopo() async {
     final prefs = await SharedPreferences.getInstance();
-    final escopo = localBackupEscopoFromManifest(
-      prefs.getString(_kBackupAutomaticoEscopo),
-    );
+    final raw = prefs.getString(_kBackupAutomaticoEscopo);
+    if (raw == null || raw.trim().isEmpty) {
+      return LocalBackupEscopo.somenteBanco;
+    }
+    final escopo = localBackupEscopoFromManifest(raw);
     if (!escopo.disponivelNoAutomatico) {
-      return LocalBackupEscopo.completo;
+      return LocalBackupEscopo.somenteBanco;
     }
     return escopo;
   }
