@@ -18,9 +18,6 @@ abstract final class PdvConsultaDetalheLinhaUtil {
     if (marca.isNotEmpty) partes.add(marca);
     final loc = produto.localizacao.trim();
     if (loc.isNotEmpty) partes.add('Loc. $loc');
-    if (produto.rotuloConversaoEmbalagem.isNotEmpty) {
-      partes.add(produto.rotuloConversaoEmbalagem);
-    }
     if (quantidadeNoOrcamento > 0) {
       partes.add(
         'Orc. ${ProdutoEmbalagem.formatarQuantidadeUnidadeVenda(produto, quantidadeNoOrcamento.toDouble())}',

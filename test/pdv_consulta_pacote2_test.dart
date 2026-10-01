@@ -26,7 +26,7 @@ Produto _produto({
     );
 
 void main() {
-  test('detalhe linha junta sku ean marca local embalagem orcamento', () {
+  test('detalhe linha junta sku ean marca local orcamento', () {
     final p = _produto();
     final texto = PdvConsultaDetalheLinhaUtil.montar(
       p,

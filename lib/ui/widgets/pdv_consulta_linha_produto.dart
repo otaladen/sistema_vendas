@@ -77,8 +77,7 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
   static const _tiposPreco = ['preco1', 'preco2', 'preco3'];
 
   static bool exibirBadgesCompactos(Produto produto) {
-    return produto.codigoInterno.trim().isNotEmpty ||
-        produto.rotuloConversaoEmbalagem.isNotEmpty;
+    return produto.codigoInterno.trim().isNotEmpty;
   }
 
   static double alturaPara({
@@ -284,7 +283,6 @@ class _BadgesCompactosLinha extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final sku = produto.codigoInterno.trim();
-    final emb = produto.rotuloConversaoEmbalagem.trim();
 
     return Wrap(
       spacing: 4,
@@ -295,12 +293,6 @@ class _BadgesCompactosLinha extends StatelessWidget {
             rotulo: sku,
             corFundo: scheme.secondaryContainer.withValues(alpha: 0.65),
             corTexto: scheme.onSecondaryContainer,
-          ),
-        if (emb.isNotEmpty)
-          _BadgeCompacto(
-            rotulo: emb,
-            corFundo: scheme.primaryContainer.withValues(alpha: 0.5),
-            corTexto: scheme.onPrimaryContainer,
           ),
       ],
     );
