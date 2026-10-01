@@ -90,20 +90,39 @@ class ProdutoEmbalagem {
     String? unidadeComercial,
     String? unidadeInterna,
   }) {
+    final uInt = normalizarUnidade(unidadeInterna);
+    if (unidadeVendaTipicamenteFracionada(uInt)) return true;
     if (quantidadeUnidadeVenda != quantidadeUnidadeVenda.roundToDouble()) {
-      return true;
+      // UN/PC etc.: decimal na nota arredonda no estoque, sem milésimos (evita 41,9 → 41900).
+      return false;
     }
     if (fator > 0 &&
         (fator - 1).abs() > 0.0001 &&
         fator != fator.roundToDouble()) {
-      return true;
+      return false;
     }
-    final uInt = normalizarUnidade(unidadeInterna);
-    return uInt == 'M' ||
-        uInt == 'M2' ||
-        uInt == 'M3' ||
-        uInt == 'KG' ||
-        uInt == 'LT';
+    return false;
+  }
+
+  /// Milésimos na NF-e so quando o cadastro/unidade exige estoque fracionado.
+  static bool notaGravaQuantidadeEmMilesimos({
+    Produto? produto,
+    required double quantidadeUnidadeVenda,
+    required double fator,
+    String? unidadeComercial,
+    String? unidadeInterna,
+  }) {
+    if (produto != null) {
+      if (estoqueUsaEscalaFracionada(produto)) return true;
+      if (unidadeVendaTipicamenteFracionada(produto.unidade)) return true;
+      return false;
+    }
+    return notaExigeEscalaEstoque(
+      quantidadeUnidadeVenda: quantidadeUnidadeVenda,
+      fator: fator,
+      unidadeComercial: unidadeComercial,
+      unidadeInterna: unidadeInterna,
+    );
   }
 
   /// Unidades de medida em que a venda decimal e o caso normal (4,2 M2; 1,5 M3).
@@ -138,15 +157,13 @@ class ProdutoEmbalagem {
       embalagemMultiplica: embalagemMultiplica,
     );
     if (bruto <= 0) return 0;
-    final fracionada = produto != null
-        ? estoqueUsaEscalaFracionada(produto) ||
-            exigeQuantidadeDecimalUnidadeVenda(produto, bruto)
-        : notaExigeEscalaEstoque(
-            quantidadeUnidadeVenda: bruto,
-            fator: fator,
-            unidadeComercial: unidadeComercial,
-            unidadeInterna: unidadeInterna,
-          );
+    final fracionada = notaGravaQuantidadeEmMilesimos(
+      produto: produto,
+      quantidadeUnidadeVenda: bruto,
+      fator: fator,
+      unidadeComercial: unidadeComercial,
+      unidadeInterna: unidadeInterna,
+    );
     if (fracionada) {
       return QuantidadeVendaUtil.paraArmazenamento(bruto, fracionada: true);
     }
@@ -211,17 +228,11 @@ class ProdutoEmbalagem {
     String? unidadeInterna,
     bool comUnidade = false,
   }) {
-    if (produto != null) {
-      return formatarEstoque(
-        produto,
-        estoqueArmazenado,
-        comUnidade: comUnidade,
-      );
-    }
-    final u = normalizarUnidade(unidadeInterna);
-    final fracionada = quantidadeUnidadeVenda !=
-            quantidadeUnidadeVenda.roundToDouble() ||
-        estoqueArmazenado >= QuantidadeVendaUtil.escalaFracionada;
+    final u = normalizarUnidade(produto?.unidade ?? unidadeInterna);
+    final fracionada =
+        quantidadeUnidadeVenda != quantidadeUnidadeVenda.roundToDouble() ||
+            (produto != null && estoqueUsaEscalaFracionada(produto)) ||
+            unidadeVendaTipicamenteFracionada(u);
     final txt = QuantidadeVendaUtil.formatarExibicao(
       quantidadeUnidadeVenda,
       fracionada: fracionada,

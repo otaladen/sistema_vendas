@@ -1,9 +1,112 @@
 import '../model/item_nota_temporario.dart';
 import '../model/produto.dart';
 import 'produto_embalagem.dart';
+import 'quantidade_venda_util.dart';
+
+/// Severidade de divergencia entre qtd. da nota e entrada calculada.
+enum NfeEntradaNivelDiscrepancia { nenhum, atencao, grave }
+
+/// Resultado da checagem de seguranca na conferencia NF-e.
+class NfeEntradaDiscrepanciaEntrada {
+  const NfeEntradaDiscrepanciaEntrada({
+    required this.nivel,
+    required this.mensagem,
+  });
+
+  final NfeEntradaNivelDiscrepancia nivel;
+  final String mensagem;
+
+  bool get bloqueiaConfirmacao => nivel == NfeEntradaNivelDiscrepancia.grave;
+}
 
 /// Regras de conversao e custo na entrada de NF-e (conferencia + persistencia).
 abstract final class NfeEntradaConversaoUtil {
+  static const double _razaoDiscrepanciaAtencao = 10;
+  static const double _razaoDiscrepanciaGrave = 100;
+  static const double _entradaAltaUn = 1000;
+
+  /// Parse decimal PT-BR/EN para fator e quantidades digitadas (41,9 / 41.9).
+  static double parseDecimalTexto(String texto) {
+    final t = texto
+        .trim()
+        .replaceAll(RegExp(r'[\s\u00A0\u202F]'), '')
+        .replaceAll(',', '.');
+    if (t.isEmpty) return 0;
+    final v = double.tryParse(t);
+    if (v == null || !v.isFinite) return 0;
+    return v;
+  }
+
+  /// [quantidadeEntrada] = qtd. nota × fator (ou ÷), na unidade de estoque.
+  static double quantidadeEntradaUnidadeVenda({
+    required double quantidadeNota,
+    required double fatorConversao,
+    required bool embalagemMultiplica,
+  }) {
+    return ProdutoEmbalagem.quantidadeNotaParaUnidadeVenda(
+      quantidadeComercial: quantidadeNota,
+      fator: fatorConversao,
+      embalagemMultiplica: embalagemMultiplica,
+    );
+  }
+
+  /// Detecta fator/quantidade incoerentes (ex.: 41,9 UN virando 41900).
+  static NfeEntradaDiscrepanciaEntrada avaliarDiscrepanciaQuantidadeEntrada({
+    required double quantidadeNota,
+    required double quantidadeEntradaUnidadeVenda,
+    required double fatorConversao,
+  }) {
+    if (!quantidadeNota.isFinite ||
+        !quantidadeEntradaUnidadeVenda.isFinite ||
+        !fatorConversao.isFinite ||
+        quantidadeNota <= 0 ||
+        quantidadeEntradaUnidadeVenda <= 0 ||
+        fatorConversao <= 0) {
+      return const NfeEntradaDiscrepanciaEntrada(
+        nivel: NfeEntradaNivelDiscrepancia.nenhum,
+        mensagem: '',
+      );
+    }
+
+    final razao = quantidadeEntradaUnidadeVenda / quantidadeNota;
+    final fatorUnitario = (fatorConversao - 1).abs() < 0.0001;
+    final escalaMilErrada =
+        fatorUnitario && razao >= QuantidadeVendaUtil.escalaFracionada * 0.9;
+
+    if (escalaMilErrada ||
+        (razao >= _razaoDiscrepanciaGrave && fatorUnitario)) {
+      return NfeEntradaDiscrepanciaEntrada(
+        nivel: NfeEntradaNivelDiscrepancia.grave,
+        mensagem:
+            'Entrada ${quantidadeEntradaUnidadeVenda.toStringAsFixed(3)} '
+            'para ${quantidadeNota.toStringAsFixed(3)} na nota '
+            '(~${razao.toStringAsFixed(0)}×). Revise fator/conversao.',
+      );
+    }
+
+    final coerenteComFator =
+        (razao - fatorConversao).abs() <= (fatorConversao.abs() * 0.02 + 0.05);
+    final entradaAltaDesproporcional =
+        quantidadeEntradaUnidadeVenda >= _entradaAltaUn &&
+            razao >= _razaoDiscrepanciaAtencao &&
+            !coerenteComFator;
+    if (!coerenteComFator &&
+        (fatorUnitario && razao >= _razaoDiscrepanciaAtencao ||
+            entradaAltaDesproporcional)) {
+      return NfeEntradaDiscrepanciaEntrada(
+        nivel: NfeEntradaNivelDiscrepancia.atencao,
+        mensagem:
+            'Entrada muito acima da nota (~${razao.toStringAsFixed(1)}×). '
+            'Confira qtd. na embalagem.',
+      );
+    }
+
+    return const NfeEntradaDiscrepanciaEntrada(
+      nivel: NfeEntradaNivelDiscrepancia.nenhum,
+      mensagem: '',
+    );
+  }
+
   /// Fator sugerido na conferencia (vinculo, cadastro, XML uCom/uTrib, unidades conhecidas).
   static double fatorInicialConferencia({
     required ItemNotaTemporario item,

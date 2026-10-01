@@ -322,13 +322,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
         .replaceFirst(RegExp(r'\.$'), '');
   }
 
-  static double _lerFator(String texto) {
-    final v = double.tryParse(texto.trim().replaceAll(',', '.'));
-    if (v == null || !v.isFinite) {
-      return 0;
-    }
-    return v;
-  }
+  static double _lerFator(String texto) =>
+      NfeEntradaConversaoUtil.parseDecimalTexto(texto);
 
   Produto? _produtoDestinoLinha(_LinhaEdicao linha) {
     final id = linha.produtoDestinoId();
@@ -521,11 +516,28 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     return (custoXml - p.precoCusto) / p.precoCusto > 0.05;
   }
 
+  NfeEntradaDiscrepanciaEntrada _discrepanciaEntradaLinha(_LinhaEdicao linha) {
+    final item = linha.sugestao.item;
+    final f = _lerFator(linha.fatorCtrl.text);
+    final qtdEntrada = NfeEntradaConversaoUtil.quantidadeEntradaUnidadeVenda(
+      quantidadeNota: item.quantidadeComercial,
+      fatorConversao: f,
+      embalagemMultiplica: linha.embalagemMultiplica,
+    );
+    return NfeEntradaConversaoUtil.avaliarDiscrepanciaQuantidadeEntrada(
+      quantidadeNota: item.quantidadeComercial,
+      quantidadeEntradaUnidadeVenda: qtdEntrada,
+      fatorConversao: f,
+    );
+  }
+
   bool _linhaPrecisaAtencao(_LinhaEdicao linha) =>
       _linhaEhNovo(linha) ||
       !_linhaFatorValido(linha) ||
       _linhaMargemAbaixoMinimo(linha) ||
-      _linhaCustoAumentou(linha);
+      _linhaCustoAumentou(linha) ||
+      _discrepanciaEntradaLinha(linha).nivel !=
+          NfeEntradaNivelDiscrepancia.nenhum;
 
   bool _linhaPronta(_LinhaEdicao linha) =>
       _linhaFatorValido(linha) &&
@@ -1180,6 +1192,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     final linha = _linhas[index];
     final item = linha.sugestao.item;
     final status = _coresStatusChip(context, linha);
+    final discrepancia = _discrepanciaEntradaLinha(linha);
     return ConferenciaNfeTabelaLinha(
       indice: index,
       numeroItem: item.numeroItem,
@@ -1192,6 +1205,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       statusCor: status.bg,
       statusCorTexto: status.fg,
       entradaRotulo: _rotuloEntradaEstoque(linha),
+      discrepanciaEntrada: discrepancia.nivel,
+      discrepanciaMensagem: discrepancia.mensagem,
       unidadeInterna: _unidadeEstoqueLinha(linha),
       unidadeTravada: _linhaUnidadeCadastroTravada(linha),
       fatorController: linha.fatorCtrl,
@@ -1992,10 +2007,83 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
     return const [];
   }
 
+  Future<bool> _confirmarDiscrepanciasEntrada() async {
+    final alertas = <String>[];
+    final graves = <String>[];
+    for (final linha in _linhas) {
+      final d = _discrepanciaEntradaLinha(linha);
+      if (d.nivel == NfeEntradaNivelDiscrepancia.nenhum) continue;
+      final item = linha.sugestao.item;
+      final rotulo = item.descricao.length > 40
+          ? '${item.descricao.substring(0, 40)}…'
+          : item.descricao;
+      final msg = '$rotulo: ${d.mensagem}';
+      if (d.bloqueiaConfirmacao) {
+        graves.add(msg);
+      } else {
+        alertas.add(msg);
+      }
+    }
+    if (graves.isNotEmpty) {
+      if (!mounted) return false;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(Icons.block, color: Theme.of(ctx).colorScheme.error),
+          title: const Text('Entrada bloqueada'),
+          content: SingleChildScrollView(
+            child: Text(
+              'A quantidade calculada esta incoerente com a nota. '
+              'Corrija o fator ou a conversao antes de confirmar.\n\n'
+              '${graves.join('\n')}',
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Entendi'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+    if (alertas.isEmpty) return true;
+    if (!mounted) return false;
+    final seguir = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          Icons.warning_amber_rounded,
+          color: Theme.of(ctx).colorScheme.tertiary,
+        ),
+        title: const Text('Conferir quantidades'),
+        content: SingleChildScrollView(
+          child: Text(
+            'Ha itens com entrada muito acima da quantidade da nota. '
+            'Deseja confirmar mesmo assim?\n\n${alertas.join('\n')}',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Revisar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmar assim'),
+          ),
+        ],
+      ),
+    );
+    return seguir == true;
+  }
+
   Future<void> _confirmar() async {
     for (final linha in _linhas) {
       linha.erroValidacao = null;
     }
+    if (!await _confirmarDiscrepanciasEntrada()) return;
     String? erroGlobal;
     final confirmacoes = <ConferenciaNfeLinhaConfirmacao>[];
     for (final linha in _linhas) {

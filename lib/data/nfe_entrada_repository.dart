@@ -616,6 +616,24 @@ class NfeEntradaRepository {
           throw StateError('Unidade de estoque invalida: $unidadeEstoque');
         }
 
+        final qtdEntradaUn = NfeEntradaConversaoUtil.quantidadeEntradaUnidadeVenda(
+          quantidadeNota: linha.item.quantidadeComercial,
+          fatorConversao: fator,
+          embalagemMultiplica: embalagemMultiplica,
+        );
+        final discrepancia =
+            NfeEntradaConversaoUtil.avaliarDiscrepanciaQuantidadeEntrada(
+          quantidadeNota: linha.item.quantidadeComercial,
+          quantidadeEntradaUnidadeVenda: qtdEntradaUn,
+          fatorConversao: fator,
+        );
+        if (discrepancia.bloqueiaConfirmacao) {
+          throw StateError(
+            'Quantidade de entrada incoerente (${linha.item.codigo}): '
+            '${discrepancia.mensagem}',
+          );
+        }
+
         final qtdInterna = ProdutoEmbalagem.quantidadeNotaParaEstoque(
           quantidadeComercial: linha.item.quantidadeComercial,
           fator: fator,

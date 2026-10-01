@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../data/nfe_entrada_repository.dart';
+import '../../../domain/nfe_entrada_conversao_util.dart';
 
 /// Linha resumida para a grade de conferencia (desktop).
 class ConferenciaNfeTabelaLinha {
@@ -17,6 +18,8 @@ class ConferenciaNfeTabelaLinha {
     required this.statusCor,
     required this.statusCorTexto,
     required this.entradaRotulo,
+    this.discrepanciaEntrada = NfeEntradaNivelDiscrepancia.nenhum,
+    this.discrepanciaMensagem = '',
     required this.unidadeInterna,
     required this.unidadeTravada,
     required this.fatorController,
@@ -38,6 +41,8 @@ class ConferenciaNfeTabelaLinha {
   final Color statusCor;
   final Color statusCorTexto;
   final String entradaRotulo;
+  final NfeEntradaNivelDiscrepancia discrepanciaEntrada;
+  final String discrepanciaMensagem;
   final String unidadeInterna;
   final bool unidadeTravada;
   final TextEditingController fatorController;
@@ -167,15 +172,7 @@ class ConferenciaNfeTabelaItens extends StatelessWidget {
                     ),
                     DataCell(_celulaUnidade(context, l)),
                     DataCell(_celulaEmbalagem(context, l)),
-                    DataCell(
-                      Text(
-                        l.entradaRotulo,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: cs.primary,
-                        ),
-                      ),
-                    ),
+                    DataCell(_celulaEntrada(context, l)),
                     DataCell(
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -283,9 +280,42 @@ class ConferenciaNfeTabelaItens extends StatelessWidget {
     );
   }
 
+  Widget _celulaEntrada(BuildContext context, ConferenciaNfeTabelaLinha l) {
+    final cs = Theme.of(context).colorScheme;
+    final grave = l.discrepanciaEntrada == NfeEntradaNivelDiscrepancia.grave;
+    final atencao = l.discrepanciaEntrada == NfeEntradaNivelDiscrepancia.atencao;
+    Color? fundo;
+    Color? texto = cs.primary;
+    if (grave) {
+      fundo = cs.errorContainer.withValues(alpha: 0.55);
+      texto = cs.onErrorContainer;
+    } else if (atencao) {
+      fundo = cs.tertiaryContainer.withValues(alpha: 0.65);
+      texto = cs.onTertiaryContainer;
+    }
+    return Tooltip(
+      message: l.discrepanciaMensagem.isEmpty ? l.entradaRotulo : l.discrepanciaMensagem,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: fundo,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Text(
+            l.entradaRotulo,
+            style: TextStyle(fontWeight: FontWeight.w700, color: texto),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _celulaEmbalagem(BuildContext context, ConferenciaNfeTabelaLinha l) {
     final cs = Theme.of(context).colorScheme;
     final temErro = l.erroFator != null && l.erroFator!.isNotEmpty;
+    final discrepancia = l.discrepanciaEntrada != NfeEntradaNivelDiscrepancia.nenhum;
+    final grave = l.discrepanciaEntrada == NfeEntradaNivelDiscrepancia.grave;
     return Semantics(
       label: temErro ? l.erroFator : null,
       child: SizedBox(
@@ -314,13 +344,22 @@ class ConferenciaNfeTabelaItens extends StatelessWidget {
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide(
-                      color: temErro ? cs.error : cs.outlineVariant,
+                      color: temErro || grave
+                          ? cs.error
+                          : discrepancia
+                              ? cs.tertiary
+                              : cs.outlineVariant,
+                      width: discrepancia || temErro ? 1.5 : 1,
                     ),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide(
-                      color: temErro ? cs.error : cs.primary,
+                      color: temErro || grave
+                          ? cs.error
+                          : discrepancia
+                              ? cs.tertiary
+                              : cs.primary,
                       width: 1.5,
                     ),
                   ),
