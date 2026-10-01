@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:path/path.dart' as p;
 
@@ -26,9 +27,24 @@ bool nomeIgnoradoNoBackupLocal(String nome) {
   return nomesIgnoradosNoBackupLocal.contains(nome.toLowerCase());
 }
 
+/// Locks, temporarios e journals — nunca entram no backup.
+bool arquivoIgnoradoNoBackupLocal(String nome) {
+  final n = nome.toLowerCase();
+  if (n.endsWith('-lock') || n.endsWith('.lock')) return true;
+  if (n.endsWith('.tmp') || n.endsWith('.temp')) return true;
+  if (n.endsWith('.log')) return true;
+  if (n == 'lock.mdb' || n.startsWith('data.mdb-lock')) return true;
+  return false;
+}
+
 bool _nomeIgnoradoNaCopia(String nome, Set<String> extras) {
   final n = nome.toLowerCase();
   return nomesIgnoradosNoBackupLocal.contains(n) || extras.contains(n);
+}
+
+bool _entidadeIgnoradaNaCopia(String nome, Set<String> extras) {
+  return _nomeIgnoradoNaCopia(nome, extras) ||
+      arquivoIgnoradoNoBackupLocal(nome);
 }
 
 /// Na restauracao so logs (e pastas extras, ex.: fotos num backup sem imagens)
@@ -51,7 +67,7 @@ Future<int> contarArquivosRecursivo(
   var n = 0;
   await for (final entidade in origem.list(recursive: false)) {
     final nome = p.basename(entidade.path);
-    if (_nomeIgnoradoNaCopia(nome, ignorarNomes)) continue;
+    if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
     if (entidade is File) {
       n++;
     } else if (entidade is Directory) {
@@ -64,11 +80,86 @@ Future<int> contarArquivosRecursivo(
   return n;
 }
 
+Future<int> contarBytesArquivosRecursivo(
+  Directory origem, {
+  Set<String> ignorarNomes = const {},
+}) async {
+  if (!origem.existsSync()) return 0;
+  var total = 0;
+  await for (final entidade in origem.list(recursive: false)) {
+    final nome = p.basename(entidade.path);
+    if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
+    if (entidade is File) {
+      total += await _tamanhoArquivo(entidade);
+    } else if (entidade is Directory) {
+      total += await contarBytesArquivosRecursivo(
+        entidade,
+        ignorarNomes: ignorarNomes,
+      );
+    }
+  }
+  return total;
+}
+
+/// Diario leve: copia apenas [data.mdb] (sem locks/temporarios).
+Future<void> copiarObjectBoxSomenteBanco({
+  required Directory origem,
+  required Directory destino,
+  void Function(int bytesCopiados, int bytesTotal)? onProgressoBytes,
+}) async {
+  if (!origem.existsSync()) {
+    throw Exception('Pasta objectbox nao encontrada.');
+  }
+  final mdb = File(p.join(origem.path, 'data.mdb'));
+  if (!mdb.existsSync()) {
+    throw Exception('data.mdb nao encontrado na pasta objectbox.');
+  }
+  destino.createSync(recursive: true);
+  final destinoMdb = File(p.join(destino.path, 'data.mdb'));
+  await copiarArquivoComProgressoBytes(
+    origem: mdb,
+    destino: destinoMdb,
+    onProgressoBytes: onProgressoBytes,
+  );
+}
+
+Future<void> copiarArquivoComProgressoBytes({
+  required File origem,
+  required File destino,
+  void Function(int bytesCopiados, int bytesTotal)? onProgressoBytes,
+}) async {
+  final total = await origem.length();
+  if (total <= 0) {
+    await origem.copy(destino.path);
+    onProgressoBytes?.call(0, 0);
+    return;
+  }
+  const chunkBytes = 512 * 1024;
+  final leitura = await origem.open();
+  final escrita = await destino.open(mode: FileMode.write);
+  try {
+    var copiados = 0;
+    while (copiados < total) {
+      final ler = math.min(chunkBytes, total - copiados);
+      final buffer = await leitura.read(ler);
+      if (buffer.isEmpty) break;
+      await escrita.writeFrom(buffer);
+      copiados += buffer.length;
+      onProgressoBytes?.call(copiados, total);
+    }
+  } finally {
+    await leitura.close();
+    await escrita.close();
+  }
+}
+
 Future<int> tamanhoDiretorioBytes(Directory origem) async {
   if (!origem.existsSync()) return 0;
   var total = 0;
   await for (final entidade in origem.list(recursive: true, followLinks: false)) {
     if (entidade is! File) continue;
+    final nome = p.basename(entidade.path);
+    if (arquivoIgnoradoNoBackupLocal(nome)) continue;
     try {
       total += await entidade.length();
     } catch (_) {}
@@ -142,32 +233,100 @@ Future<void> copiarDiretorioRecursivo({
   required Directory origem,
   required Directory destino,
   void Function()? onArquivoCopiado,
+  void Function(int bytesCopiados, int bytesTotal)? onProgressoBytes,
+  int bytesCopiadosAcumulado = 0,
+  int? bytesTotalPrevisto,
   Set<String> ignorarNomes = const {},
 }) async {
   if (!origem.existsSync()) return;
   destino.createSync(recursive: true);
-  var n = 0;
+  var copiados = bytesCopiadosAcumulado;
+  final totalPrevisto = bytesTotalPrevisto;
   await for (final entidade in origem.list(recursive: false)) {
     final nome = p.basename(entidade.path);
-    if (_nomeIgnoradoNaCopia(nome, ignorarNomes)) continue;
+    if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
     final destinoPath = p.join(destino.path, nome);
     if (entidade is Directory) {
-      await copiarDiretorioRecursivo(
+      copiados = await _copiarSubdiretorioComProgresso(
         origem: entidade,
         destino: Directory(destinoPath),
-        onArquivoCopiado: onArquivoCopiado,
         ignorarNomes: ignorarNomes,
+        onArquivoCopiado: onArquivoCopiado,
+        onProgressoBytes: onProgressoBytes,
+        bytesCopiadosAcumulado: copiados,
+        bytesTotalPrevisto: totalPrevisto,
       );
     } else if (entidade is File) {
-      await entidade.copy(destinoPath);
-      onArquivoCopiado?.call();
-      n++;
-      // Libera o UI periodicamente em pastas grandes.
-      if (n % 8 == 0) {
-        await Future<void>.delayed(Duration.zero);
+      final tamanho = await _tamanhoArquivo(entidade);
+      if (onProgressoBytes != null && totalPrevisto != null && totalPrevisto > 0) {
+        await copiarArquivoComProgressoBytes(
+          origem: entidade,
+          destino: File(destinoPath),
+          onProgressoBytes: (parcial, _) {
+            onProgressoBytes(copiados + parcial, totalPrevisto);
+          },
+        );
+        copiados += tamanho;
+        onProgressoBytes(copiados, totalPrevisto);
+      } else {
+        await entidade.copy(destinoPath);
+        copiados += tamanho;
+        if (onProgressoBytes != null && totalPrevisto != null && totalPrevisto > 0) {
+          onProgressoBytes(copiados, totalPrevisto);
+        }
       }
+      onArquivoCopiado?.call();
     }
   }
+}
+
+Future<int> _copiarSubdiretorioComProgresso({
+  required Directory origem,
+  required Directory destino,
+  required Set<String> ignorarNomes,
+  void Function()? onArquivoCopiado,
+  void Function(int bytesCopiados, int bytesTotal)? onProgressoBytes,
+  required int bytesCopiadosAcumulado,
+  required int? bytesTotalPrevisto,
+}) async {
+  var copiados = bytesCopiadosAcumulado;
+  await for (final entidade in origem.list(recursive: false)) {
+    final nome = p.basename(entidade.path);
+    if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
+    final destinoPath = p.join(destino.path, nome);
+    if (entidade is Directory) {
+      destino.createSync(recursive: true);
+      copiados = await _copiarSubdiretorioComProgresso(
+        origem: entidade,
+        destino: Directory(destinoPath),
+        ignorarNomes: ignorarNomes,
+        onArquivoCopiado: onArquivoCopiado,
+        onProgressoBytes: onProgressoBytes,
+        bytesCopiadosAcumulado: copiados,
+        bytesTotalPrevisto: bytesTotalPrevisto,
+      );
+    } else if (entidade is File) {
+      final tamanho = await _tamanhoArquivo(entidade);
+      if (onProgressoBytes != null &&
+          bytesTotalPrevisto != null &&
+          bytesTotalPrevisto > 0) {
+        await copiarArquivoComProgressoBytes(
+          origem: entidade,
+          destino: File(destinoPath),
+          onProgressoBytes: (parcial, _) {
+            onProgressoBytes(copiados + parcial, bytesTotalPrevisto);
+          },
+        );
+        copiados += tamanho;
+        onProgressoBytes(copiados, bytesTotalPrevisto);
+      } else {
+        await entidade.copy(destinoPath);
+        copiados += tamanho;
+      }
+      onArquivoCopiado?.call();
+    }
+  }
+  return copiados;
 }
 
 /// Remove o conteudo de [diretorio], preservando logs e [preservarNomes].

@@ -55,12 +55,24 @@ class BackupConfiguracaoSection extends StatefulWidget {
 }
 
 class _ProgressoBackupUi {
-  const _ProgressoBackupUi({this.valor = 0, this.etapa = ''});
+  const _ProgressoBackupUi({
+    this.valor = 0,
+    this.etapa = '',
+    this.decorrido = Duration.zero,
+  });
 
   final double valor;
   final String etapa;
+  final Duration decorrido;
 
   int get percentual => (valor * 100).round().clamp(0, 100);
+
+  String get decorridoFormatado {
+    final s = decorrido.inSeconds;
+    final mm = (s ~/ 60).toString().padLeft(2, '0');
+    final ss = (s % 60).toString().padLeft(2, '0');
+    return '$mm:${ss}s';
+  }
 }
 
 class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
@@ -75,6 +87,8 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
       ValueNotifier(const _ProgressoBackupUi());
   bool _dialogoProgressoAberto = false;
   BuildContext? _ctxDialogoProgresso;
+  Stopwatch? _cronometroBackup;
+  Timer? _timerCronometroBackup;
 
   BackupRegistroManual _manual = const BackupRegistroManual();
   BackupStatusResumo? _status;
@@ -108,6 +122,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
 
   @override
   void dispose() {
+    _pararCronometroBackup();
     _progressoUi.dispose();
     super.dispose();
   }
@@ -648,19 +663,51 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     await WindowsBackupAoFecharWindowService.atualizarPreventClose();
   }
 
+  void _iniciarCronometroBackup() {
+    _pararCronometroBackup();
+    _cronometroBackup = Stopwatch()..start();
+    _timerCronometroBackup = Timer.periodic(const Duration(seconds: 1), (_) {
+      _repintarDecorridoBackup();
+    });
+  }
+
+  void _pararCronometroBackup() {
+    _timerCronometroBackup?.cancel();
+    _timerCronometroBackup = null;
+    _cronometroBackup?.stop();
+    _cronometroBackup = null;
+  }
+
+  void _repintarDecorridoBackup() {
+    final sw = _cronometroBackup;
+    if (sw == null) return;
+    final atual = _progressoUi.value;
+    _progressoUi.value = _ProgressoBackupUi(
+      valor: atual.valor,
+      etapa: atual.etapa,
+      decorrido: sw.elapsed,
+    );
+  }
+
   void _atualizarProgresso(double v, String etapa) {
     if (!mounted) return;
     final clamped = v.clamp(0.0, 1.0);
+    final decorrido = _cronometroBackup?.elapsed ?? _progressoUi.value.decorrido;
     setState(() {
       _progresso = clamped;
       _etapaProgresso = etapa;
     });
-    _progressoUi.value = _ProgressoBackupUi(valor: clamped, etapa: etapa);
+    _progressoUi.value = _ProgressoBackupUi(
+      valor: clamped,
+      etapa: etapa,
+      decorrido: decorrido,
+    );
   }
 
   Future<void> _abrirDialogoProgresso({required String titulo}) async {
     if (_dialogoProgressoAberto || !mounted) return;
     _dialogoProgressoAberto = true;
+    _iniciarCronometroBackup();
     final dialogoPronto = Completer<void>();
     unawaited(
       showDialog<void>(
@@ -697,7 +744,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                         ),
                         const SizedBox(height: 12),
                         LinearProgressIndicator(
-                          value: p.valor > 0 ? p.valor : null,
+                          value: p.valor.clamp(0.0, 1.0),
                           minHeight: 10,
                           borderRadius: BorderRadius.circular(6),
                         ),
@@ -706,6 +753,15 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                           p.etapa.isEmpty ? 'Preparando…' : p.etapa,
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          p.decorridoFormatado,
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
                         ),
                         const SizedBox(height: 6),
                         Text(
@@ -724,6 +780,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
           );
         },
       ).whenComplete(() {
+        _pararCronometroBackup();
         _dialogoProgressoAberto = false;
         _ctxDialogoProgresso = null;
       }),
@@ -2060,7 +2117,7 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
                   ),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
-                    value: _progresso > 0 ? _progresso : null,
+                    value: _progresso.clamp(0.0, 1.0),
                     minHeight: 10,
                     borderRadius: BorderRadius.circular(6),
                   ),

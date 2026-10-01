@@ -63,8 +63,9 @@ class BackupZipService {
 
     try {
       final encoder = ZipFileEncoder();
-      encoder.create(zipPathTmp);
-      encoder.addDirectorySync(pastaBackup);
+      // Nivel 1 = deflate rapido; pasta local ja e copia direta quando possivel.
+      encoder.create(zipPathTmp, level: ZipFileEncoder.gzip);
+      encoder.addDirectorySync(pastaBackup, level: ZipFileEncoder.gzip);
       encoder.closeSync();
 
       final bytes = await zipFileTmp.length();

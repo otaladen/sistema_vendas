@@ -32,6 +32,20 @@ void main() {
     expect(Directory(p.join(destino.path, 'logs')).existsSync(), isFalse);
   });
 
+  test('copia ignora arquivos de lock e temporarios', () async {
+    final origem = Directory(p.join(temp.path, 'objectbox'))..createSync();
+    File(p.join(origem.path, 'data.mdb')).writeAsStringSync('mdb');
+    File(p.join(origem.path, 'data.mdb-lock')).writeAsStringSync('lock');
+    File(p.join(origem.path, 'tmp.journal')).writeAsStringSync('j');
+
+    final destino = Directory(p.join(temp.path, 'dest_ob'));
+    await copiarObjectBoxSomenteBanco(origem: origem, destino: destino);
+
+    expect(File(p.join(destino.path, 'data.mdb')).existsSync(), isTrue);
+    expect(File(p.join(destino.path, 'data.mdb-lock')).existsSync(), isFalse);
+    expect(File(p.join(destino.path, 'tmp.journal')).existsSync(), isFalse);
+  });
+
   test('copia ignora caches e, se pedido, pastas de foto', () async {
     final origem = Directory(p.join(temp.path, 'app'))..createSync();
     File(p.join(origem.path, 'data.txt')).writeAsStringSync('ok');

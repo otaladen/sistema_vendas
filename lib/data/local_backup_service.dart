@@ -10,6 +10,7 @@ import 'local_app_data_paths.dart';
 import 'local_backup_atomic.dart';
 import 'local_backup_cadastro_produtos_service.dart';
 import 'local_backup_copy.dart';
+import 'local_backup_isolate.dart';
 import 'local_backup_preferencias_service.dart';
 import 'local_backup_validation.dart';
 import 'objectbox.dart';
@@ -20,6 +21,21 @@ export '../domain/local_backup_escopo.dart';
 enum LocalBackupTipo { manual, automatico }
 
 typedef BackupProgressCallback = void Function(double progresso, String etapa);
+
+/// Estado de progresso consumivel pela UI (notifier ou stream).
+class LocalBackupProgressoEstado {
+  const LocalBackupProgressoEstado({
+    required this.progresso,
+    required this.etapa,
+    this.decorrido = Duration.zero,
+  });
+
+  final double progresso;
+  final String etapa;
+  final Duration decorrido;
+
+  int get percentual => (progresso * 100).round().clamp(0, 100);
+}
 
 class LocalBackupResult {
   const LocalBackupResult({
@@ -169,44 +185,35 @@ class LocalBackupService {
       final pularImagens = escopo == LocalBackupEscopo.semImagens
           ? nomesPastasImagemNoBackup
           : const <String>{};
+      String? checksumDataMdb;
       if (escopo == LocalBackupEscopo.somenteBanco) {
-        report(0.22, 'Copiando banco…');
+        report(0.18, 'Preparando arquivos…');
+        destinoDados.createSync(recursive: true);
         final destinoOb = Directory(p.join(destinoDados.path, 'objectbox'));
         destinoOb.createSync(recursive: true);
-        await copiarDiretorioRecursivo(
+        final copia = await executarCopiaLocalBackupIsolate(
+          somenteBanco: true,
           origem: origemObjectBox,
           destino: destinoOb,
-          onArquivoCopiado: () => report(0.5, 'Copiando banco…'),
+          onProgress: report,
         );
+        checksumDataMdb = copia.checksumDataMdbSha256;
       } else {
         report(
-          0.18,
+          0.16,
           escopo == LocalBackupEscopo.semImagens
-              ? 'Contando arquivos (sem fotos)…'
-              : 'Contando arquivos…',
+              ? 'Preparando arquivos (sem fotos)…'
+              : 'Preparando arquivos…',
         );
-        final totalArquivos = await contarArquivosRecursivo(
-          baseDadosDir,
-          ignorarNomes: pularImagens,
-        );
-        report(0.22, 'Copiando dados…');
-        var copiados = 0;
-        await copiarDiretorioRecursivo(
+        destinoDados.createSync(recursive: true);
+        final copia = await executarCopiaLocalBackupIsolate(
+          somenteBanco: false,
           origem: baseDadosDir,
           destino: destinoDados,
           ignorarNomes: pularImagens,
-          onArquivoCopiado: totalArquivos > 0
-              ? () {
-                  copiados++;
-                  final frac = copiados / totalArquivos;
-                  report(
-                    0.22 + frac * 0.52,
-                    'Copiando… ${((0.22 + frac * 0.52) * 100).round()}% '
-                    '($copiados/$totalArquivos)',
-                  );
-                }
-              : null,
+          onProgress: report,
         );
+        checksumDataMdb = copia.checksumDataMdbSha256;
         report(0.78, 'Exportando configuracoes locais…');
         await LocalBackupPreferenciasService.exportarParaPasta(pastaBackup);
       }
@@ -218,9 +225,10 @@ class LocalBackupService {
       final tamanhoKb = mdb == null ? 0.0 : mdb.lengthSync() / 1024.0;
 
       report(0.94, 'Gravando manifesto…');
-      final checksumDataMdb =
-          LocalBackupAtomic.checksumDataMdb(destinoDados);
-      final tamanhoPastaKb = await _kbDaPasta(pastaBackup);
+      checksumDataMdb ??= LocalBackupAtomic.checksumDataMdb(destinoDados);
+      final tamanhoPastaKb = escopo == LocalBackupEscopo.somenteBanco
+          ? tamanhoKb + 2
+          : await _kbDaPasta(pastaBackup);
       final manifest = {
         'app': 'sistema_vendas',
         'versaoApp': versaoApp,
