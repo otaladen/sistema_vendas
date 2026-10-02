@@ -145,17 +145,21 @@ class PdvConsultaLinhaProduto extends StatelessWidget {
               ),
               SizedBox(
                 width: PdvConsultaColunas.larguraUnidade,
-                child: Text(
-                  rotuloUnidadeProdutoExibicao(produto.unidade),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        fontSize: PdvTipografia.listaMeta,
-                        height: 1.0,
-                        color: scheme.onSecondaryContainer,
-                      ),
+                child: Padding(
+                  padding: PdvConsultaColunas.paddingCelulaUnidade,
+                  child: Text(
+                    rotuloUnidadeProdutoExibicao(produto.unidade.trim()),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.clip,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          fontSize: PdvTipografia.listaMeta,
+                          height: 1.0,
+                          color: scheme.onSecondaryContainer,
+                        ),
+                  ),
                 ),
               ),
               SizedBox(

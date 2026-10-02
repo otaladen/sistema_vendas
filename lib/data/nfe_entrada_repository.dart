@@ -7,6 +7,7 @@ import '../domain/lista_compra_entrada_nfe_linha.dart';
 import '../domain/custo_medio_entrada_util.dart';
 import '../domain/nfe_entrada_conversao_util.dart';
 import '../domain/produto_embalagem.dart';
+import '../domain/produto_unidades_catalogo.dart';
 import '../data/models/conta_pagar.dart';
 import '../model/fornecedor_nfe.dart';
 import '../model/historico_entrada.dart';
@@ -134,16 +135,8 @@ class NfeEntradaRepository {
   final GerenciadorEstoqueService _estoque;
   final NfeEntradaXmlStore _xmlStore;
 
-  static const List<String> unidadesInternasValidas = [
-    'UN',
-    'M',
-    'M2',
-    'M3',
-    'KG',
-    'SC',
-    'CX',
-    'LT',
-  ];
+  static const List<String> unidadesInternasValidas =
+      ProdutoUnidadesCatalogo.unidadesInternasValidas;
 
   void _notificarMutacaoNfeEntrada({List<int>? produtoIds}) {
     // Uma unica notificacao de produto com ids (evita flood WS que atrasa o terminal).

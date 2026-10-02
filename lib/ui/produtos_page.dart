@@ -23,6 +23,7 @@ import '../domain/permissao_usuario.dart';
 import '../domain/importacao/produto_importacao_linha.dart';
 import '../domain/importacao/produto_importacao_util.dart';
 import '../domain/produto_categorias_catalogo.dart';
+import '../domain/produto_unidades_catalogo.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_exclusao_guard.dart';
 import '../domain/produto_marca.dart';
@@ -154,44 +155,6 @@ class _ProdutosPageState extends State<ProdutosPage>
   /// Folga a direita para a barra de rolagem nao cobrir bordas dos cards.
   static const double _erpScrollbarGutter = 18;
 
-  static const List<String> _unidades = [
-    'UN',
-    'M',
-    'MTS',
-    'M2',
-    'M3',
-    'KG',
-    'SC',
-    'CX',
-    'LT',
-  ];
-
-  /// Embalagens comuns na unidade de compra (NF-e / PDV em CX, SC…).
-  static const List<String> _unidadesCompraSugeridas = [
-    'CX',
-    'SC',
-    'FD',
-    'UN',
-    'KG',
-    'LT',
-    'M',
-    'M2',
-    'M3',
-    'MTS',
-  ];
-
-  static const Map<String, String> _rotuloUnidadeLongo = {
-    'UN': 'UN - Unidade',
-    'M': 'M - Metro',
-    'MTS': 'MTS - Metros',
-    'M2': 'M2 - Metro quadrado',
-    'M3': 'M3 - Metro cubico',
-    'KG': 'KG - Quilograma',
-    'SC': 'SC - Saco',
-    'CX': 'CX - Caixa',
-    'FD': 'FD - Fardo',
-    'LT': 'LT - Litro',
-  };
   static const String _categoriaOutros = ProdutoCategoriasCatalogo.outros;
   static const Map<String, List<String>> _categoriasMateriaisConstrucao =
       ProdutoCategoriasCatalogo.materiaisConstrucao;
@@ -3579,8 +3542,9 @@ class _ProdutosPageState extends State<ProdutosPage>
                         value: codigo,
                         child: Text(
                           codigo.isEmpty
-                              ? 'Igual à venda (${_rotuloUnidadeLongo[uVenda] ?? uVenda})'
-                              : (_rotuloUnidadeLongo[codigo] ?? codigo),
+                              ? 'Igual à venda (${ProdutoUnidadesCatalogo.rotuloLongo[uVenda] ?? uVenda})'
+                              : (ProdutoUnidadesCatalogo.rotuloLongo[codigo] ??
+                                  codigo),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -3672,28 +3636,12 @@ class _ProdutosPageState extends State<ProdutosPage>
     );
   }
 
-  String _normalizarUnidade(String? unidade) {
-    if (unidade == null || unidade.trim().isEmpty) {
-      return 'UN';
-    }
-    final u = unidade.trim().toUpperCase();
-    if (u == 'METRO') return 'M';
-    return _unidades.contains(u) ? u : 'UN';
-  }
+  String _normalizarUnidade(String? unidade) =>
+      ProdutoUnidadesCatalogo.normalizarUnidadeVenda(unidade);
 
   /// Unidade de compra cadastrada (vazio = igual à de venda).
-  String? _normalizarUnidadeCompraOpcional(String? unidade) {
-    if (unidade == null || unidade.trim().isEmpty) return null;
-    final u = unidade.trim().toUpperCase();
-    if (u == 'METRO') return 'M';
-    if (_unidadesCompraSugeridas.contains(u) || _unidades.contains(u)) {
-      return u;
-    }
-    for (final opt in _unidadesCompraSugeridas) {
-      if (u.contains(opt)) return opt;
-    }
-    return null;
-  }
+  String? _normalizarUnidadeCompraOpcional(String? unidade) =>
+      ProdutoUnidadesCatalogo.normalizarUnidadeCompraOpcional(unidade);
 
   String _unidadeCompraNoFormulario() {
     return _normalizarUnidadeCompraOpcional(_unidadeCompraController.text) ??
@@ -3778,7 +3726,7 @@ class _ProdutosPageState extends State<ProdutosPage>
 
   List<String> _opcoesDropdownUnidadeCompra(String uVenda) {
     final out = <String>[''];
-    for (final u in _unidadesCompraSugeridas) {
+    for (final u in ProdutoUnidadesCatalogo.unidadesCompraSugeridas) {
       if (u == uVenda) continue;
       if (!out.contains(u)) out.add(u);
     }
@@ -4081,15 +4029,8 @@ class _ProdutosPageState extends State<ProdutosPage>
     return true;
   }
 
-  String _mapearUnidadeGeminiParaSistema(String unidadeGemini) {
-    var u = unidadeGemini.trim().toUpperCase();
-    if (u == 'MT') u = 'M';
-    final normalizada = _normalizarUnidade(u);
-    if (_unidades.contains(normalizada)) {
-      return normalizada;
-    }
-    return 'UN';
-  }
+  String _mapearUnidadeGeminiParaSistema(String unidadeGemini) =>
+      ProdutoUnidadesCatalogo.normalizarUnidadeVenda(unidadeGemini);
 
   Future<void> _padronizarProdutoComGemini() async {
     final texto = _nomeController.text.trim();
@@ -6768,63 +6709,22 @@ class _ProdutosPageState extends State<ProdutosPage>
                                                                     _erpInputDecoration(
                                                                       context,
                                                                     ),
-                                                                items: const [
-                                                                  DropdownMenuItem(
-                                                                    value: 'UN',
-                                                                    child: Text(
-                                                                      'UN - Unidade',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value: 'M',
-                                                                    child: Text(
-                                                                      'M - Metro',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value:
-                                                                        'MTS',
-                                                                    child: Text(
-                                                                      'MTS - Metros',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value: 'M2',
-                                                                    child: Text(
-                                                                      'M2 - Metro quadrado',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value: 'M3',
-                                                                    child: Text(
-                                                                      'M3 - Metro cubico',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value: 'KG',
-                                                                    child: Text(
-                                                                      'KG - Quilograma',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value: 'SC',
-                                                                    child: Text(
-                                                                      'SC - Saco',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value: 'CX',
-                                                                    child: Text(
-                                                                      'CX - Caixa',
-                                                                    ),
-                                                                  ),
-                                                                  DropdownMenuItem(
-                                                                    value: 'LT',
-                                                                    child: Text(
-                                                                      'LT - Litro',
-                                                                    ),
-                                                                  ),
-                                                                ],
+                                                                items: ProdutoUnidadesCatalogo
+                                                                    .unidadesVenda
+                                                                    .map(
+                                                                      (
+                                                                        codigo,
+                                                                      ) => DropdownMenuItem(
+                                                                        value:
+                                                                            codigo,
+                                                                        child:
+                                                                            Text(
+                                                                          ProdutoUnidadesCatalogo.rotuloLongo[codigo] ??
+                                                                              codigo,
+                                                                        ),
+                                                                      ),
+                                                                    )
+                                                                    .toList(),
                                                                 onChanged: (value) {
                                                                   if (value !=
                                                                       null) {

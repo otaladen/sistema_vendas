@@ -17,6 +17,7 @@ import '../domain/pdv_busca_inteligente.dart';
 import '../domain/produto_exclusao_guard.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/produto_nome_titulo_normalizer.dart';
+import '../domain/produto_unidades_catalogo.dart';
 import '../services/gerenciador_estoque_service.dart';
 import '../services/produto_imagem_service.dart';
 import 'lote_produto_repository.dart';
@@ -114,16 +115,8 @@ class ProdutoRepository extends ChangeNotifier
 
   ObjectBox get objectBox => _db;
 
-  static const List<String> _unidadesValidas = [
-    'UN',
-    'M',
-    'M2',
-    'M3',
-    'KG',
-    'SC',
-    'CX',
-    'LT',
-  ];
+  static const List<String> _unidadesValidas =
+      ProdutoUnidadesCatalogo.unidadesVenda;
   static const Duration _cacheTtl = Duration(minutes: 2);
 
   List<ProdutoBuscaDoc> _cacheDocs = const [];
@@ -303,9 +296,13 @@ class ProdutoRepository extends ChangeNotifier
   void _normalizarDadosLegados(List<Produto> produtos) {
     final alterados = <Produto>[];
     for (final produto in produtos) {
-      final unidade = produto.unidade.trim();
+      final unidade = produto.unidade.trim().toUpperCase();
       final unidadeValida = _unidadesValidas.contains(unidade);
       var houveAjuste = false;
+      if (produto.unidade != unidade) {
+        produto.unidade = unidade;
+        houveAjuste = true;
+      }
       if (!unidadeValida) {
         produto.unidade = 'UN';
         houveAjuste = true;

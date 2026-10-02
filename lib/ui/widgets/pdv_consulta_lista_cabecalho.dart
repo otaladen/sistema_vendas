@@ -51,7 +51,10 @@ class PdvConsultaListaCabecalho extends StatelessWidget {
               ),
               SizedBox(
                 width: PdvConsultaColunas.larguraUnidade,
-                child: Text('Un.', style: estilo, textAlign: TextAlign.center),
+                child: Padding(
+                  padding: PdvConsultaColunas.paddingCelulaUnidade,
+                  child: Text('Un.', style: estilo, textAlign: TextAlign.center),
+                ),
               ),
               SizedBox(
                 width: PdvConsultaColunas.larguraEstoque,
@@ -87,7 +90,10 @@ class PdvConsultaListaCabecalho extends StatelessWidget {
 abstract final class PdvConsultaColunas {
   PdvConsultaColunas._();
 
-  static const double larguraUnidade = 32;
+  /// Largura minima para siglas (UN, PC, KG, M²) sem reticencias.
+  static const double larguraUnidade = 44;
+  static const EdgeInsets paddingCelulaUnidade =
+      EdgeInsets.symmetric(horizontal: 2);
   static const double larguraEstoque = 56;
   /// Cada coluna de preco (Preco 1 / Preco 2 / Preco 3).
   static const double larguraPrecoColuna = 76;

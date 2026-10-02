@@ -329,6 +329,9 @@ abstract final class BuscarNaLoja {
       case 'CX':
       case 'PCT':
       case 'RL':
+      case 'FD':
+      case 'DZ':
+      case 'PAR':
         return true;
       default:
         return false;

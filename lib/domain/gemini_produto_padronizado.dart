@@ -1,4 +1,5 @@
 import 'produto_categorias_catalogo.dart';
+import 'produto_unidades_catalogo.dart';
 
 /// Resultado estruturado da padronizacao de produto via Gemini.
 class ProdutoPadronizadoGemini {
@@ -31,17 +32,8 @@ class ProdutoPadronizadoGemini {
         growable: false,
       );
 
-  static const unidadesPermitidas = <String>[
-    'UN',
-    'KG',
-    'MT',
-    'M',
-    'M2',
-    'M3',
-    'SC',
-    'CX',
-    'LT',
-  ];
+  static List<String> get unidadesPermitidas =>
+      ProdutoUnidadesCatalogo.unidadesVenda;
 
   static const gruposTributariosPermitidos = <String>[
     'tributado',
@@ -57,12 +49,8 @@ class ProdutoPadronizadoGemini {
       categoria = 'Outros';
     }
 
-    var unidade = s('unidade_medida').toUpperCase();
-    if (unidade == 'METRO') unidade = 'M';
-    if (unidade == 'MTS') unidade = 'MT';
-    if (!unidadesPermitidas.contains(unidade)) {
-      unidade = 'UN';
-    }
+    final unidade =
+        ProdutoUnidadesCatalogo.normalizarUnidadeVenda(s('unidade_medida'));
 
     final nome = s('nome_padronizado');
     if (nome.isEmpty) {
