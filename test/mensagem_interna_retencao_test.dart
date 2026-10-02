@@ -29,7 +29,7 @@ void main() {
     expect(texto.preservarNaRetencao, isFalse);
   });
 
-  test('podar nao remove autorizacao PDV antiga ao estourar TTL', () async {
+  test('podar remove autorizacao PDV ao estourar limite de mensagens', () async {
     final dir = await Directory.systemTemp.createTemp('chat_retencao_');
     addTearDown(() async {
       try {
@@ -56,13 +56,13 @@ void main() {
     }
 
     final historico = await repo.listarHistorico();
+    expect(historico.length, 2);
     expect(
       historico.any((m) => m.tipo == kMensagemInternaTipoAutorizacaoPdv),
-      isTrue,
-      reason: 'Autorizacao PDV deve permanecer apos poda',
+      isFalse,
+      reason: 'Autorizacao PDV entra na poda como demais mensagens',
     );
     expect(historico.any((m) => m.texto == 'msg 4'), isTrue);
-    expect(historico.length, 2);
-
+    expect(historico.any((m) => m.texto == 'msg 3'), isTrue);
   });
 }

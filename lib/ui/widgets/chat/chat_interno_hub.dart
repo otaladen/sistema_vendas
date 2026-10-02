@@ -601,7 +601,8 @@ class ChatInternoHub extends ChangeNotifier {
     } else {
       throw StateError('Chat interno nao configurado.');
     }
-    _mensagens = _mensagens.where((m) => m.preservarNaRetencao).toList();
+    _mensagens = [];
+    _apiRepo?.aplicarLimpezaNormais();
     _recalcularNaoLidos();
     notifyListeners();
     return removidos.length;
@@ -625,7 +626,7 @@ class ChatInternoHub extends ChangeNotifier {
   }
 
   void _aplicarLimpezaRemota() {
-    _mensagens = _mensagens.where((m) => m.preservarNaRetencao).toList();
+    _mensagens = [];
     _apiRepo?.aplicarLimpezaNormais();
     _recalcularNaoLidos();
     notifyListeners();

@@ -37,6 +37,7 @@ import '../domain/produto_coocorrencia_venda.dart';
 import '../domain/promocao_cadastro.dart';
 import '../domain/retirada_parcial_evento.dart';
 import '../domain/saldo_retirada_item.dart';
+import '../domain/sanitizar_historico_vendas_unidades.dart';
 import '../domain/promocao_preco_service.dart';
 import '../domain/ultimas_vendas_finalizadas_ordenacao.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
@@ -7284,6 +7285,16 @@ class VendaRepository {
     } finally {
       q.close();
     }
+  }
+
+  /// Corrige itens UN/PC com quantidade/escala inconsistente no historico.
+  SanitizarHistoricoVendasUnidadesResultado sanitizarHistoricoVendasUnidades() {
+    final itens = _db.itemVendaBox.getAll();
+    return SanitizarHistoricoVendasUnidades.executarEmItens(
+      itens,
+      (id) => _db.produtoBox.get(id),
+      persistir: _db.itemVendaBox.put,
+    );
   }
 
 }

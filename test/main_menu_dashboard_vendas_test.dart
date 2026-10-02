@@ -5,15 +5,21 @@ import 'package:sistema_vendas/model/usuario_sistema.dart';
 
 void main() {
   group('MainMenuDashboardVendasKpi.intervaloMesCorrenteAteHojeUtc', () {
-    test('inicia no dia 1 do mes local e termina no instante atual', () {
+    test('inicia no dia 1 00:00 local e termina no fim do dia corrente', () {
       final agora = DateTime(2026, 9, 22, 15, 30, 45, 123, 456);
       final local = MainMenuDashboardVendasKpi.intervaloMesCorrenteAteHoje(agora);
       expect(local.inicioLocal, DateTime(2026, 9, 1));
-      expect(local.fimLocal, agora);
+      expect(
+        local.fimLocal,
+        DateTime(2026, 9, 22, 23, 59, 59, 999),
+      );
 
       final utc = MainMenuDashboardVendasKpi.intervaloMesCorrenteAteHojeUtc(agora);
       expect(utc.inicioUtc, DateTime(2026, 9, 1).toUtc());
-      expect(utc.fimUtc, agora.toUtc());
+      expect(
+        utc.fimUtc,
+        DateTime(2026, 9, 22, 23, 59, 59, 999).toUtc(),
+      );
     });
   });
 
@@ -27,7 +33,10 @@ void main() {
       expect(filtro.filtroCancelamento, 'ativas');
       expect(filtro.vendedorId, 42);
       expect(filtro.dataInicioUtc, DateTime(2026, 3, 1).toUtc());
-      expect(filtro.dataFimUtc, agora.toUtc());
+      expect(
+        filtro.dataFimUtc,
+        DateTime(2026, 3, 10, 23, 59, 59, 999).toUtc(),
+      );
     });
   });
 

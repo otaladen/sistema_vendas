@@ -177,10 +177,11 @@ abstract final class RevincularProdutoItemVendaFlow {
       },
     );
     if (escolher != true || !context.mounted) return null;
-    return showProdutoPesquisaDialog(
+    final escolhido = await showProdutoPesquisaDialog(
       context: context,
       produtoRepository: produtoRepository,
     );
+    return escolhido is Produto ? escolhido : null;
   }
 
   static Future<void> _aplicarVinculos({

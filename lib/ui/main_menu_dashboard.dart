@@ -21,6 +21,7 @@ import '../../data/titulo_receber_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/backup_status_helper.dart';
 import '../../domain/dashboard_alertas.dart';
+import '../../domain/dashboard_vendas_store.dart';
 import '../../domain/main_menu_dashboard_vendas.dart';
 import '../../domain/fiscal/fiscal_pendencias_resumo.dart';
 import '../../domain/main_menu_destino.dart';
@@ -30,7 +31,6 @@ import '../../domain/usuario_permissao_helper.dart';
 import '../../model/caixa_sessao.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/recado_loja.dart';
-import '../../model/venda.dart';
 import '../../services/lan_api_server.dart';
 import 'loja_ao_vivo_page.dart';
 import 'layout/app_layout.dart';
@@ -424,6 +424,24 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
     setState(() => _favoritos = favs);
   }
 
+  /// Recarrega KPIs de vendas hoje e mês (mesma regra dos cards do Início).
+  Future<DashboardVendasKpiPar> _recarregarKpisVendasDashboard({
+    DateTime? agora,
+  }) async {
+    final deps = MainMenuDeps.of(context);
+    final store = DashboardVendasStore(
+      vendaRepository: deps.vendaRepository,
+      usuario: deps.usuarioLogado,
+    );
+    store.carregarVendasHoje(agora);
+    store.carregarVendasMes(agora);
+    return DashboardVendasKpiPar(
+      hoje: store.vendasHojeResumo,
+      mes: store.vendasMesResumo,
+      vendasHoje: store.vendasHojeLista,
+    );
+  }
+
   Future<void> _carregarPainel({bool silencioso = false}) async {
     if (!mounted) return;
     if (!silencioso) {
@@ -570,58 +588,20 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
           fromPrefs || CaixaStatusHub.instance.lojaAberta;
       final agora = DateTime.now();
       final u = deps.usuarioLogado;
-      final verTotalLoja = UsuarioPermissaoHelper.podeVerFaturamentoTotalLoja(u);
-
-      // Mesma fonte da Listagem de vendas (periodo "hoje") — evita divergencia.
-      final inicioDia = DateTime(agora.year, agora.month, agora.day);
-      final fimDia =
-          DateTime(agora.year, agora.month, agora.day, 23, 59, 59, 999);
-      List<Venda> listaVendas;
+      DashboardVendasKpiPar kpisVendas;
       try {
-        if (!verTotalLoja && u.vendedorId <= 0) {
-          listaVendas = <Venda>[];
-        } else {
-          final filtro = FiltroListagemVendas(
-            textoBusca: '',
-            dataInicioUtc: inicioDia.toUtc(),
-            dataFimUtc: fimDia.toUtc(),
-            filtroCancelamento: 'ativas',
-            canceladaPorFiltro: 'todos',
-            formaPagamento: 'todos',
-            tipoEntrega: 'todos',
-            entregaPendente: 'todos',
-            filtroFiscal: 'todos',
-            vendedorId: verTotalLoja ? null : u.vendedorId,
-          );
-          listaVendas = List<Venda>.from(
-            deps.vendaRepository.listarListagemVendasCompleto(filtro),
-          );
-          // Complemento: orcamento antigo finalizado hoje (data fora do dia).
-          if (deps.vendaRepository is VendaRepository) {
-            final extra = (deps.vendaRepository as VendaRepository)
-                .listarVendasFinalizadasNoDiaLocal(agora);
-            final ids = listaVendas.map((v) => v.id).toSet();
-            for (final v in extra) {
-              if (ids.contains(v.id)) continue;
-              if (!verTotalLoja && v.vendedor.targetId != u.vendedorId) {
-                continue;
-              }
-              listaVendas.add(v);
-              ids.add(v.id);
-            }
-          }
-        }
+        kpisVendas = await _recarregarKpisVendasDashboard(agora: agora);
       } catch (e) {
-        debugPrint('MainMenuDashboard.vendasHoje: $e');
-        listaVendas = <Venda>[];
+        debugPrint('MainMenuDashboard.vendasKpi: $e');
+        kpisVendas = const DashboardVendasKpiPar(
+          hoje: MainMenuVendasResumo.vazio(),
+          mes: MainMenuVendasResumo.vazio(),
+          vendasHoje: [],
+        );
       }
-      final faturamento =
-          listaVendas.fold<double>(0.0, (s, v) => s + v.total);
-      final resumoMes = MainMenuDashboardVendasKpi.calcularResumoMesNoRepositorio(
-        vendaRepository: deps.vendaRepository,
-        agora: agora,
-        usuario: u,
-      );
+      final listaVendas = kpisVendas.vendasHoje;
+      final faturamento = kpisVendas.hoje.faturamento;
+      final resumoMes = kpisVendas.mes;
 
       // Celular: so KPI do dia + caixa. Nada de entregas/financeiro/alertas/fiscal.
       if (celular) {
@@ -1178,7 +1158,7 @@ class _MainMenuDashboardState extends State<MainMenuDashboard> {
           ],
           IconButton(
             tooltip: 'Atualizar painel',
-            onPressed: _carregarPainel,
+            onPressed: () => _carregarPainel(),
             icon: const Icon(Icons.refresh_outlined),
           ),
           ContaSessaoAppBarActions(login: u.login, onLogout: deps.onLogout),

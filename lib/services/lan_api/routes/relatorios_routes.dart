@@ -84,12 +84,26 @@ void registerRelatoriosRoutes(Router router, LanApiDeps d) {
     for (final v in lista) {
       faturamento += v.total;
     }
-    final filtroMes = MainMenuDashboardVendasKpi.filtroVendasMesCorrente(
+    final usuarioKpi = vendedorId == null
+        ? const UsuarioSistema(
+            id: 'api',
+            login: 'api',
+            nome: 'API',
+            senha: '',
+            admin: true,
+          )
+        : UsuarioSistema(
+            id: 'api',
+            login: 'api',
+            nome: 'API',
+            senha: '',
+            vendedorId: vendedorId,
+          );
+    final resumoMes = MainMenuDashboardVendasKpi.carregarVendasMes(
+      vendaRepository: d.vendaRepository,
       agora: ref,
-      vendedorId: vendedorId,
-    );
-    final resumoMes = MainMenuDashboardVendasKpi.resumoDe(
-      d.vendaRepository.listarListagemVendasCompleto(filtroMes),
+      usuario: usuarioKpi,
+      vendasHojeParaUniao: lista,
     );
     final contagem = d.vendaRepository.contarEntregasPainelResumo();
     var caixaAberto = false;

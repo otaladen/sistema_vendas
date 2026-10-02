@@ -83,6 +83,10 @@ class _CadastroProdutoCancelarIntent extends Intent {
   const _CadastroProdutoCancelarIntent();
 }
 
+class _CadastroProdutoNovoIntent extends Intent {
+  const _CadastroProdutoNovoIntent();
+}
+
 class _CadastroProdutoSubAbaIntent extends Intent {
   const _CadastroProdutoSubAbaIntent(this.index);
 
@@ -4783,7 +4787,7 @@ class _ProdutosPageState extends State<ProdutosPage>
       context: context,
       produtoRepository: widget.produtoRepository,
     );
-    if (escolhido == null || !mounted) return;
+    if (escolhido is! Produto || !mounted) return;
     if (escolhido.id == _produtoEmEdicaoId) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -6152,13 +6156,20 @@ class _ProdutosPageState extends State<ProdutosPage>
   }
 
   Future<void> _abrirPesquisaProduto() async {
-    final produtoSelecionado = await showProdutoPesquisaDialog(
+    final resultado = await showProdutoPesquisaDialog(
       context: context,
       produtoRepository: widget.produtoRepository,
       sessaoCadastro: _sessaoPesquisaCadastro,
+      printService: widget.printService,
     );
-    if (!mounted || produtoSelecionado == null) return;
-    await _abrirProdutoParaEdicao(produtoSelecionado);
+    if (!mounted || resultado == null) return;
+    if (resultado is ProdutoPesquisaSolicitacaoNovoCadastro) {
+      await _limparFormularioComConfirmacao();
+      return;
+    }
+    if (resultado is Produto) {
+      await _abrirProdutoParaEdicao(resultado);
+    }
   }
 
   /// Abre produto fresco do servidor quando em terminal leve.
@@ -6232,6 +6243,10 @@ class _ProdutosPageState extends State<ProdutosPage>
           builder: (tabCtx) {
             return Shortcuts(
               shortcuts: const <ShortcutActivator, Intent>{
+                SingleActivator(LogicalKeyboardKey.f2):
+                    _CadastroProdutoNovoIntent(),
+                SingleActivator(LogicalKeyboardKey.insert):
+                    _CadastroProdutoNovoIntent(),
                 SingleActivator(LogicalKeyboardKey.f5):
                     _CadastroProdutoSalvarIntent(),
                 SingleActivator(LogicalKeyboardKey.f10):
@@ -6264,6 +6279,15 @@ class _ProdutosPageState extends State<ProdutosPage>
                           final tc = DefaultTabController.maybeOf(tabCtx);
                           if (tc != null && tc.index != 0) return null;
                           _limparFormularioComConfirmacao();
+                          return null;
+                        },
+                      ),
+                  _CadastroProdutoNovoIntent:
+                      CallbackAction<_CadastroProdutoNovoIntent>(
+                        onInvoke: (_) {
+                          final tc = DefaultTabController.maybeOf(tabCtx);
+                          if (tc != null && tc.index != 0) return null;
+                          unawaited(_limparFormularioComConfirmacao());
                           return null;
                         },
                       ),

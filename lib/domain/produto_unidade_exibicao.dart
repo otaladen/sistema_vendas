@@ -17,6 +17,11 @@ String rotuloUnidadeProdutoExibicao(String unidade) {
   }
 }
 
+/// Unidade de venda primaria para colunas estreitas (cadastro/pesquisa, PDV).
+String rotuloUnidadeVendaColunaTabela(Produto produto) {
+  return rotuloUnidadeProdutoExibicao(produto.unidade);
+}
+
 /// Unidade de venda (e compra, quando diferente) para listas do PDV/estoque.
 String rotuloUnidadeProdutoLista(Produto produto) {
   final venda = rotuloUnidadeProdutoExibicao(produto.unidade);

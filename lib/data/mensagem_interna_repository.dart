@@ -88,15 +88,10 @@ class MensagemInternaRepository {
 
   void _podar() {
     final limite = DateTime.now().toUtc().subtract(ttl);
-    _cache = _cache
-        .where(
-          (m) => m.preservarNaRetencao || !m.dataHora.isBefore(limite),
-        )
-        .toList();
+    _cache =
+        _cache.where((m) => !m.dataHora.isBefore(limite)).toList();
     while (_cache.length > maxMensagens) {
-      final idx = _cache.indexWhere((m) => !m.preservarNaRetencao);
-      if (idx < 0) break;
-      _cache.removeAt(idx);
+      _cache.removeAt(0);
     }
   }
 
@@ -215,16 +210,12 @@ class MensagemInternaRepository {
     });
   }
 
-  /// Remove todas as mensagens normais; mantem autorizacoes PDV.
+  /// Remove todo o mural (inclui autorizacoes PDV).
   Future<List<int>> limparMuralNormais() {
     return _serial(() async {
       await _garantirCarregado(forcarDisco: true);
-      final removidos = <int>[];
-      _cache.removeWhere((m) {
-        if (m.preservarNaRetencao) return false;
-        removidos.add(m.id);
-        return true;
-      });
+      final removidos = _cache.map((m) => m.id).toList();
+      _cache = [];
       if (removidos.isNotEmpty) {
         await _persistir();
       }

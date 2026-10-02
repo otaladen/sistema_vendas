@@ -539,7 +539,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
       context: context,
       produtoRepository: widget.produtoRepository,
     );
-    if (p == null || !mounted) return;
+    if (p is! Produto || !mounted) return;
     setState(() {
       _linhas.add(
         _LinhaPromocaoDraft(
@@ -605,7 +605,7 @@ class _PromocaoEditPageState extends State<PromocaoEditPage> {
       context: context,
       produtoRepository: widget.produtoRepository,
     );
-    if (p == null || !mounted) return;
+    if (p is! Produto || !mounted) return;
     setState(() {
       _linhasCombo.add(
         _LinhaComboDraft(

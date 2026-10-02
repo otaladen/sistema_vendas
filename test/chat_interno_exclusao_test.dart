@@ -115,7 +115,7 @@ void main() {
     );
   });
 
-  test('limpar mural remove normais e mantem autorizacao', () async {
+  test('limpar mural remove todas as mensagens incluindo autorizacao', () async {
     final dir = await Directory.systemTemp.createTemp('chat_exc_');
     addTearDown(() async {
       try {
@@ -133,11 +133,10 @@ void main() {
     await repo.enviar(vendedor: 'A', texto: 'normal 2');
 
     final removidos = await repo.limparMuralNormais();
-    expect(removidos.length, 2);
+    expect(removidos.length, 3);
 
     final historico = await repo.listarHistorico();
-    expect(historico.length, 1);
-    expect(historico.single.ehAutorizacaoPdv, isTrue);
+    expect(historico, isEmpty);
   });
 
   test('repositorio recusa apagar mensagem protegida', () async {

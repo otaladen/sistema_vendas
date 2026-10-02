@@ -33,7 +33,7 @@ class MensagemInterna {
       tipo == kMensagemInternaTipoAutorizacaoPdv ||
       payload['solicitacaoId']?.toString().trim().isNotEmpty == true;
 
-  /// Nunca expirar no TTL / limite de mensagens (auditoria PDV).
+  /// Impede apagar manualmente (autorizacao PDV); entra na poda por TTL/limite.
   bool get preservarNaRetencao {
     if (tipo == kMensagemInternaTipoAutorizacaoPdv || ehAutorizacaoPdv) {
       return true;

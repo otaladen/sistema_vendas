@@ -248,7 +248,7 @@ class _KitOrcamentoEditPageState extends State<KitOrcamentoEditPage> {
       context: context,
       produtoRepository: widget.produtoRepository,
     );
-    if (p == null || !mounted) return;
+    if (p is! Produto || !mounted) return;
     setState(() {
       _linhas.add(
         _LinhaDraftKit(

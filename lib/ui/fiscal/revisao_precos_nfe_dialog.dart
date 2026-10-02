@@ -67,8 +67,12 @@ class RevisaoPrecosNfeDialog extends StatefulWidget {
 }
 
 class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
+  static const double _larguraMinColunaProduto = 180;
+
   late final NfeRevisaoPrecificacaoStore _store;
   late final List<FocusNode> _preco1Focus;
+  late final ScrollController _tabelaScrollVertical;
+  late final ScrollController _tabelaScrollHorizontal;
   final _aplicarFocus = FocusNode();
   bool _imprimirEtiquetas = false;
   bool _aplicando = false;
@@ -77,6 +81,8 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
   @override
   void initState() {
     super.initState();
+    _tabelaScrollVertical = ScrollController();
+    _tabelaScrollHorizontal = ScrollController();
     _store = NfeRevisaoPrecificacaoStore(
       itens: widget.itens,
       margemMinimaLoja: widget.margemMinimaPadrao.clamp(0, 99),
@@ -106,6 +112,8 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
   @override
   void dispose() {
     _store.dispose();
+    _tabelaScrollVertical.dispose();
+    _tabelaScrollHorizontal.dispose();
     for (final f in _preco1Focus) {
       f.dispose();
     }
@@ -266,6 +274,13 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
         : 'NF-e';
     final emitente = widget.emitente.trim();
     final size = MediaQuery.sizeOf(context);
+    final horizDialogInset = compact ? 12.0 : 28.0;
+    final maxDialogW =
+        _store.mostrarPreco2Preco3 ? 1480.0 : 1180.0;
+    final dialogMaxWidth = (size.width - horizDialogInset * 2).clamp(
+      compact ? 280.0 : 480.0,
+      maxDialogW,
+    );
 
     return ListenableBuilder(
       listenable: _store,
@@ -281,14 +296,14 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
             autofocus: true,
             child: Dialog(
               insetPadding: EdgeInsets.symmetric(
-                horizontal: compact ? 12 : 28,
+                horizontal: horizDialogInset,
                 vertical: compact ? 16 : 24,
               ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: _store.mostrarPreco2Preco3 ? 1480 : 1180,
+                  maxWidth: dialogMaxWidth,
                   maxHeight: size.height * 0.92,
-                  minWidth: compact ? 0 : 720,
+                  minWidth: compact ? 0 : 480,
                 ),
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
@@ -456,6 +471,9 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
   }
 
   Widget _tabela(ThemeData theme, AppSemanticColors sem) {
+    final extras = _store.mostrarPreco2Preco3;
+    final colSpacing = extras ? 6.0 : 14.0;
+    final larguraCampoPreco = extras ? 80.0 : 124.0;
     final cols = <DataColumn>[
       const DataColumn(label: Text('Codigo / Produto')),
       const DataColumn(label: Text('Custo antigo x novo'), numeric: true),
@@ -464,7 +482,7 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
       const DataColumn(label: Text('Sugerido'), numeric: true),
       const DataColumn(label: Text('Novo Preco 1')),
     ];
-    if (_store.mostrarPreco2Preco3) {
+    if (extras) {
       cols.addAll(const [
         DataColumn(label: Text('Preco 2 atual'), numeric: true),
         DataColumn(label: Text('Sug. 2'), numeric: true),
@@ -475,70 +493,137 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
       ]);
     }
     return Scrollbar(
+      controller: _tabelaScrollVertical,
       thumbVisibility: true,
       child: SingleChildScrollView(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowHeight: 40,
-            dataRowMinHeight: 52,
-            dataRowMaxHeight: 72,
-            columnSpacing: 14,
-            headingTextStyle: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.w800,
+        controller: _tabelaScrollVertical,
+        child: Scrollbar(
+          controller: _tabelaScrollHorizontal,
+          thumbVisibility: true,
+          notificationPredicate: (notification) => notification.depth == 1,
+          child: SingleChildScrollView(
+            controller: _tabelaScrollHorizontal,
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: extras ? 1180 : 720,
+              ),
+              child: DataTable(
+                headingRowHeight: 40,
+                dataRowMinHeight: 52,
+                dataRowMaxHeight: 72,
+                columnSpacing: colSpacing,
+                horizontalMargin: extras ? 8 : 24,
+                headingTextStyle: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  fontSize: extras ? 12 : null,
+                ),
+                columns: cols,
+                rows: [
+                  for (var i = 0; i < widget.itens.length; i++)
+                    _linhaTabela(
+                      i,
+                      theme,
+                      sem,
+                      extras: extras,
+                      larguraCampoPreco: larguraCampoPreco,
+                    ),
+                ],
+              ),
             ),
-            columns: cols,
-            rows: [
-              for (var i = 0; i < widget.itens.length; i++)
-                _linhaTabela(i, theme, sem),
-            ],
           ),
         ),
       ),
     );
   }
 
-  DataRow _linhaTabela(int i, ThemeData theme, AppSemanticColors sem) {
+  DataRow _linhaTabela(
+    int i,
+    ThemeData theme,
+    AppSemanticColors sem, {
+    required bool extras,
+    required double larguraCampoPreco,
+  }) {
     final item = widget.itens[i];
     final aumento = item.custoAumentou;
+    final precoStyle = extras
+        ? theme.textTheme.bodySmall?.copyWith(fontSize: 11)
+        : theme.textTheme.bodySmall;
     final cells = <DataCell>[
       DataCell(
-        SizedBox(
-          width: 240,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                item.codigoInterno,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: _larguraMinColunaProduto),
+          child: SizedBox(
+            width: extras ? _larguraMinColunaProduto : 240,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  item.codigoInterno,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-              Text(
-                item.nome,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
+                Text(
+                  item.nome,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
           ),
         ),
       ),
       DataCell(_custoComparacao(item, theme, aumento, sem)),
       DataCell(_celulaMargem(i, theme, sem)),
-      DataCell(Text(NfeRevisaoPrecificacaoStore.formatarReais(item.precoVendaAtual))),
-      DataCell(Text(NfeRevisaoPrecificacaoStore.formatarReais(item.precoVendaSugerido))),
-      DataCell(_campoPreco(_store.controllerPreco1(i), focus: _preco1Focus[i], index: i)),
+      DataCell(Text(
+        NfeRevisaoPrecificacaoStore.formatarReais(item.precoVendaAtual),
+        style: precoStyle,
+      )),
+      DataCell(Text(
+        NfeRevisaoPrecificacaoStore.formatarReais(item.precoVendaSugerido),
+        style: precoStyle,
+      )),
+      DataCell(
+        _campoPreco(
+          _store.controllerPreco1(i),
+          width: larguraCampoPreco,
+          compacto: extras,
+          focus: _preco1Focus[i],
+          index: i,
+        ),
+      ),
     ];
-    if (_store.mostrarPreco2Preco3) {
+    if (extras) {
       cells.addAll([
-        DataCell(Text(NfeRevisaoPrecificacaoStore.formatarReais(item.preco2Atual))),
-        DataCell(Text(NfeRevisaoPrecificacaoStore.formatarReais(item.preco2Sugerido))),
-        DataCell(_campoPreco(_store.controllerPreco2(i))),
-        DataCell(Text(NfeRevisaoPrecificacaoStore.formatarReais(item.preco3Atual))),
-        DataCell(Text(NfeRevisaoPrecificacaoStore.formatarReais(item.preco3Sugerido))),
-        DataCell(_campoPreco(_store.controllerPreco3(i))),
+        DataCell(Text(
+          NfeRevisaoPrecificacaoStore.formatarReais(item.preco2Atual),
+          style: precoStyle,
+        )),
+        DataCell(Text(
+          NfeRevisaoPrecificacaoStore.formatarReais(item.preco2Sugerido),
+          style: precoStyle,
+        )),
+        DataCell(_campoPreco(
+          _store.controllerPreco2(i),
+          width: larguraCampoPreco,
+          compacto: true,
+        )),
+        DataCell(Text(
+          NfeRevisaoPrecificacaoStore.formatarReais(item.preco3Atual),
+          style: precoStyle,
+        )),
+        DataCell(Text(
+          NfeRevisaoPrecificacaoStore.formatarReais(item.preco3Sugerido),
+          style: precoStyle,
+        )),
+        DataCell(_campoPreco(
+          _store.controllerPreco3(i),
+          width: larguraCampoPreco,
+          compacto: true,
+        )),
       ]);
     }
     return DataRow(
@@ -718,14 +803,19 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
     String? label,
     FocusNode? focus,
     int? index,
+    double width = 124,
+    bool compacto = false,
   }) {
     return SizedBox(
-      width: 124,
+      width: width,
       child: TextField(
         controller: controller,
         focusNode: focus,
         enabled: !_aplicando,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        style: compacto
+            ? const TextStyle(fontSize: 12)
+            : null,
         textInputAction: index != null && index == widget.itens.length - 1
             ? TextInputAction.done
             : TextInputAction.next,
@@ -735,7 +825,10 @@ class _RevisaoPrecosNfeDialogState extends State<RevisaoPrecosNfeDialog> {
         decoration: InputDecoration(
           isDense: true,
           labelText: label,
-          prefixText: 'R\$ ',
+          prefixText: compacto ? 'R\$' : 'R\$ ',
+          contentPadding: compacto
+              ? const EdgeInsets.symmetric(horizontal: 6, vertical: 8)
+              : null,
           border: const OutlineInputBorder(),
         ),
         onSubmitted: focus != null && index != null

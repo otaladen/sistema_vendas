@@ -1903,7 +1903,7 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
       context: context,
       produtoRepository: widget.produtoRepository,
     );
-    if (escolhido == null || !mounted) return;
+    if (escolhido is! Produto || !mounted) return;
     final u = escolhido.unidade.trim().toUpperCase();
     linha.vinculoManualProdutoId = escolhido.id;
     linha.vinculoManualProdutoNome =

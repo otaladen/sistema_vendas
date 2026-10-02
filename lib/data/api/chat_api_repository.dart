@@ -69,7 +69,7 @@ class ChatApiRepository {
   }
 
   void aplicarLimpezaNormais() {
-    _lista = _lista.where((m) => m.preservarNaRetencao).toList();
+    _lista = [];
   }
 
   Future<void> apagarMensagem({

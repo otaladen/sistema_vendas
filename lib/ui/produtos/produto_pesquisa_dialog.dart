@@ -6,19 +6,23 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 
 import '../../data/api/produto_api_repository.dart';
 import '../../data/produto_busca_util.dart';
 import '../../domain/produto_unidade_exibicao.dart';
 import '../../model/produto.dart';
+import '../../services/gondola_etiqueta_pdf.dart';
+import '../../services/print_service.dart';
 import '../../services/produto_imagem_lan_service.dart';
 import '../../services/produto_imagem_service.dart';
 import '../layout/app_layout.dart';
 import '../widgets/lan_api_feedback.dart';
 import '../widgets/pdv_consulta_semaforo_estoque.dart';
-import '../widgets/pdv_estoque_resumo_panel.dart';
 import '../widgets/produto_busca_input.dart';
 import '../widgets/produto_foto_view.dart';
+import '../widgets/seletor_categoria_produto.dart';
+import 'detalhes_produto_panel.dart';
 
 const int _kLoteInicialExibicao = 35;
 const int _kLoteScrollExibicao = 35;
@@ -31,8 +35,12 @@ const double _kAlturaLinhaCelular = 52.0;
 const double _kMiniaturaPx = 26.0;
 const double _kAlturaCabecalhoGrade = 28.0;
 const double _kMargemDialogo = 16.0;
-const double _kLarguraPainelDetalhe = 320;
 const String _kTodasCategorias = '';
+
+/// Fechar a pesquisa e abrir cadastro em branco (F2 / Novo Produto).
+class ProdutoPesquisaSolicitacaoNovoCadastro {
+  const ProdutoPesquisaSolicitacaoNovoCadastro();
+}
 
 final NumberFormat _moedaListaProduto = NumberFormat('#,##0.00', 'pt_BR');
 
@@ -64,14 +72,40 @@ extension ProdutoPesquisaOrdenacaoRotulo on ProdutoPesquisaOrdenacao {
 class _ProdutoPesquisaColunas {
   static const double larguraMarcacao = 36;
   static const double larguraCodigo = 100;
-  static const double larguraUnidade = 56;
+  static const double larguraUnidade = 60;
   static const double larguraPrecoColuna = 92;
   static const double larguraEstoque = 118;
   static const double larguraFoto = _kMiniaturaPx + 8;
   static const EdgeInsets paddingCelula =
       EdgeInsets.symmetric(vertical: 4, horizontal: 8);
+  static const EdgeInsets paddingCelulaUnidade =
+      EdgeInsets.symmetric(vertical: 4, horizontal: 2);
   static const int flexDescricao = 5;
   static const int flexCategoria = 2;
+}
+
+/// Celula da coluna Un. na grade de pesquisa do cadastro de produtos.
+class ProdutoCadastroTabelaCelulaUnidade extends StatelessWidget {
+  const ProdutoCadastroTabelaCelulaUnidade({
+    super.key,
+    required this.produto,
+    this.style,
+  });
+
+  final Produto produto;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      rotuloUnidadeVendaColunaTabela(produto),
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.clip,
+      textAlign: TextAlign.center,
+      style: style,
+    );
+  }
 }
 
 /// Estado da pesquisa no cadastro de produtos (persiste entre aberturas do dialogo).
@@ -141,16 +175,18 @@ class ProdutoPesquisaCadastroSessao {
 }
 
 /// Dialogo de pesquisa de produto no cadastro (debounce + scroll progressivo).
-Future<Produto?> showProdutoPesquisaDialog({
+Future<Object?> showProdutoPesquisaDialog({
   required BuildContext context,
   required dynamic produtoRepository,
   ProdutoPesquisaCadastroSessao? sessaoCadastro,
+  PrintService? printService,
 }) {
-  return showDialog<Produto>(
+  return showDialog<Object>(
     context: context,
     builder: (context) => _ProdutoPesquisaDialog(
       produtoRepository: produtoRepository,
       sessaoCadastro: sessaoCadastro,
+      printService: printService,
     ),
   );
 }
@@ -159,10 +195,12 @@ class _ProdutoPesquisaDialog extends StatefulWidget {
   const _ProdutoPesquisaDialog({
     required this.produtoRepository,
     this.sessaoCadastro,
+    this.printService,
   });
 
   final dynamic produtoRepository;
   final ProdutoPesquisaCadastroSessao? sessaoCadastro;
+  final PrintService? printService;
 
   @override
   State<_ProdutoPesquisaDialog> createState() => _ProdutoPesquisaDialogState();
@@ -175,6 +213,8 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   final _listaAtalhosFocusNode = FocusNode();
   Timer? _debounce;
   Timer? _debounceCliqueLinha;
+  Timer? _suprimirHoverListaTimer;
+  var _suprimirHoverLista = false;
 
   var _somenteInativos = false;
   var _carregados = <Produto>[];
@@ -188,12 +228,22 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   final _idsMarcados = <int>{};
   var _excluindo = false;
   var _aplicandoFoto = false;
+  var _processandoLote = false;
   var _categoriaFiltro = _kTodasCategorias;
   var _ordenacao = ProdutoPesquisaOrdenacao.relevancia;
   var _painelDetalheAberto = false;
 
   bool get _usarPainelDetalhe =>
       widget.sessaoCadastro != null && !context.isCompactLayout;
+
+  bool get _modoGestaoCadastro => widget.sessaoCadastro != null;
+
+  bool get _operacaoLoteEmAndamento =>
+      _excluindo || _aplicandoFoto || _processandoLote;
+
+  List<Produto> get _produtosMarcados => _carregados
+      .where((p) => _idsMarcados.contains(p.id))
+      .toList(growable: false);
 
   List<Produto> get _listaFiltradaOrdenada {
     Iterable<Produto> base = _carregados;
@@ -328,6 +378,87 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     }
   }
 
+  /// Evita que linhas sob o mouse roubem a selecao enquanto a lista rola pelo teclado.
+  void _marcarNavegacaoTecladoLista() {
+    _suprimirHoverLista = true;
+    _suprimirHoverListaTimer?.cancel();
+    _suprimirHoverListaTimer = Timer(const Duration(milliseconds: 650), () {
+      if (mounted) _suprimirHoverLista = false;
+    });
+  }
+
+  void _onHoverLinhaLista(int indice) {
+    if (_suprimirHoverLista) return;
+    _definirIndiceSelecionado(indice);
+  }
+
+  void _prepararExibicaoParaIndice(int indice) {
+    final filtrada = _listaFiltradaOrdenada;
+    if (indice >= 0 &&
+        indice >= _exibidos &&
+        indice < filtrada.length) {
+      _atualizarExibidos(math.min(indice + 1, filtrada.length));
+    }
+  }
+
+  void _rolarParaIndiceSelecionado() {
+    final indice = _indiceSelecionado.value;
+    if (indice < 0 || !_scrollController.hasClients) return;
+
+    final pos = _scrollController.position;
+    final viewport = pos.viewportDimension;
+    if (viewport <= 0) return;
+
+    final alturaLinha = _alturaLinhaLista(context.isCompactLayout);
+    final itemTop = indice * alturaLinha;
+    final itemBottom = itemTop + alturaLinha;
+    var alvo = pos.pixels;
+    if (itemTop < alvo) {
+      alvo = itemTop;
+    } else if (itemBottom > alvo + viewport) {
+      alvo = itemBottom - viewport;
+    } else {
+      return;
+    }
+    alvo = alvo.clamp(0.0, pos.maxScrollExtent);
+    if ((alvo - pos.pixels).abs() < 0.5) return;
+    _scrollController.jumpTo(alvo);
+  }
+
+  void _moverSelecaoTeclado(int novoIndice) {
+    _marcarNavegacaoTecladoLista();
+    _ativarFocoAtalhosLista();
+    _prepararExibicaoParaIndice(novoIndice);
+    _definirIndiceSelecionado(novoIndice);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _rolarParaIndiceSelecionado();
+    });
+  }
+
+  void _setaBaixoNaLista() {
+    final total = _listaFiltradaOrdenada.length;
+    if (total == 0) return;
+    final atual = _indiceSelecionado.value;
+    _moverSelecaoTeclado(math.min(atual < 0 ? 0 : atual + 1, total - 1));
+  }
+
+  void _setaCimaNaLista({bool voltarParaBuscaNoTopo = false}) {
+    final total = _listaFiltradaOrdenada.length;
+    if (total == 0) return;
+    final atual = _indiceSelecionado.value;
+    if (atual <= 0) {
+      if (voltarParaBuscaNoTopo) {
+        _pesquisaFocusNode.requestFocus();
+      }
+      if (atual != 0) {
+        _moverSelecaoTeclado(0);
+      }
+      return;
+    }
+    _moverSelecaoTeclado(atual - 1);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -434,6 +565,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     _persistirSessao();
     _debounce?.cancel();
     _debounceCliqueLinha?.cancel();
+    _suprimirHoverListaTimer?.cancel();
     _indiceSelecionado.dispose();
     _exibidosNotifier.dispose();
     _scrollController.removeListener(_onScroll);
@@ -663,6 +795,179 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     }
   }
 
+  void _solicitarNovoProduto() {
+    if (_fechando || !_modoGestaoCadastro) return;
+    _fechando = true;
+    _persistirSessao();
+    Navigator.pop(context, const ProdutoPesquisaSolicitacaoNovoCadastro());
+  }
+
+  Future<bool> _persistirProduto(Produto produto) async {
+    final repo = widget.produtoRepository;
+    if (repo is ProdutoApiRepository) {
+      try {
+        await repo.salvarRemoto(produto);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    try {
+      repo.salvar(produto);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _imprimirEtiquetasMarcados() async {
+    if (_operacaoLoteEmAndamento || _idsMarcados.isEmpty) return;
+    final marcados = _produtosMarcados;
+    if (marcados.isEmpty) return;
+
+    setState(() => _processandoLote = true);
+    try {
+      final payload = [
+        for (final p in marcados)
+          (
+            nome: p.nome,
+            codigo: p.codigoBarras.trim().isNotEmpty
+                ? p.codigoBarras.trim()
+                : p.codigoInterno.trim(),
+            preco: p.preco1 > 0 ? p.preco1 : p.precoVenda,
+          ),
+      ];
+      final bytes = await gerarPdfEtiquetasGondolaProdutos(payload);
+      if (!mounted) return;
+
+      final printService = widget.printService;
+      if (printService != null) {
+        final nomeSalvo = await printService.obterNomeImpressoraSalva();
+        if (nomeSalvo.isNotEmpty) {
+          final printer = await printService.resolverImpressoraPorNome(nomeSalvo);
+          if (printer != null) {
+            await Printing.directPrintPdf(
+              printer: printer,
+              onLayout: (_) async => bytes,
+              name: 'Etiquetas produtos',
+            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Etiquetas enviadas para impressao (${marcados.length}).',
+                  ),
+                ),
+              );
+            }
+            return;
+          }
+        }
+      }
+      await Printing.layoutPdf(
+        onLayout: (_) async => bytes,
+        name: 'Etiquetas produtos',
+      );
+    } catch (e) {
+      if (mounted) {
+        LanApiFeedback.snackErro(context, e, prefixo: 'Etiquetas');
+      }
+    } finally {
+      if (mounted) setState(() => _processandoLote = false);
+    }
+  }
+
+  Future<void> _alterarCategoriaMarcados() async {
+    if (_operacaoLoteEmAndamento || _idsMarcados.isEmpty) return;
+    final selecao = await showSeletorCategoriaProduto(context);
+    if (selecao == null || !mounted) return;
+
+    setState(() => _processandoLote = true);
+    var ok = 0;
+    var falhas = 0;
+    try {
+      for (final p in _produtosMarcados) {
+        p.categoria = selecao.categoria;
+        p.subcategoria = selecao.subcategoria ?? '';
+        if (await _persistirProduto(p)) {
+          ok++;
+        } else {
+          falhas++;
+        }
+      }
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            falhas == 0
+                ? 'Categoria atualizada em $ok produto(s).'
+                : 'Categoria: $ok ok, $falhas falha(s).',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _processandoLote = false);
+    }
+  }
+
+  Future<void> _inativarMarcados() async {
+    if (_operacaoLoteEmAndamento || _idsMarcados.isEmpty) return;
+    final marcados = _produtosMarcados;
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Inativar ${marcados.length} produto(s)?'),
+        content: const Text(
+          'Produtos inativos nao aparecem no PDV ate serem reativados no cadastro.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Inativar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    setState(() => _processandoLote = true);
+    var ok = 0;
+    var falhas = 0;
+    try {
+      for (final p in marcados) {
+        if (!p.ativo) {
+          ok++;
+          continue;
+        }
+        p.ativo = false;
+        if (await _persistirProduto(p)) {
+          ok++;
+        } else {
+          falhas++;
+          p.ativo = true;
+        }
+      }
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            falhas == 0
+                ? '$ok produto(s) inativado(s).'
+                : 'Inativacao: $ok ok, $falhas falha(s).',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _processandoLote = false);
+    }
+  }
+
   Future<void> _carregarProximaPaginaRepo() async {
     if (_carregando || !_temMaisNoRepo || _buscaComTexto) return;
     setState(() => _carregando = true);
@@ -805,35 +1110,6 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
   double _alturaLinhaLista(bool compacto) =>
       compacto ? _kAlturaLinhaCelular : _kAlturaLinha;
 
-  void _garantirIndiceVisivel() {
-    final indice = _indiceSelecionado.value;
-    if (indice < 0) return;
-    final filtrada = _listaFiltradaOrdenada;
-    if (indice >= _exibidos && indice < filtrada.length) {
-      _atualizarExibidos(math.min(indice + 1, filtrada.length));
-    }
-    if (!_scrollController.hasClients) return;
-
-    final pos = _scrollController.position;
-    final viewport = pos.viewportDimension;
-    if (viewport <= 0) return;
-
-    final alturaLinha = _alturaLinhaLista(context.isCompactLayout);
-    final itemTop = indice * alturaLinha;
-    final itemBottom = itemTop + alturaLinha;
-    var alvo = pos.pixels;
-    if (itemTop < alvo) {
-      alvo = itemTop;
-    } else if (itemBottom > alvo + viewport) {
-      alvo = itemBottom - viewport;
-    } else {
-      return;
-    }
-    alvo = alvo.clamp(0.0, pos.maxScrollExtent);
-    if ((alvo - pos.pixels).abs() < 0.5) return;
-    _scrollController.jumpTo(alvo);
-  }
-
   void _confirmarSelecionado() {
     final produto = _produtoSelecionado;
     if (produto == null) {
@@ -965,7 +1241,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
               onToggleMarca: () => _alternarMarca(produto.id),
               onTap: () => _onLinhaTap(index, produto),
               onDoubleTap: () => _onLinhaDuploClique(index, produto),
-              onHover: () => _definirIndiceSelecionado(index),
+              onHover: () => _onHoverLinhaLista(index),
             ),
           );
         },
@@ -1028,26 +1304,31 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     }
 
     Widget campoBusca({String? helper}) {
-      return TextField(
-        controller: _pesquisaController,
-        focusNode: _pesquisaFocusNode,
-        autofocus: true,
-        decoration: produtoBuscaInputDecoration(
-          helperText: helper,
-          suffixIcon: widget.sessaoCadastro != null &&
-                  _pesquisaController.text.isNotEmpty
-              ? IconButton(
-                  tooltip: 'Limpar busca',
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: _limparPesquisaCadastro,
-                )
-              : null,
-        ),
-        onChanged: (_) {
-          setState(() {});
-          _agendarBusca();
+      return CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.arrowDown): _setaBaixoNaLista,
         },
-        onSubmitted: (_) => _confirmarSelecionado(),
+        child: TextField(
+          controller: _pesquisaController,
+          focusNode: _pesquisaFocusNode,
+          autofocus: true,
+          decoration: produtoBuscaInputDecoration(
+            helperText: helper,
+            suffixIcon: widget.sessaoCadastro != null &&
+                    _pesquisaController.text.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Limpar busca',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: _limparPesquisaCadastro,
+                  )
+                : null,
+          ),
+          onChanged: (_) {
+            setState(() {});
+            _agendarBusca();
+          },
+          onSubmitted: (_) => _confirmarSelecionado(),
+        ),
       );
     }
 
@@ -1143,11 +1424,34 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
 
     final acoes = [
       if (_idsMarcados.isNotEmpty) ...[
+        FilledButton.tonalIcon(
+          onPressed:
+              _operacaoLoteEmAndamento ? null : _imprimirEtiquetasMarcados,
+          icon: _processandoLote
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.print_outlined),
+          label: const Text('Imprimir Etiquetas'),
+        ),
+        TextButton.icon(
+          onPressed:
+              _operacaoLoteEmAndamento ? null : _alterarCategoriaMarcados,
+          icon: const Icon(Icons.category_outlined, size: 18),
+          label: const Text('Alterar Categoria em Lote'),
+        ),
+        TextButton.icon(
+          onPressed: _operacaoLoteEmAndamento ? null : _inativarMarcados,
+          icon: const Icon(Icons.visibility_off_outlined, size: 18),
+          label: const Text('Inativar Selecionados'),
+        ),
         Tooltip(
           message: 'Aplicar a mesma foto a todos os produtos marcados',
           child: TextButton.icon(
             onPressed:
-                (_excluindo || _aplicandoFoto) ? null : _aplicarFotoAosMarcados,
+                _operacaoLoteEmAndamento ? null : _aplicarFotoAosMarcados,
             icon: _aplicandoFoto
                 ? const SizedBox(
                     width: 16,
@@ -1162,7 +1466,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           ),
         ),
         FilledButton.tonalIcon(
-          onPressed: (_excluindo || _aplicandoFoto) ? null : _excluirMarcados,
+          onPressed: _operacaoLoteEmAndamento ? null : _excluirMarcados,
           icon: _excluindo
               ? const SizedBox(
                   width: 16,
@@ -1177,7 +1481,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
         ),
       ],
       TextButton(
-        onPressed: (_excluindo || _aplicandoFoto) ? null : _fechar,
+        onPressed: _operacaoLoteEmAndamento ? null : _fechar,
         child: const Text('Fechar'),
       ),
     ];
@@ -1185,10 +1489,20 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
     return Focus(
       focusNode: _listaAtalhosFocusNode,
       onKeyEvent: (node, event) {
-        if (event is! KeyDownEvent) {
+        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
           return KeyEventResult.ignored;
         }
+        if (_modoGestaoCadastro && event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.f2 ||
+              event.logicalKey == LogicalKeyboardKey.insert) {
+            _solicitarNovoProduto();
+            return KeyEventResult.handled;
+          }
+        }
         if (event.logicalKey == LogicalKeyboardKey.escape) {
+          if (event is! KeyDownEvent) {
+            return KeyEventResult.handled;
+          }
           if (_usarPainelDetalhe && _painelDetalheAberto) {
             _fecharPainelDetalhe();
             return KeyEventResult.handled;
@@ -1201,21 +1515,17 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
           return KeyEventResult.ignored;
         }
         if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-          _ativarFocoAtalhosLista();
-          _definirIndiceSelecionado(math.min(
-            (_indiceSelecionado.value < 0 ? 0 : _indiceSelecionado.value + 1),
-            totalLista - 1,
-          ));
-          _garantirIndiceVisivel();
+          _setaBaixoNaLista();
           return KeyEventResult.handled;
         }
         if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-          _ativarFocoAtalhosLista();
-          _definirIndiceSelecionado(
-            math.max(_indiceSelecionado.value - 1, 0),
+          _setaCimaNaLista(
+            voltarParaBuscaNoTopo: event is KeyDownEvent,
           );
-          _garantirIndiceVisivel();
           return KeyEventResult.handled;
+        }
+        if (event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
         }
         if (event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.numpadEnter) {
@@ -1240,11 +1550,29 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
                   _kMargemDialogo,
                   8,
                 ),
-                child: Text(
-                  'Pesquisar produto',
-                  style: compacto
-                      ? theme.textTheme.titleLarge
-                      : theme.textTheme.headlineSmall,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _modoGestaoCadastro
+                            ? 'Pesquisa e gestao de produtos'
+                            : 'Pesquisar produto',
+                        style: compacto
+                            ? theme.textTheme.titleLarge
+                            : theme.textTheme.headlineSmall,
+                      ),
+                    ),
+                    if (_modoGestaoCadastro) ...[
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        onPressed: _operacaoLoteEmAndamento
+                            ? null
+                            : _solicitarNovoProduto,
+                        icon: const Icon(Icons.add, size: 20),
+                        label: const Text('Novo Produto'),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const Divider(height: 1),
@@ -1326,7 +1654,7 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
                         builder: (context, _, __) {
                           final produto = _produtoSelecionado;
                           if (produto == null) return const SizedBox.shrink();
-                          return _ProdutoPesquisaDetalhePanel(
+                          return DetalhesProdutoPanel(
                             produto: produto,
                             imagesDirectoryPath:
                                 widget.produtoRepository.productImagesDirPath,
@@ -1348,7 +1676,10 @@ class _ProdutoPesquisaDialogState extends State<_ProdutoPesquisaDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _BarraAtalhosPesquisaProduto(compacto: compacto),
+                    _BarraAtalhosPesquisaProduto(
+                      compacto: compacto,
+                      gestaoCadastro: _modoGestaoCadastro,
+                    ),
                     const SizedBox(height: 6),
                     rodape,
                     const SizedBox(height: 8),
@@ -1437,12 +1768,13 @@ class _ProdutoPesquisaGridRow extends StatelessWidget {
     required double largura,
     Alignment alignment = Alignment.centerLeft,
     bool ultimaColuna = false,
+    EdgeInsets? padding,
   }) {
     return SizedBox(
       width: largura,
       child: Container(
         alignment: alignment,
-        padding: _ProdutoPesquisaColunas.paddingCelula,
+        padding: padding ?? _ProdutoPesquisaColunas.paddingCelula,
         decoration: BoxDecoration(
           border: Border(
             right: ultimaColuna
@@ -1517,6 +1849,7 @@ class _ProdutoPesquisaGridRow extends StatelessWidget {
             context,
             largura: _ProdutoPesquisaColunas.larguraUnidade,
             alignment: Alignment.center,
+            padding: _ProdutoPesquisaColunas.paddingCelulaUnidade,
             child: unidade,
           ),
           _celula(
@@ -1726,11 +2059,8 @@ class _ProdutoPesquisaLinha extends StatelessWidget {
                       estilo: estiloTitulo,
                       maxLinhas: 1,
                     ),
-                    unidade: Text(
-                      rotuloUnidadeProdutoLista(produto),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
+                    unidade: ProdutoCadastroTabelaCelulaUnidade(
+                      produto: produto,
                       style: estiloCelula?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: scheme.onSecondaryContainer,
@@ -1916,9 +2246,13 @@ class _TextoComDestaque extends StatelessWidget {
 }
 
 class _BarraAtalhosPesquisaProduto extends StatelessWidget {
-  const _BarraAtalhosPesquisaProduto({required this.compacto});
+  const _BarraAtalhosPesquisaProduto({
+    required this.compacto,
+    this.gestaoCadastro = false,
+  });
 
   final bool compacto;
+  final bool gestaoCadastro;
 
   @override
   Widget build(BuildContext context) {
@@ -1926,213 +2260,10 @@ class _BarraAtalhosPesquisaProduto extends StatelessWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
           letterSpacing: 0.1,
         );
+    final novo = gestaoCadastro ? ' · [F2/Insert] Novo produto' : '';
     final partes = compacto
-        ? '[Enter] Selecionar · [Esc] Sair'
-        : '[↑↓] Navegar · [Enter] Selecionar · [2× clique] Confirmar · [Esc] Sair';
+        ? '[Enter] Selecionar · [Esc] Sair$novo'
+        : '[↑↓] Navegar · [Enter] Selecionar · [2× clique] Confirmar · [Esc] Sair$novo';
     return Text(partes, style: estilo);
-  }
-}
-
-class _ProdutoPesquisaDetalhePanel extends StatelessWidget {
-  const _ProdutoPesquisaDetalhePanel({
-    required this.produto,
-    required this.imagesDirectoryPath,
-    required this.onFechar,
-    required this.onEditar,
-  });
-
-  final Produto produto;
-  final String imagesDirectoryPath;
-  final VoidCallback onFechar;
-  final VoidCallback onEditar;
-
-  String _moeda(double v) => 'R\$ ${_moedaListaProduto.format(v)}';
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final ean = produto.codigoBarras.trim();
-    final fornecedor = produto.fornecedor.trim();
-    final categoria = produto.categoria.trim();
-
-    return Material(
-      elevation: 2,
-      color: scheme.surfaceContainerLow,
-      child: SizedBox(
-        width: _kLarguraPainelDetalhe,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 4, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Detalhes',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Recolher painel (Esc)',
-                    onPressed: onFechar,
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: produto.fotoPath.trim().isEmpty
-                            ? Container(
-                                width: 160,
-                                height: 160,
-                                color: scheme.surfaceContainerHighest,
-                                child: Icon(
-                                  Icons.inventory_2_outlined,
-                                  size: 48,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              )
-                            : ProdutoFotoView(
-                                fotoPath: produto.fotoPath,
-                                imagesDirectoryPath: imagesDirectoryPath,
-                                width: 160,
-                                height: 160,
-                                fit: BoxFit.cover,
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      produto.nome,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'SKU ${produto.codigoInterno.trim().isEmpty ? '-' : produto.codigoInterno.trim()}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _DetalheSecaoTitulo(titulo: 'Codigo de barras (EAN)'),
-                    Text(
-                      ean.isEmpty ? 'Nao informado' : ean,
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 14),
-                    _DetalheSecaoTitulo(titulo: 'Precos'),
-                    _DetalheLinhaValor(
-                      rotulo: 'Preco 1',
-                      valor: _moeda(produto.preco1),
-                    ),
-                    _DetalheLinhaValor(
-                      rotulo: 'Preco 2',
-                      valor: _moeda(produto.preco2),
-                    ),
-                    _DetalheLinhaValor(
-                      rotulo: 'Custo medio',
-                      valor: _moeda(produto.custoMedio),
-                    ),
-                    const SizedBox(height: 14),
-                    _DetalheSecaoTitulo(titulo: 'Estoque'),
-                    PdvEstoqueResumoPanel(produto: produto, compacto: true),
-                    const SizedBox(height: 14),
-                    _DetalheSecaoTitulo(titulo: 'Fornecedor e categoria'),
-                    _DetalheLinhaValor(
-                      rotulo: 'Fornecedor',
-                      valor: fornecedor.isEmpty ? '-' : fornecedor,
-                    ),
-                    _DetalheLinhaValor(
-                      rotulo: 'Categoria',
-                      valor: categoria.isEmpty ? '-' : categoria,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: FilledButton.icon(
-                onPressed: onEditar,
-                icon: const Icon(Icons.edit_outlined, size: 20),
-                label: const Text('Editar produto'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DetalheSecaoTitulo extends StatelessWidget {
-  const _DetalheSecaoTitulo({required this.titulo});
-
-  final String titulo;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(
-        titulo,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-      ),
-    );
-  }
-}
-
-class _DetalheLinhaValor extends StatelessWidget {
-  const _DetalheLinhaValor({required this.rotulo, required this.valor});
-
-  final String rotulo;
-  final String valor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 108,
-            child: Text(
-              rotulo,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              valor,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

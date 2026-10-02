@@ -3,6 +3,8 @@ import 'dart:async';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/relatorio_meta_comissao.dart';
+import '../../domain/relatorio_vendas_service.dart';
+import '../../model/produto.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../model/cliente.dart';
 import '../../model/item_venda.dart';
@@ -134,17 +136,12 @@ Future<void> relatorioHidratarPeriodoApi(
   } catch (_) {}
 }
 
-/// Lucro estimado da linha (quantidade liquida x margem unitaria).
+/// Lucro estimado da linha (quantidade real liquida x margem unitaria).
 double relatorioLucroItemVenda({
-  required int quantidade,
-  required int quantidadeDevolvida,
-  required double precoUnitario,
-  required double precoCustoUnitario,
-}) {
-  final q = quantidade - quantidadeDevolvida;
-  if (q <= 0) return 0;
-  return q * (precoUnitario - precoCustoUnitario);
-}
+  required ItemVenda item,
+  Produto? produto,
+}) =>
+    RelatorioVendasService.metricasItemVenda(item: item, produto: produto).lucro;
 
 String relatorioRotuloFormaPagamento(String forma) {
   switch (forma) {

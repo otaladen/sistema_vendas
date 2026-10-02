@@ -1,28 +1,13 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/venda_repository.dart';
-import '../../model/produto.dart';
-import '../../model/venda.dart';
+import '../../data/produtos_mais_vendidos_repository.dart';
 import 'relatorio_comparativo.dart';
 import 'relatorio_drill_down.dart';
 import 'relatorio_export_util.dart';
-import 'relatorio_helpers.dart';
 import 'relatorio_periodo.dart';
 import 'widgets/relatorio_exportacoes_menu.dart';
 import 'widgets/relatorio_periodo_painel.dart';
-
-class _AggProd {
-  _AggProd({required this.nome, required this.produtoId});
-
-  final String nome;
-  final int produtoId;
-  int quantidade = 0;
-  double valor = 0;
-  double lucro = 0;
-
-  double get margemPct => valor.abs() < 0.01 ? 0 : (lucro / valor) * 100;
-}
 
 class RelatorioProdutosMaisVendidosPage extends StatefulWidget {
   const RelatorioProdutosMaisVendidosPage({
@@ -42,78 +27,30 @@ class RelatorioProdutosMaisVendidosPage extends StatefulWidget {
 class _RelatorioProdutosMaisVendidosPageState
     extends State<RelatorioProdutosMaisVendidosPage> {
   final NumberFormat _moeda = NumberFormat('#,##0.00', 'pt_BR');
+  final NumberFormat _qtd = NumberFormat('#,##0.###', 'pt_BR');
   LimitesPeriodo? _limites;
   bool _compararPeriodo = false;
   String _ordenarPor = 'quantidade';
-  List<_AggProd> _ranking = [];
+  List<ProdutoMaisVendidoLinha> _ranking = [];
+
+  late final ProdutosMaisVendidosRepository _repo = ProdutosMaisVendidosRepository(
+    vendaRepository: widget.vendaRepository,
+    produtoRepository: widget.produtoRepository,
+  );
 
   String _fmt(double v) => 'R\$ ${_moeda.format(v)}';
 
-  void _agregarVendas(LimitesPeriodo limites, Map<String, _AggProd> map) {
-    final vendas = relatorioVendasFinalizadasPeriodo(widget.vendaRepository, limites);
-    for (final Venda v in vendas) {
-      for (final item in relatorioItensDaVenda(widget.vendaRepository, v)) {
-        final pid = item.produto.targetId;
-        final chave = pid > 0 ? 'id:$pid' : 'nome:${item.nomeProduto}';
-        final nome = pid > 0
-            ? ((widget.produtoRepository.obterPorId(pid) as Produto?)?.nome ??
-                item.nomeProduto)
-            : item.nomeProduto;
-        map.putIfAbsent(chave, () => _AggProd(nome: nome, produtoId: pid));
-        final a = map[chave]!;
-        a.quantidade += item.quantidade;
-        a.valor += item.subtotal;
-        a.lucro += relatorioLucroItemVenda(
-          quantidade: item.quantidade,
-          quantidadeDevolvida: item.quantidadeDevolvida,
-          precoUnitario: item.precoUnitario,
-          precoCustoUnitario: item.precoCustoUnitario,
-        );
-      }
-    }
-    final deltas = (widget.vendaRepository.listarDeltasProdutosDevolucaoPeriodo(
-          relatorioPeriodoFiltro(limites),
-        ) as List)
-        .cast<DeltaProdutoDevolucao>();
-    for (final DeltaProdutoDevolucao d in deltas) {
-      map.putIfAbsent(
-        d.chaveAgg,
-        () => _AggProd(nome: d.nomeExibicao, produtoId: d.produtoId),
-      );
-      final a = map[d.chaveAgg]!;
-      a.quantidade += d.deltaQuantidade;
-      a.valor += d.deltaValor;
-    }
-  }
+  String _fmtQtd(double q) => _qtd.format(q);
 
   void _calcular(LimitesPeriodo limites) {
-    final map = <String, _AggProd>{};
-    _agregarVendas(limites, map);
-    var lista = map.values.where((a) => a.quantidade > 0).toList();
-    lista = _ordenar(lista);
     setState(() {
       _limites = limites;
-      _ranking = lista;
+      _ranking = _repo.listarRanking(limites, ordenarPor: _ordenarPor);
     });
   }
 
-  List<_AggProd> _ordenar(List<_AggProd> lista) {
-    switch (_ordenarPor) {
-      case 'valor':
-        lista.sort((a, b) => b.valor.compareTo(a.valor));
-      case 'lucro':
-        lista.sort((a, b) => b.lucro.compareTo(a.lucro));
-      default:
-        lista.sort((a, b) => b.quantidade.compareTo(a.quantidade));
-    }
-    return lista;
-  }
-
-  Map<String, _AggProd> _mapPeriodo(LimitesPeriodo limites) {
-    final map = <String, _AggProd>{};
-    _agregarVendas(limites, map);
-    return map;
-  }
+  Map<String, ProdutoMaisVendidoLinha> _mapPeriodo(LimitesPeriodo limites) =>
+      _repo.agregarPeriodo(limites);
 
   RelatorioTotaisPeriodo? get _totaisAtual => _limites == null
       ? null
@@ -128,15 +65,26 @@ class _RelatorioProdutosMaisVendidosPageState
   }
 
   List<List<String>> _linhasCsv() => [
-        ['#', 'Produto', 'Quantidade', 'Valor', 'Lucro', 'Margem %'],
+        [
+          '#',
+          'Produto',
+          'Quantidade',
+          'Valor',
+          'Lucro',
+          'Margem %',
+          'Revisar cadastro',
+        ],
         ..._ranking.asMap().entries.map(
               (e) => [
                 '${e.key + 1}',
                 e.value.nome,
-                '${e.value.quantidade}',
-                _moeda.format(e.value.valor),
+                _fmtQtd(e.value.quantidade),
+                _moeda.format(e.value.faturamentoTotal),
                 _moeda.format(e.value.lucro),
-                e.value.margemPct.toStringAsFixed(1),
+                e.value.margemIrreal
+                    ? '—'
+                    : e.value.margemPercentual.toStringAsFixed(1),
+                e.value.margemIrreal ? 'sim' : '',
               ],
             ),
       ];
@@ -152,32 +100,39 @@ class _RelatorioProdutosMaisVendidosPageState
         return [
           '${e.key + 1}',
           a.nome,
-          '${a.quantidade}',
-          _fmt(a.valor),
+          _fmtQtd(a.quantidade),
+          _fmt(a.faturamentoTotal),
           _fmt(a.lucro),
         ];
       }).toList(),
     );
   }
 
-  String _chaveAgg(_AggProd a) =>
+  String _chaveAgg(ProdutoMaisVendidoLinha a) =>
       a.produtoId > 0 ? 'id:${a.produtoId}' : 'nome:${a.nome}';
 
-  String? _rotuloVariacao(_AggProd a) {
+  String? _rotuloVariacao(ProdutoMaisVendidoLinha a) {
     if (!_compararPeriodo || _limites == null) return null;
     final ant = _mapPeriodo(relatorioPeriodoAnterior(_limites!))[_chaveAgg(a)];
     if (ant == null) return 'novo no periodo ant.';
     final atual = switch (_ordenarPor) {
-      'valor' => a.valor,
+      'valor' => a.faturamentoTotal,
       'lucro' => a.lucro,
-      _ => a.quantidade.toDouble(),
+      _ => a.quantidade,
     };
     final anterior = switch (_ordenarPor) {
-      'valor' => ant.valor,
+      'valor' => ant.faturamentoTotal,
       'lucro' => ant.lucro,
-      _ => ant.quantidade.toDouble(),
+      _ => ant.quantidade,
     };
     return relatorioFormatarVariacaoPct(atual, anterior);
+  }
+
+  String _rotuloMargem(ProdutoMaisVendidoLinha a) {
+    if (a.margemIrreal) {
+      return 'Margem irreal — revisar cadastro/escala';
+    }
+    return '${a.margemPercentual.toStringAsFixed(1)}%';
   }
 
   @override
@@ -222,7 +177,10 @@ class _RelatorioProdutosMaisVendidosPageState
                 onSelectionChanged: (s) {
                   setState(() {
                     _ordenarPor = s.first;
-                    if (lim != null) _ranking = _ordenar(List.from(_ranking));
+                    if (lim != null) {
+                      _ranking =
+                          _repo.listarRanking(lim, ordenarPor: _ordenarPor);
+                    }
                   });
                 },
               ),
@@ -260,9 +218,9 @@ class _RelatorioProdutosMaisVendidosPageState
                         leading: CircleAvatar(child: Text('${i + 1}')),
                         title: Text(a.nome),
                         subtitle: Text(
-                          '${a.quantidade} un. · ${_fmt(a.valor)} · '
+                          '${_fmtQtd(a.quantidade)} un. · ${_fmt(a.faturamentoTotal)} · '
                           'Lucro ${_fmt(a.lucro)} · '
-                          '${a.margemPct.toStringAsFixed(1)}%'
+                          '${_rotuloMargem(a)}'
                           '${varPct != null ? ' · $varPct vs ant.' : ''}',
                         ),
                         trailing: a.produtoId > 0
