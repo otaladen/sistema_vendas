@@ -65,6 +65,26 @@ void main() {
     expect(item.precoVendaSugerido, closeTo(12, 0.01));
   });
 
+  test('preco 2 e 3 usam margem da propria tabela', () {
+    final p = produto(custo: 10, venda: 20);
+    p.preco2 = 18;
+    p.preco3 = 16;
+    final item = NfeRevisaoPrecoCalculo.deProduto(
+      produto: p,
+      custoNovo: 12,
+      margemMinimaPadrao: 20,
+    );
+    expect(item.preco2Atual, 18);
+    expect(item.preco3Atual, 16);
+    expect(item.preco2Sugerido, closeTo(21.6, 0.01));
+    expect(item.preco3Sugerido, closeTo(19.2, 0.01));
+    expect(item.variacaoCustoPercentual, closeTo(20, 0.01));
+    expect(
+      item.precoRepassandoAumentoCusto(20),
+      closeTo(22, 0.01),
+    );
+  });
+
   test('upsert por produto fica com o maior custo XML', () {
     final mapa = <int, NfeRevisaoPrecoItem>{};
     NfeRevisaoPrecoCalculo.upsert(

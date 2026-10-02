@@ -2183,6 +2183,8 @@ class _ConferenciaXmlScreenState extends State<ConferenciaXmlScreen> {
             emitente: widget.nfe.emitente.nomeFantasia.trim().isNotEmpty
                 ? widget.nfe.emitente.nomeFantasia
                 : widget.nfe.emitente.razaoSocial,
+            margemMinimaPadrao: _margemMinimaPadrao,
+            configuracoesService: widget.configuracoesService,
           );
         }
       } catch (e) {
