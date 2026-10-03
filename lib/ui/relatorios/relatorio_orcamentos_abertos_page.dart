@@ -772,7 +772,7 @@ class _RelatorioOrcamentosAbertosPageState
                                   context: context,
                                   venda: v,
                                   acao: 'pdf',
-                                  tooltip: 'PDF',
+                                  tooltip: 'PDF para o cliente',
                                   icone: Icons.picture_as_pdf_outlined,
                                   handler: widget.onGerarPdf!,
                                 ),

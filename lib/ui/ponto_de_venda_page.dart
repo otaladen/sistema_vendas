@@ -11,6 +11,7 @@ import 'package:printing/printing.dart';
 import '../domain/cliente_busca_util.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/entregas/cargas_entrega.dart';
+import '../domain/entregas/observacao_carreto.dart';
 import '../domain/pdv_balcao_rapido_helper.dart';
 import '../domain/pdv_busca_inteligente.dart';
 import '../domain/quantidade_venda_util.dart';
@@ -69,6 +70,7 @@ import '../data/vendedor_repository.dart';
 import 'vales/vale_credito_busca_dialog.dart';
 import 'pdv/dialogs/orcamento_salvo_dialog.dart';
 import 'pdv/dialogs/selecionar_cliente_dialog.dart';
+import 'pdv/pdv_dialogo_vendedor_atalho.dart';
 import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/kit_orcamento.dart';
@@ -79,12 +81,14 @@ import '../services/cupom_pdf_gerado.dart';
 import '../services/esc_pos_orcamento_builder.dart';
 import '../services/esc_pos_printer_service.dart';
 import '../services/orcamento_pdf_service.dart';
+import '../services/orcamento_proposta_pdf.dart';
 import '../services/print_service.dart';
 import 'clientes_page.dart';
 import 'pdv_consulta_preview_panel.dart';
 import 'pdv_consulta_produtos_page.dart';
 import 'pdv/agenda_carreto_pdv_dialog.dart';
 import 'pdv/dividir_cargas_pdv_dialog.dart';
+import 'vendas/carreto_observacao_dialog.dart';
 import 'widgets/cadastro_rapido_cliente_dialog.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'pdv_pesquisa_comando.dart';
@@ -231,6 +235,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Agenda de carretos aberta (consulta ou definir data) — evita reentrada.
   bool _agendaCarretoDialogAberto = false;
 
+  /// Modal de observacoes do carreto aberto: atalhos do PDV/checkout ficam
+  /// com o modal (Esc, F10...).
+  bool _carretoObservacaoDialogAberto = false;
+
+  /// O modal abre sozinho uma vez por venda, quando o frete e escolhido.
+  bool _carretoObservacaoSugeridaNaVenda = false;
+
   /// Dialogo "Orcamento salvo" (imprimir/PDF) — bloqueia F10 do PDV.
   bool _dialogoOrcamentoSalvoAberto = false;
 
@@ -244,6 +255,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   /// Modal "Quem esta vendendo?" aberto (bloqueia atalhos 1-6 do checkout).
   bool _dialogoSelecionarVendedorPdvAberto = false;
+  List<Vendedor> _dialogoVendedorListaAtivos = const [];
+  void Function(int vendedorId)? _dialogoVendedorConfirmarPorTecla;
+  void Function()? _dialogoVendedorCancelarPorTecla;
+  bool _dialogoVendedorBuscaPorNomeAtiva = false;
+  bool _dialogoVendedorTecladoAtivo = false;
+  String? _dialogoVendedorDigitoPendente;
+  bool _overlayVendedorNoCheckout = false;
+  Completer<bool>? _overlayVendedorCheckoutCompleter;
 
   /// Overlay "Processando orcamento..." — so durante o save no servidor.
   bool _overlaySalvandoOrcamento = false;
@@ -442,12 +461,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   void _alternarTipoEntregaLinhaCarrinho(int index) {
     if (index < 0 || index >= _carrinho.length) return;
+    final tinhaCarreto = _carrinhoTemItemCarreto;
     final tipoAnterior = EntregaVendaHelper.normalizarTipoItem(
       _carrinho[index].tipoEntregaItem,
     );
     final tipoNovo = EntregaVendaHelper.proximoTipoItem(tipoAnterior);
     _carrinho[index].tipoEntregaItem = tipoNovo;
     _notificarUiCarrinho();
+    if (!tinhaCarreto && _carrinhoTemItemCarreto) {
+      _sugerirObservacaoCarretoAposFrete();
+    }
   }
 
   void _alternarTabelaPrecoLinhaCarrinho(int index) {
@@ -1892,6 +1915,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Teclas globais do PDV (F7 checkout; seta baixo na busca entra no carrinho).
   bool _handlerTeclasHardwarePdv(KeyEvent event) {
     if (!mounted) return false;
+    if (_dialogoSelecionarVendedorPdvAberto) {
+      if (_tratarTeclaDialogoVendedorPdv(event)) return true;
+      return false;
+    }
+    if (_carretoObservacaoDialogAberto) return false;
     if (event is KeyDownEvent &&
         _pdvBloqueioVendedor &&
         _pdvBloqueioInatividadeMinutos > 0) {
@@ -1939,6 +1967,10 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     // Checkout modal: rota do PDV deixa de ser "current", mas os atalhos
     // precisam funcionar (F10 enviar, F6/F3, Esc).
     if (_checkoutDialogAberto && event is KeyDownEvent) {
+      if (_dialogoSelecionarVendedorPdvAberto &&
+          _tratarTeclaDialogoVendedorPdv(event)) {
+        return true;
+      }
       if (event.logicalKey == LogicalKeyboardKey.f10) {
         if (!_confirmandoEnvioCheckout && !_salvandoOrcamento) {
           unawaited(_checkoutDialogAcaoF10Async());
@@ -1955,6 +1987,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       }
       if (event.logicalKey == LogicalKeyboardKey.f7) {
         _agendarCheckoutF7Microtask(_shiftPressionado());
+        return true;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.f8 &&
+          _carrinhoTemItemCarreto) {
+        unawaited(
+          _abrirObservacaoCarretoPdv(setDialogState: _checkoutDialogSetState),
+        );
         return true;
       }
       if (event.logicalKey == LogicalKeyboardKey.escape) {
@@ -2074,8 +2113,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _voltarFocoParaPesquisa();
   }
 
-  /// Carrinho vazio: abre consulta (F4). Com itens: foco no campo de busca do PDV.
+  /// Venda com carreto: observacoes do carreto. Sem carreto: carrinho vazio
+  /// abre consulta (F4); com itens, foco no campo de busca do PDV.
   void _atalhoF8Pdv() {
+    if (_carrinhoTemItemCarreto ||
+        EntregaVendaHelper.normalizarTipoItem(_tipoEntregaSelecionada) ==
+            EntregaVendaHelper.tipoEntregaLoja) {
+      unawaited(_abrirObservacaoCarretoPdv());
+      return;
+    }
     if (_carrinho.isEmpty) {
       unawaited(_abrirConsultaProdutos());
       return;
@@ -2823,6 +2869,81 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return lista.where((Vendedor v) => v.ativo).take(60).toList();
   }
 
+  void _confirmarDialogoVendedorPorCodigo(String codigo) {
+    if (!_dialogoSelecionarVendedorPdvAberto ||
+        _dialogoVendedorBuscaPorNomeAtiva) {
+      return;
+    }
+    final v = pdvResolverVendedorPorCodigoInterno(
+      _dialogoVendedorListaAtivos,
+      codigo,
+    );
+    if (v != null) {
+      _dialogoVendedorConfirmarPorTecla?.call(v.id);
+    }
+  }
+
+  void _consumirDigitoPendenteDialogoVendedor() {
+    final digito = _dialogoVendedorDigitoPendente;
+    if (digito == null) return;
+    _dialogoVendedorDigitoPendente = null;
+    _confirmarDialogoVendedorPorCodigo(digito);
+  }
+
+  /// Teclas do modal vendedor (hardware). Retorna true se consumiu o evento.
+  bool _tratarTeclaDialogoVendedorPdv(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (!_dialogoVendedorBuscaPorNomeAtiva) {
+      final digito = pdvDigitoDeTeclaVendedor(event.logicalKey);
+      if (digito != null) {
+        if (_dialogoVendedorTecladoAtivo) {
+          _confirmarDialogoVendedorPorCodigo(digito);
+        } else {
+          _dialogoVendedorDigitoPendente = digito;
+        }
+        return true;
+      }
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _dialogoVendedorCancelarPorTecla?.call();
+      return _dialogoVendedorCancelarPorTecla != null;
+    }
+    return false;
+  }
+
+  void _fecharOverlayVendedorCheckout({required bool confirmado, int? vendedorId}) {
+    if (!_overlayVendedorNoCheckout) return;
+    _overlayVendedorNoCheckout = false;
+    _focusPagamentoPdV.canRequestFocus = true;
+    final c = _overlayVendedorCheckoutCompleter;
+    _overlayVendedorCheckoutCompleter = null;
+    _checkoutDialogSetState?.call(() {});
+    if (c != null && !c.isCompleted) {
+      c.complete(confirmado && vendedorId != null);
+    }
+  }
+
+  Widget _buildOverlaySelecionarVendedorCheckout() {
+    if (!_overlayVendedorNoCheckout) return const SizedBox.shrink();
+    return Positioned.fill(
+      child: Material(
+        color: Colors.black54,
+        child: Center(
+          child: _DialogoSelecionarVendedorPdv(
+            vendedoresAtivos: _dialogoVendedorListaAtivos,
+            pesquisarVendedores: _pesquisarVendedoresAtivosPdv,
+            onConfirmar: (id) => _dialogoVendedorConfirmarPorTecla?.call(id),
+            onCancelar: () => _dialogoVendedorCancelarPorTecla?.call(),
+            onModoBuscaPorNomeChanged: (ativo) {
+              _dialogoVendedorBuscaPorNomeAtiva = ativo;
+            },
+            onTeclaCodigo: _confirmarDialogoVendedorPorCodigo,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Quando [pdvExigirVendedor] esta ativo, abre dialogo para escolher vendedor.
   /// Retorna `false` se o usuario cancelar ou nao houver vendedores ativos.
   Future<bool> _garantirVendedorPdvObrigatorio() async {
@@ -2866,39 +2987,89 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     }
 
     int? vendedorSelecionadoId;
-    // Com checkout aberto, o dialogo precisa ir no mesmo Navigator do fechamento
-    // (nao no root), senao fica atras do modal e a tela parece travada.
     final checkoutAberto = _checkoutDialogAberto;
     final ctxVendedor =
         checkoutAberto && _checkoutDialogFechamentoContext != null
         ? _checkoutDialogFechamentoContext!
         : context;
     _dialogoSelecionarVendedorPdvAberto = true;
+    _dialogoVendedorListaAtivos = vendedoresAtivos;
+    _dialogoVendedorBuscaPorNomeAtiva = false;
+    _dialogoVendedorDigitoPendente = null;
     if (checkoutAberto) {
       _focusPagamentoPdV.unfocus();
+      _focusCheckoutAcaoPrimaria.unfocus();
+      _focusPagamentoPdV.canRequestFocus = false;
     }
     bool confirmar = false;
     try {
-      confirmar =
-          await showDialog<bool>(
-            context: ctxVendedor,
-            useRootNavigator: !checkoutAberto,
-            barrierDismissible: false,
-            builder: (dialogContext) {
-              return _DialogoSelecionarVendedorPdv(
-                vendedoresAtivos: vendedoresAtivos,
-                pesquisarVendedores: _pesquisarVendedoresAtivosPdv,
-                onConfirmar: (id) {
+      if (checkoutAberto && _checkoutDialogSetState != null) {
+        final completer = Completer<bool>();
+        _overlayVendedorCheckoutCompleter = completer;
+        _dialogoVendedorTecladoAtivo = true;
+        _dialogoVendedorConfirmarPorTecla = (id) {
+          vendedorSelecionadoId = id;
+          _fecharOverlayVendedorCheckout(confirmado: true, vendedorId: id);
+        };
+        _dialogoVendedorCancelarPorTecla = () {
+          _fecharOverlayVendedorCheckout(confirmado: false, vendedorId: null);
+        };
+        _overlayVendedorNoCheckout = true;
+        _checkoutDialogSetState!.call(() {});
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _consumirDigitoPendenteDialogoVendedor();
+        });
+        confirmar = await completer.future;
+      } else {
+        _dialogoVendedorTecladoAtivo = false;
+        confirmar =
+            await showDialog<bool>(
+              context: ctxVendedor,
+              barrierDismissible: false,
+              builder: (dialogContext) {
+                _dialogoVendedorTecladoAtivo = true;
+                _dialogoVendedorConfirmarPorTecla = (id) {
                   vendedorSelecionadoId = id;
-                  Navigator.pop(dialogContext, true);
-                },
-                onCancelar: () => Navigator.pop(dialogContext, false),
-              );
-            },
-          ) ==
-          true;
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext, true);
+                  }
+                };
+                _dialogoVendedorCancelarPorTecla = () {
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext, false);
+                  }
+                };
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _consumirDigitoPendenteDialogoVendedor();
+                });
+                return _DialogoSelecionarVendedorPdv(
+                  vendedoresAtivos: vendedoresAtivos,
+                  pesquisarVendedores: _pesquisarVendedoresAtivosPdv,
+                  onConfirmar: (id) {
+                    vendedorSelecionadoId = id;
+                    Navigator.pop(dialogContext, true);
+                  },
+                  onCancelar: () => Navigator.pop(dialogContext, false),
+                  onModoBuscaPorNomeChanged: (ativo) {
+                    _dialogoVendedorBuscaPorNomeAtiva = ativo;
+                  },
+                  onTeclaCodigo: _confirmarDialogoVendedorPorCodigo,
+                );
+              },
+            ) ==
+            true;
+      }
     } finally {
+      _overlayVendedorNoCheckout = false;
+      _overlayVendedorCheckoutCompleter = null;
+      _focusPagamentoPdV.canRequestFocus = true;
       _dialogoSelecionarVendedorPdvAberto = false;
+      _dialogoVendedorListaAtivos = const [];
+      _dialogoVendedorConfirmarPorTecla = null;
+      _dialogoVendedorCancelarPorTecla = null;
+      _dialogoVendedorBuscaPorNomeAtiva = false;
+      _dialogoVendedorTecladoAtivo = false;
+      _dialogoVendedorDigitoPendente = null;
     }
     if (!confirmar || vendedorSelecionadoId == null) return false;
     if (!mounted) return false;
@@ -4575,6 +4746,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         onRemoverItem: _removerItemCarrinho,
         onAlternarTipoEntrega: _alternarTipoEntregaLinhaCarrinho,
         onAlternarTabelaPreco: _alternarTabelaPrecoLinhaCarrinho,
+        onAplicarTabelaPrecoCarrinho: _aplicarTabelaPrecoNoCarrinho,
         onDividirLinha: _dividirLinhaCarrinho,
         onAlterarPrecoLinha: _alterarPrecoLinhaCarrinho,
         onIrPesquisaQuandoVazio: () => unawaited(_abrirConsultaProdutos()),
@@ -4671,6 +4843,55 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return _rotuloPreco(tabela);
   }
 
+  /// Alt+F1–F3 ou menu do cabecalho TAB.: aplica a tabela em todo o carrinho.
+  ///
+  /// Preco negociado na linha e mantido. Novos itens (leitor / busca direta)
+  /// passam a entrar nessa tabela.
+  void _aplicarTabelaPrecoNoCarrinho(String novaTabela) {
+    if (_carrinho.isEmpty) return;
+    final tabela = _normalizarTabelaPrecoPdv(novaTabela);
+    _precoListaAtivo = tabela;
+    var alteradas = 0;
+    var negociadas = 0;
+    for (final linha in _carrinho) {
+      final jaNaTabela = _normalizarTabelaPrecoPdv(linha.precoTipo) == tabela;
+      if (linha.precoUnitarioManual) {
+        if (jaNaTabela) continue;
+        _aplicarTabelaPrecoNaLinha(linha, tabela);
+        negociadas++;
+        continue;
+      }
+      if (jaNaTabela) continue;
+      _aplicarTabelaPrecoNaLinha(linha, tabela);
+      alteradas++;
+    }
+    if (alteradas > 0 || negociadas > 0) {
+      _promoCarrinho?.aplicarRegrasCarrinho(
+        _carrinho,
+        dataReferencia: DateTime.now(),
+        segmentoCliente: _segmentoClienteAtivo,
+      );
+    }
+    _notificarUiCarrinho();
+    if (!mounted) return;
+    final rotulo = _rotuloPreco(tabela);
+    final String mensagem;
+    if (alteradas == 0 && negociadas == 0) {
+      mensagem = 'Carrinho já está em $rotulo.';
+    } else if (negociadas == 0) {
+      final itens = alteradas == 1 ? 'item' : 'itens';
+      mensagem = '$rotulo aplicado em $alteradas $itens.';
+    } else {
+      final aviso = negociadas == 1
+          ? '1 preço negociado foi mantido'
+          : '$negociadas preços negociados foram mantidos';
+      mensagem = '$rotulo aplicado no carrinho. $aviso.';
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(mensagem), duration: const Duration(seconds: 3)),
+    );
+  }
+
   /// F1–F3 com linha selecionada no carrinho: altera a tabela da linha.
   void _aplicarTabelaPrecoAtalhoPdv(String novaTabela) {
     final idx = _indiceLinhaCarrinho;
@@ -4744,6 +4965,64 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           ),
         );
       }
+    }
+    if (tipo == EntregaVendaHelper.tipoEntregaLoja) {
+      _sugerirObservacaoCarretoAposFrete();
+    }
+  }
+
+  /// Frete escolhido no PDV: abre o modal de observacoes uma vez por venda.
+  void _sugerirObservacaoCarretoAposFrete() {
+    if (_carretoObservacaoSugeridaNaVenda || _entregaSomenteCotacao) return;
+    _carretoObservacaoSugeridaNaVenda = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_abrirObservacaoCarretoPdv());
+    });
+  }
+
+  /// Modal de observacoes do carreto (F8 ou botao no fechamento). O texto
+  /// fica em [_observacaoEntregaController] e vai para
+  /// [Venda.observacaoEntrega] ao salvar o orcamento/venda.
+  Future<void> _abrirObservacaoCarretoPdv({
+    StateSetter? setDialogState,
+  }) async {
+    if (_carretoObservacaoDialogAberto || !mounted) return;
+    if (_entregaSomenteCotacao) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cotacao sem endereco: as observacoes do carreto sao gravadas '
+            'quando a entrega for definida.',
+          ),
+        ),
+      );
+      return;
+    }
+    _carretoObservacaoDialogAberto = true;
+    try {
+      final gravada = _observacaoEntregaController.text;
+      final digitado = await mostrarCarretoObservacaoDialog(
+        context,
+        observacaoInicial: ObservacaoCarreto.textoEditavel(gravada),
+        clienteNome: _clienteSelecionado()?.nomeRazao ?? '',
+        enderecoResumo: _enderecoEntregaController.text,
+      );
+      if (!mounted || digitado == null) return;
+      void aplicar() {
+        _observacaoEntregaController.text = ObservacaoCarreto.mesclar(
+          _observacaoEntregaController.text,
+          digitado,
+        );
+      }
+
+      if (setDialogState != null) {
+        _atualizarCheckoutFechamento(setDialogState, aplicar);
+      } else {
+        setState(aplicar);
+      }
+    } finally {
+      _carretoObservacaoDialogAberto = false;
     }
   }
 
@@ -5453,7 +5732,18 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   ) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (_dialogoSelecionarVendedorPdvAberto) {
-      return KeyEventResult.ignored;
+      if (!_dialogoVendedorBuscaPorNomeAtiva) {
+        final digito = pdvDigitoDeTeclaVendedor(event.logicalKey);
+        if (digito != null) {
+          if (_dialogoVendedorTecladoAtivo) {
+            _confirmarDialogoVendedorPorCodigo(digito);
+          } else {
+            _dialogoVendedorDigitoPendente = digito;
+          }
+          return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.handled;
     }
     if (_pagamentoMistoPdV) return KeyEventResult.ignored;
     final key = event.logicalKey;
@@ -5856,50 +6146,57 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                         ),
                       ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                    child: Stack(
+                      fit: StackFit.expand,
                       children: [
-                        _buildCheckoutDialogCabecalho(dialogContext),
-                        Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            celular ? 14 : 20,
-                            14,
-                            celular ? 14 : 20,
-                            10,
-                          ),
-                          child: _buildCheckoutResumoFixo(setDialogState),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: celular ? 14 : 20,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildCheckoutDialogCabecalho(dialogContext),
+                            Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                celular ? 14 : 20,
+                                14,
+                                celular ? 14 : 20,
+                                10,
+                              ),
+                              child: _buildCheckoutResumoFixo(setDialogState),
                             ),
-                            child: Scrollbar(
-                              controller: scrollCheckout,
-                              thumbVisibility: !celular,
-                              interactive: true,
-                              child: SingleChildScrollView(
-                                controller: scrollCheckout,
-                                primary: false,
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                padding: const EdgeInsets.only(
-                                  right: 6,
-                                  bottom: 12,
+                            Expanded(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: celular ? 14 : 20,
                                 ),
-                                child: FocusTraversalGroup(
-                                  policy: OrderedTraversalPolicy(),
-                                  child: _buildFormularioFechamentoVenda(
-                                    setDialogState: setDialogState,
-                                    scrollCheckout: scrollCheckout,
+                                child: Scrollbar(
+                                  controller: scrollCheckout,
+                                  thumbVisibility: !celular,
+                                  interactive: true,
+                                  child: SingleChildScrollView(
+                                    controller: scrollCheckout,
+                                    primary: false,
+                                    physics:
+                                        const AlwaysScrollableScrollPhysics(),
+                                    padding: const EdgeInsets.only(
+                                      right: 6,
+                                      bottom: 12,
+                                    ),
+                                    child: FocusTraversalGroup(
+                                      policy: OrderedTraversalPolicy(),
+                                      child: _buildFormularioFechamentoVenda(
+                                        setDialogState: setDialogState,
+                                        scrollCheckout: scrollCheckout,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
+                            _buildCheckoutDialogRodape(
+                              dialogContext: dialogContext,
+                            ),
+                          ],
                         ),
-                        _buildCheckoutDialogRodape(
-                          dialogContext: dialogContext,
-                        ),
+                        _buildOverlaySelecionarVendedorCheckout(),
                       ],
                     ),
                   ),
@@ -6358,6 +6655,25 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                         },
                         icon: const Icon(Icons.edit_outlined),
                         label: const Text('Editar dados da entrega'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: () => unawaited(
+                        _abrirObservacaoCarretoPdv(
+                          setDialogState: setDialogState,
+                        ),
+                      ),
+                      icon: const Icon(Icons.sticky_note_2_outlined),
+                      label: Text(
+                        ObservacaoCarreto.linhasDigitadas(
+                          _observacaoEntregaController.text,
+                        ).isEmpty
+                            ? 'Observações do carreto (F8)'
+                            : 'Editar observações do carreto (F8)',
                       ),
                     ),
                   ),
@@ -6924,6 +7240,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _valorFreteController.clear();
       _enderecoEntregaController.clear();
       _observacaoEntregaController.clear();
+      _carretoObservacaoSugeridaNaVenda = false;
       _orcamentoEmEdicaoId = null;
       _orcamentoEmEdicaoNumero = null;
       _idempotencyKeyOrcamentoPendente = null;
@@ -7967,9 +8284,28 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   }
 
   Future<CupomPdfGerado> _gerarOrcamentoPdfBytes(Venda venda) async {
+    final empresa = await widget.configuracoesService.carregarEfetiva();
+    if (empresa.modeloPdf == 'a4') {
+      return _gerarOrcamentoPdfCliente(venda);
+    }
+    final carregado = await _carregarItensOrcamentoParaImpressao(venda);
+    return OrcamentoPdfService.gerar(
+      venda: venda,
+      itens: carregado.itens,
+      empresa: empresa,
+      validadeDias: _validadeOrcamentoDias,
+      cliente: _clienteDaVenda(venda),
+      vendedor: _vendedorDaVenda(venda),
+      produtosPorItem: carregado.produtos,
+      formatarMoedaFn: _formatarMoeda,
+    );
+  }
+
+  /// PDF A4 para arquivo e WhatsApp. A bobina continua no cupom.
+  Future<CupomPdfGerado> _gerarOrcamentoPdfCliente(Venda venda) async {
     final carregado = await _carregarItensOrcamentoParaImpressao(venda);
     final empresa = await widget.configuracoesService.carregarEfetiva();
-    return OrcamentoPdfService.gerar(
+    return OrcamentoPropostaPdf.gerar(
       venda: venda,
       itens: carregado.itens,
       empresa: empresa,
@@ -8037,7 +8373,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         cliente: _clienteDaVenda(venda),
         valorTotal: venda.total,
         nomeLoja: nomeLoja,
-        gerarPdfOrcamento: _gerarOrcamentoPdfBytes,
+        gerarPdfOrcamento: _gerarOrcamentoPdfCliente,
         onDialogoFilhoComDigitacao: (aberto) {
           if (!mounted) return;
           setState(() => _dialogoWhatsappSobreOrcamentoSalvo = aberto);
@@ -8077,7 +8413,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         return;
       }
 
-      final pdf = await _gerarOrcamentoPdfBytes(venda);
+      final pdf = acao == 'pdf'
+          ? await _gerarOrcamentoPdfCliente(venda)
+          : await _gerarOrcamentoPdfBytes(venda);
       if (!mounted) return;
       if (acao == 'imprimir') {
         await Printing.layoutPdf(
@@ -8367,6 +8705,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         SingleActivator(LogicalKeyboardKey.f3): SelecionarPrecoListaIntent(
           'preco3',
         ),
+        SingleActivator(LogicalKeyboardKey.f1, alt: true):
+            AplicarTabelaPrecoCarrinhoIntent('preco1'),
+        SingleActivator(LogicalKeyboardKey.f2, alt: true):
+            AplicarTabelaPrecoCarrinhoIntent('preco2'),
+        SingleActivator(LogicalKeyboardKey.f3, alt: true):
+            AplicarTabelaPrecoCarrinhoIntent('preco3'),
         SingleActivator(LogicalKeyboardKey.f1, control: true):
             SelecionarEntregaPadraoIntent('retirada'),
         SingleActivator(LogicalKeyboardKey.f2, control: true):
@@ -8397,6 +8741,13 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
               CallbackAction<SelecionarPrecoListaIntent>(
                 onInvoke: (intent) {
                   _aplicarTabelaPrecoAtalhoPdv(intent.precoTipo);
+                  return null;
+                },
+              ),
+          AplicarTabelaPrecoCarrinhoIntent:
+              CallbackAction<AplicarTabelaPrecoCarrinhoIntent>(
+                onInvoke: (intent) {
+                  _aplicarTabelaPrecoNoCarrinho(intent.precoTipo);
                   return null;
                 },
               ),
@@ -8935,6 +9286,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
     required this.onRemoverItem,
     required this.onAlternarTipoEntrega,
     required this.onAlternarTabelaPreco,
+    required this.onAplicarTabelaPrecoCarrinho,
     required this.onDividirLinha,
     required this.onAlterarPrecoLinha,
     required this.onIrPesquisaQuandoVazio,
@@ -8959,6 +9311,7 @@ class _PdvCarrinhoProdutos extends StatefulWidget {
   final void Function(int index) onRemoverItem;
   final void Function(int index) onAlternarTipoEntrega;
   final void Function(int index) onAlternarTabelaPreco;
+  final ValueChanged<String> onAplicarTabelaPrecoCarrinho;
   final Future<void> Function(int index) onDividirLinha;
   final Future<void> Function(int index) onAlterarPrecoLinha;
   final VoidCallback onIrPesquisaQuandoVazio;
@@ -9074,6 +9427,7 @@ class _PdvCarrinhoProdutosState extends State<_PdvCarrinhoProdutos> {
                 PdvCarrinhoListaCabecalho(
                   alvosTouchAmplos: widget.alvosTouchAmplos,
                   exibirColunaUnitario: exibirColunaUnitario,
+                  onAplicarTabelaPreco: widget.onAplicarTabelaPrecoCarrinho,
                 ),
               Expanded(
                 child: ListView.builder(
@@ -10174,6 +10528,12 @@ class SelecionarPrecoListaIntent extends Intent {
   final String precoTipo;
 }
 
+/// Alt+F1–F3: aplica a tabela de preco em todas as linhas do carrinho.
+class AplicarTabelaPrecoCarrinhoIntent extends Intent {
+  const AplicarTabelaPrecoCarrinhoIntent(this.precoTipo);
+  final String precoTipo;
+}
+
 /// Ctrl+F1/F2/F3: padrao de entrega (carrinho uniforme aplica nas linhas;
 /// misto: so padrao — tecla E / Dividir por linha).
 class SelecionarEntregaPadraoIntent extends Intent {
@@ -10338,12 +10698,16 @@ class _DialogoSelecionarVendedorPdv extends StatefulWidget {
     required this.pesquisarVendedores,
     required this.onConfirmar,
     required this.onCancelar,
+    required this.onModoBuscaPorNomeChanged,
+    required this.onTeclaCodigo,
   });
 
   final List<Vendedor> vendedoresAtivos;
   final List<Vendedor> Function(String termo) pesquisarVendedores;
   final ValueChanged<int> onConfirmar;
   final VoidCallback onCancelar;
+  final ValueChanged<bool> onModoBuscaPorNomeChanged;
+  final ValueChanged<String> onTeclaCodigo;
 
   @override
   State<_DialogoSelecionarVendedorPdv> createState() =>
@@ -10356,49 +10720,52 @@ class _DialogoSelecionarVendedorPdvState
   int? _vendedorSelecionadoId;
   late final TextEditingController _pesquisaController;
   final _focusPesquisa = FocusNode();
+  bool _confirmacaoVendedorEnviada = false;
+  bool _buscaPorNomeAtiva = false;
 
   @override
   void initState() {
     super.initState();
     _vendedoresExibidos = widget.vendedoresAtivos.take(60).toList();
     _pesquisaController = TextEditingController();
-    HardwareKeyboard.instance.addHandler(_handlerTeclasHardwareVendedor);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _focusPesquisa.canRequestFocus) {
-        _focusPesquisa.requestFocus();
-      }
-    });
+    widget.onModoBuscaPorNomeChanged(false);
   }
 
   @override
   void dispose() {
-    HardwareKeyboard.instance.removeHandler(_handlerTeclasHardwareVendedor);
     _pesquisaController.dispose();
     _focusPesquisa.dispose();
     super.dispose();
   }
 
-  bool _handlerTeclasHardwareVendedor(KeyEvent event) {
-    if (!mounted || event is! KeyDownEvent) return false;
-    final route = ModalRoute.of(context);
-    if (route == null || !route.isCurrent) return false;
+  void _ativarBuscaPorNome() {
+    if (_buscaPorNomeAtiva) return;
+    setState(() => _buscaPorNomeAtiva = true);
+    widget.onModoBuscaPorNomeChanged(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusPesquisa.requestFocus();
+    });
+  }
 
-    final digito = _digitoDeTecla(event.logicalKey);
-    if (digito != null) {
-      // Com texto na busca, o digito filtra nome/codigo — nao atalho rapido.
-      if (_pesquisaController.text.trim().isNotEmpty) return false;
-      final v = _vendedorPorCodigo(digito);
-      if (v != null) {
-        widget.onConfirmar(v.id);
-        return true;
-      }
-      return false;
-    }
-    if (event.logicalKey == LogicalKeyboardKey.escape) {
-      widget.onCancelar();
-      return true;
-    }
-    return false;
+  void _desativarBuscaPorNome() {
+    if (!_buscaPorNomeAtiva) return;
+    _pesquisaController.clear();
+    _atualizarBusca('');
+    setState(() => _buscaPorNomeAtiva = false);
+    widget.onModoBuscaPorNomeChanged(false);
+    _focusPesquisa.unfocus();
+  }
+
+  bool _confirmarVendedorPorCodigoTecla(String codigo) {
+    if (_confirmacaoVendedorEnviada || !mounted) return false;
+    final v = pdvResolverVendedorPorCodigoInterno(
+      widget.vendedoresAtivos,
+      codigo,
+    );
+    if (v == null) return false;
+    _confirmacaoVendedorEnviada = true;
+    widget.onConfirmar(v.id);
+    return true;
   }
 
   void _atualizarBusca(String termo) {
@@ -10414,10 +10781,7 @@ class _DialogoSelecionarVendedorPdvState
     _atualizarBusca(termo);
     final t = termo.trim();
     if (t.isEmpty) return;
-    final v = _vendedorPorCodigo(t);
-    if (v != null && v.codigoInterno.trim() == t) {
-      widget.onConfirmar(v.id);
-    }
+    _confirmarVendedorPorCodigoTecla(t);
   }
 
   String _nomeVendedor(Vendedor v) {
@@ -10427,68 +10791,18 @@ class _DialogoSelecionarVendedorPdvState
     return nome.isEmpty ? 'Vendedor ${v.id}' : nome;
   }
 
-  String? _digitoDeTecla(LogicalKeyboardKey key) {
-    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
-      return '0';
-    }
-    if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
-      return '1';
-    }
-    if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) {
-      return '2';
-    }
-    if (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) {
-      return '3';
-    }
-    if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) {
-      return '4';
-    }
-    if (key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5) {
-      return '5';
-    }
-    if (key == LogicalKeyboardKey.digit6 || key == LogicalKeyboardKey.numpad6) {
-      return '6';
-    }
-    if (key == LogicalKeyboardKey.digit7 || key == LogicalKeyboardKey.numpad7) {
-      return '7';
-    }
-    if (key == LogicalKeyboardKey.digit8 || key == LogicalKeyboardKey.numpad8) {
-      return '8';
-    }
-    if (key == LogicalKeyboardKey.digit9 || key == LogicalKeyboardKey.numpad9) {
-      return '9';
-    }
-    return null;
-  }
-
-  /// Codigo exibido na lista (ex.: `1`, `2`) — unico match entre os ativos.
-  Vendedor? _vendedorPorCodigo(String codigo) {
-    final c = codigo.trim();
-    if (c.isEmpty) return null;
-    final alvo = int.tryParse(c);
-    Vendedor? unicoPorInt;
-    for (final v in widget.vendedoresAtivos) {
-      final ci = v.codigoInterno.trim();
-      if (ci == c) return v;
-      if (alvo != null) {
-        final n = VendedorRepository.codigoInternoComoInteiro(ci);
-        if (n == alvo) {
-          if (unicoPorInt != null) return null;
-          unicoPorInt = v;
-        }
-      }
-    }
-    return unicoPorInt;
-  }
-
   void _confirmar() {
+    if (_confirmacaoVendedorEnviada || !mounted) return;
     if (_vendedorSelecionadoId != null) {
-      widget.onConfirmar(_vendedorSelecionadoId!);
+      _confirmarVendedorPorId(_vendedorSelecionadoId!);
       return;
     }
-    final v = _vendedorPorCodigo(_pesquisaController.text);
+    final v = pdvResolverVendedorPorCodigoInterno(
+      widget.vendedoresAtivos,
+      _pesquisaController.text.trim(),
+    );
     if (v != null) {
-      widget.onConfirmar(v.id);
+      _confirmarVendedorPorId(v.id);
     }
   }
 
@@ -10514,18 +10828,31 @@ class _DialogoSelecionarVendedorPdvState
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _pesquisaController,
-              focusNode: _focusPesquisa,
-              autofocus: true,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Buscar vendedor',
-                prefixIcon: Icon(Icons.search),
+            if (!_buscaPorNomeAtiva)
+              OutlinedButton.icon(
+                onPressed: _ativarBuscaPorNome,
+                icon: const Icon(Icons.search, size: 18),
+                label: const Text('Buscar vendedor por nome'),
+              )
+            else ...[
+              TextField(
+                controller: _pesquisaController,
+                focusNode: _focusPesquisa,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  labelText: 'Buscar vendedor',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: IconButton(
+                    tooltip: 'Voltar ao atalho numerico',
+                    onPressed: _desativarBuscaPorNome,
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+                onChanged: _onBuscaAlterada,
+                onSubmitted: (_) => _confirmar(),
               ),
-              onChanged: _onBuscaAlterada,
-              onSubmitted: (_) => _confirmar(),
-            ),
+            ],
             const SizedBox(height: 8),
             SizedBox(
               height: 280,
@@ -10541,8 +10868,7 @@ class _DialogoSelecionarVendedorPdvState
                           selected: _vendedorSelecionadoId == v.id,
                           title: Text(_nomeVendedor(v)),
                           subtitle: codigo.isEmpty ? null : Text(codigo),
-                          onTap: () =>
-                              setState(() => _vendedorSelecionadoId = v.id),
+                          onTap: () => _confirmarVendedorPorId(v.id),
                         );
                       },
                     ),
@@ -10551,12 +10877,21 @@ class _DialogoSelecionarVendedorPdvState
         ),
       ),
       actions: [
-        TextButton(onPressed: widget.onCancelar, child: const Text('Cancelar')),
+        TextButton(
+          onPressed: widget.onCancelar,
+          child: const Text('Cancelar'),
+        ),
         ElevatedButton(
           onPressed: _vendedorSelecionadoId == null ? null : _confirmar,
           child: const Text('Confirmar'),
         ),
       ],
     );
+  }
+
+  void _confirmarVendedorPorId(int id) {
+    if (_confirmacaoVendedorEnviada || !mounted) return;
+    _confirmacaoVendedorEnviada = true;
+    widget.onConfirmar(id);
   }
 }

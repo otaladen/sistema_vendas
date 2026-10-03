@@ -705,7 +705,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
   }) {
     final clienteId = v.cliente.targetId;
     if (clienteId <= 0) return null;
-    final vend = v.vendedor.target;
+    final vendedorId = v.vendedor.targetId;
     final ref = v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : 'id ${v.id}';
     final obsFin = _obsFinanceiraController.text.trim();
     return TrocaComNotaPdvIntent(
@@ -713,7 +713,7 @@ class _RegistrarDevolucaoTrocaPageState extends State<RegistrarDevolucaoTrocaPag
       clienteId: clienteId,
       creditoDevolucaoReais: credito,
       numeroVendaOrigem: v.numeroOrcamento,
-      vendedorId: vend?.id,
+      vendedorId: vendedorId > 0 ? vendedorId : null,
       observacao: obsFin.isEmpty
           ? 'Troca com nota apos devolucao da venda $ref'
           : obsFin,

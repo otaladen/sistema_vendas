@@ -137,6 +137,9 @@ class LanApiEventHub extends ChangeNotifier {
       return;
     }
     if (ch == null) return;
+    // Falha de conexao chega tambem no onError do stream (que reconecta);
+    // sem este handler o Future `ready` vira erro nao tratado no erro_global.
+    unawaited(ch.ready.catchError((Object _) {}));
     _channel = ch;
     _sub = ch.stream.listen(
       (raw) {

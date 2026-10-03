@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../data/app_config_repository.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/entregas/observacao_carreto.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
@@ -389,6 +390,7 @@ abstract final class EscPosCupomBuilder {
       venda: venda,
       cliente: cliente,
       itens: itens,
+      incluirObservacoes: false,
     );
     if (linhas.isEmpty) return;
 
@@ -411,6 +413,40 @@ abstract final class EscPosCupomBuilder {
       }
       if (linha.destaque) out.add(EscPosCommands.boldOff);
     }
+    out.add(EscPosCommands.separator(cols, '='));
+    adicionarBlocoObservacoesCarreto(
+      out,
+      cols: cols,
+      linhas: ObservacaoCarreto.linhasImpressaoComprovante(venda, itens: itens),
+    );
+  }
+
+  /// Bloco `OBSERVAÇÕES DO CARRETO`: titulo em altura dupla e corpo em
+  /// negrito, caixa alta (patio e motorista leem de longe).
+  static void adicionarBlocoObservacoesCarreto(
+    BytesBuilder out, {
+    required int cols,
+    required List<String> linhas,
+  }) {
+    if (linhas.isEmpty) return;
+    out.add(EscPosCommands.alignCenter);
+    out.add(EscPosCommands.boldOn);
+    out.add(EscPosCommands.doubleHeightOn);
+    for (final l in EscPosTextLayout.wrap(
+      ObservacaoCarreto.tituloImpressao,
+      cols,
+    )) {
+      out.add(EscPosCommands.line(l));
+    }
+    out.add(EscPosCommands.normalSize);
+    out.add(EscPosCommands.alignLeft);
+    out.add(EscPosCommands.separator(cols));
+    for (final linha in linhas) {
+      for (final l in EscPosTextLayout.wrap('> $linha', cols)) {
+        out.add(EscPosCommands.line(l));
+      }
+    }
+    out.add(EscPosCommands.boldOff);
     out.add(EscPosCommands.separator(cols, '='));
   }
 

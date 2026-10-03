@@ -196,13 +196,14 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   static const _navegacao = <_PdvAtalhoItem>[
     (tecla: 'Tab', descricao: 'vendedor → entrega → cliente', destaque: false),
     (tecla: 'F6', descricao: 'foco no carrinho', destaque: false),
-    (tecla: 'F8', descricao: 'foco na busca', destaque: false),
+    (tecla: 'F8', descricao: 'foco na busca (sem carreto)', destaque: false),
     (tecla: '↓', descricao: 'busca entra no carrinho', destaque: false),
     (tecla: '↑', descricao: '1º item volta à busca', destaque: false),
   ];
 
   static const _precoCliente = <_PdvAtalhoItem>[
     (tecla: 'F1–F3', descricao: 'tabela da linha no carrinho', destaque: false),
+    (tecla: 'Alt+F1–F3', descricao: 'tabela em todo o carrinho', destaque: false),
     (tecla: 'Shift+F2', descricao: 'foco no cliente', destaque: false),
     (tecla: 'Ctrl+N', descricao: 'cadastro rapido', destaque: false),
     (tecla: 'Shift+F4', descricao: 'cadastro', destaque: false),
@@ -212,6 +213,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   static const _consulta = <_PdvAtalhoItem>[
     (tecla: 'F4', descricao: 'consulta de produtos', destaque: true),
     (tecla: 'Alt+E', descricao: 'consultar agenda de carretos', destaque: true),
+    (tecla: 'F8', descricao: 'observações do carreto', destaque: true),
     (tecla: 'Enter', descricao: 'abre consulta', destaque: false),
     (tecla: 'F5', descricao: 'recarrega cadastros', destaque: false),
     (tecla: 'Ctrl+K', descricao: 'limpa busca', destaque: false),
@@ -375,6 +377,7 @@ class PdvAtalhosAjudaCarrinho extends StatelessWidget {
     (tecla: '+ / −', descricao: 'quantidade', destaque: false),
     (tecla: 'E', descricao: 'entrega', destaque: false),
     (tecla: 'T', descricao: 'tabela', destaque: false),
+    (tecla: 'Alt+F2', descricao: 'P2 em todos', destaque: false),
     (tecla: 'Ctrl+D', descricao: 'dividir', destaque: false),
     (tecla: 'Ctrl+P', descricao: 'preço', destaque: true),
     (tecla: 'Del', descricao: 'remove', destaque: false),

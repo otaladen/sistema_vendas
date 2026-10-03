@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/entregas/observacao_carreto.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
@@ -475,6 +476,14 @@ class CupomNaoFiscalVendaPdf {
           venda: venda,
           cliente: cliente,
           itens: itensCupom,
+          incluirObservacoes: false,
+        ),
+      ),
+      ...CupomPdfLayout.blocoObservacoesCarreto(
+        layout: layout,
+        linhas: ObservacaoCarreto.linhasImpressaoComprovante(
+          venda,
+          itens: itensCupom,
         ),
       ),
       CupomPdfLayout.rodapeIdentificacaoLegadoLdv(
@@ -545,6 +554,7 @@ class CupomNaoFiscalVendaPdf {
       venda: venda,
       cliente: cliente,
       itens: itensCupom,
+      incluirObservacoes: false,
     );
     final temCarreto = EntregaVendaHelper.vendaDeveImprimirBlocoEntrega(
       venda,
@@ -609,6 +619,13 @@ class CupomNaoFiscalVendaPdf {
       ...CupomPdfLayout.blocoDadosEntregaCarretoDetalhado(
         layout: layout,
         linhas: linhasEntrega,
+      ),
+      ...CupomPdfLayout.blocoObservacoesCarreto(
+        layout: layout,
+        linhas: ObservacaoCarreto.linhasImpressaoComprovante(
+          venda,
+          itens: itensCupom,
+        ),
       ),
       if (temCarreto && layout.exibirEntrega && venda.valorFrete > 0)
         CupomPdfLayout.textoCorpo(

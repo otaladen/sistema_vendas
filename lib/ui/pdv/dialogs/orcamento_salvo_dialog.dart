@@ -270,7 +270,7 @@ class _OrcamentoSalvoDialogState extends State<_OrcamentoSalvoDialog> {
                 ),
                 onPressed: () => fechar('pdf'),
                 icon: const Icon(Icons.picture_as_pdf_outlined),
-                label: const Text('Gerar PDF (2)'),
+                label: const Text('PDF para o cliente (2)'),
               ),
             ),
             const SizedBox(height: 8),

@@ -53,6 +53,7 @@ import '../services/configuracoes_service.dart';
 import '../domain/entregas/carreto_saida_produto_orfao.dart';
 import '../domain/entregas/loja_origem_mercadoria.dart';
 import '../domain/entregas/buscar_na_loja.dart';
+import '../domain/entregas/observacao_carreto.dart';
 import '../domain/entrega_pod_regra.dart';
 import '../domain/entregas/carreto_checklist_estoque_helper.dart';
 import '../services/entrega_fluxo_service.dart';
@@ -1730,8 +1731,9 @@ class _EntregasPageState extends State<EntregasPage>
                 : 'Endereco: $endereco',
             style: estilo,
           ),
-          if (_observacaoSemMotorista(venda).trim().isNotEmpty)
-            pw.Text('Obs: ${_observacaoSemMotorista(venda)}', style: estilo),
+          ...pwBlocoObservacoesCarreto(venda: venda, bobina: false),
+          if (_historicoObservacaoRomaneio(venda) case final hist?)
+            pw.Text('Hist.: $hist', style: estilo.copyWith(fontSize: 8)),
           if (_textoResumoComplementoNaVenda(venda) case final pend?)
             pw.Padding(
               padding: const pw.EdgeInsets.only(top: 2),
@@ -1806,10 +1808,11 @@ class _EntregasPageState extends State<EntregasPage>
             endereco.isEmpty ? 'End: (nao informado)' : 'End: $endereco',
             style: estiloCorpo,
           ),
-          if (_observacaoSemMotorista(venda).trim().isNotEmpty)
+          ...pwBlocoObservacoesCarreto(venda: venda, bobina: true),
+          if (_historicoObservacaoRomaneio(venda) case final hist?)
             pw.Text(
-              'Obs: ${_observacaoSemMotorista(venda)}',
-              style: estiloCorpo,
+              'Hist.: $hist',
+              style: estiloCorpo.copyWith(fontSize: 5.5),
             ),
           if (_textoResumoComplementoNaVenda(venda) case final pendBob?)
             pw.Text(
@@ -2388,6 +2391,11 @@ class _EntregasPageState extends State<EntregasPage>
         .where((linha) => !linha.trimLeft().startsWith('Motorista:'))
         .toList();
     return linhas.join('\n');
+  }
+
+  String? _historicoObservacaoRomaneio(Venda venda) {
+    final linhas = ObservacaoCarreto.linhasHistoricoInterno(venda);
+    return linhas.isEmpty ? null : linhas.join(' | ');
   }
 
   Future<void> _atualizarPrioridade(Venda venda, String novaPrioridade) async {

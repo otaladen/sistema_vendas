@@ -34,7 +34,8 @@ class PdvBotaoTabelaPrecoItem extends StatelessWidget {
     return IconButton(
       onPressed: onPressed,
       tooltip:
-          '${PdvTabelaPrecoUtil.rotulo(precoTipo)} — toque para alternar (F1–F3 na linha)',
+          '${PdvTabelaPrecoUtil.rotulo(precoTipo)} — toque para alternar esta linha (F1–F3). '
+          'Todo o carrinho: clique em TAB. ou Alt+F1–F3',
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.all(compacto ? 2 : 4),
       constraints: BoxConstraints(

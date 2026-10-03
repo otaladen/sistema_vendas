@@ -9,12 +9,16 @@ class PdvCarrinhoListaCabecalho extends StatelessWidget {
     super.key,
     this.alvosTouchAmplos = false,
     this.exibirColunaUnitario = false,
+    this.onAplicarTabelaPreco,
   });
 
   static const double altura = 26;
 
   final bool alvosTouchAmplos;
   final bool exibirColunaUnitario;
+
+  /// Aplica preco1, preco2 ou preco3 em todas as linhas do carrinho.
+  final ValueChanged<String>? onAplicarTabelaPreco;
 
   TextStyle _estiloColuna(ThemeData theme, ColorScheme scheme) {
     return theme.textTheme.labelSmall?.copyWith(
@@ -87,10 +91,9 @@ class PdvCarrinhoListaCabecalho extends StatelessWidget {
                 child: Text('QTD', style: estilo, textAlign: TextAlign.center),
               ),
             ),
-            tabelaPreco: Text(
-              'TAB.',
-              style: estilo,
-              textAlign: TextAlign.center,
+            tabelaPreco: _CabecalhoTabelaPreco(
+              estilo: estilo,
+              onAplicarTabelaPreco: onAplicarTabelaPreco,
             ),
             acoes: PdvCarrinhoLinhaColunas.acoesCabecalhoDe(
               alvosTouchAmplos: alvosTouchAmplos,
@@ -103,6 +106,48 @@ class PdvCarrinhoListaCabecalho extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CabecalhoTabelaPreco extends StatelessWidget {
+  const _CabecalhoTabelaPreco({
+    required this.estilo,
+    required this.onAplicarTabelaPreco,
+  });
+
+  final TextStyle estilo;
+  final ValueChanged<String>? onAplicarTabelaPreco;
+
+  @override
+  Widget build(BuildContext context) {
+    final rotulo = Text(
+      'TAB.',
+      style: estilo,
+      textAlign: TextAlign.center,
+    );
+    final aplicar = onAplicarTabelaPreco;
+    if (aplicar == null) return rotulo;
+
+    return PopupMenuButton<String>(
+      tooltip: 'Aplicar tabela em todo o carrinho (Alt+F1 a F3)',
+      padding: EdgeInsets.zero,
+      onSelected: aplicar,
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: 'preco1',
+          child: Text('Preço 1 em todo o carrinho  ·  Alt+F1'),
+        ),
+        PopupMenuItem(
+          value: 'preco2',
+          child: Text('Preço 2 em todo o carrinho  ·  Alt+F2'),
+        ),
+        PopupMenuItem(
+          value: 'preco3',
+          child: Text('Preço 3 em todo o carrinho  ·  Alt+F3'),
+        ),
+      ],
+      child: rotulo,
     );
   }
 }

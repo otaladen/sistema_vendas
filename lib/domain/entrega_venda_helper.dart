@@ -3,6 +3,7 @@ import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import 'entregas/carga_atual_venda.dart';
+import 'entregas/observacao_carreto.dart';
 import 'produto_embalagem.dart';
 import 'quantidade_venda_util.dart';
 
@@ -609,6 +610,24 @@ class EntregaVendaHelper {
     return out;
   }
 
+  /// Trecho de historico (patio/entregas) de uma linha de
+  /// [Venda.observacaoEntrega]; `null` quando a linha e texto digitado.
+  /// Linha mista (`texto [dd/MM/yyyy HH:mm] STATUS`) devolve so o log.
+  static String? trechoLogObservacaoEntrega(String linha) {
+    final t = linha.trim();
+    if (t.isEmpty) return null;
+    final carimbo = _carimboDataLog.firstMatch(t);
+    if (carimbo != null) {
+      final prefixo = t.substring(0, carimbo.start).trim();
+      if (prefixo.isEmpty || _linhasLogInterno.any((re) => re.hasMatch(prefixo))) {
+        return t;
+      }
+      return t.substring(carimbo.start);
+    }
+    if (_linhasLogInterno.any((re) => re.hasMatch(t))) return t;
+    return null;
+  }
+
   /// Telefone BR para comprovantes: `(71) 98225-0887` / `(71) 3222-1234`.
   static String formatarTelefoneImpressao(String telefone) {
     final bruto = telefone.trim();
@@ -672,10 +691,14 @@ class EntregaVendaHelper {
 
   /// Igual a [linhasBlocoEntregaImpressao], com bairro e referencia/obs
   /// marcados para impressao em destaque.
+  ///
+  /// [incluirObservacoes] `false`: o comprovante imprime as observacoes no
+  /// bloco proprio de `ObservacaoCarreto`.
   static List<LinhaEntregaImpressao> linhasBlocoEntregaImpressaoDetalhadas({
     required Venda venda,
     Cliente? cliente,
     List<ItemVenda>? itens,
+    bool incluirObservacoes = true,
   }) {
     if (!vendaDeveImprimirBlocoEntrega(venda, itens: itens)) {
       return const [];
@@ -735,7 +758,7 @@ class EntregaVendaHelper {
       }
     }
 
-    for (final t in obsCliente) {
+    for (final t in incluirObservacoes ? obsCliente : const <String>[]) {
       linhas.add(
         LinhaEntregaImpressao(
           t.toLowerCase().startsWith('obs') ? t : 'OBS/REFERENCIA: $t',
@@ -778,19 +801,25 @@ class EntregaVendaHelper {
     ];
   }
 
-  /// Divisorias + titulo + corpo (estimativa para altura do PDF).
+  /// Divisorias + titulo + corpo do bloco de entrega e do bloco de
+  /// observacoes do carreto (estimativa para altura do PDF do cupom).
   static int contarLinhasBlocoEntregaImpressao({
     required Venda venda,
     Cliente? cliente,
     List<ItemVenda>? itens,
   }) {
-    final corpo = linhasBlocoEntregaImpressao(
+    final corpo = linhasBlocoEntregaImpressaoDetalhadas(
       venda: venda,
       cliente: cliente,
       itens: itens,
+      incluirObservacoes: false,
     );
     if (corpo.isEmpty) return 0;
-    return 3 + corpo.length;
+    final obs = ObservacaoCarreto.linhasImpressaoComprovante(
+      venda,
+      itens: itens,
+    );
+    return 3 + corpo.length + (obs.isEmpty ? 0 : 3 + obs.length);
   }
 
   static String resumoContagem(Iterable<String> tiposItens) {

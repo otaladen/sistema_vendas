@@ -109,12 +109,13 @@ void main() {
       ),
     );
     expect(ascii, contains('SEGUNDA VIA'));
-    expect(ascii, contains('OBS/REFERENCIA: Prox antigo bar de toco'));
+    expect(ascii, contains('> PROX ANTIGO BAR DE TOCO'));
     expect(
-      'OBS/REFERENCIA:'.allMatches(ascii).length,
+      'PROX ANTIGO BAR DE TOCO'.allMatches(ascii).length,
       1,
-      reason: 'Somente a observacao digitada na venda vira OBS/REFERENCIA',
+      reason: 'Somente a observacao digitada na venda sai no bloco do carreto',
     );
+    expect(ascii, isNot(contains('OBS/REFERENCIA:')));
     _semLogPatio(ascii);
     expect(
       venda.observacaoEntrega,

@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../../domain/entregas/observacao_carreto.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../domain/venda_relacao_safe.dart';
 import '../../model/venda.dart';
 import 'logistica_entregas.dart';
@@ -21,6 +23,95 @@ String enderecoExibicaoRomaneio(Venda venda, {dynamic clienteRepository}) {
   final enderecos = cli.listarEnderecos();
   if (enderecos.isNotEmpty) return enderecos.first.resumo();
   return '';
+}
+
+pw.TextStyle _estiloObsCarreto(double fontSize) {
+  final bold = pw.Font.courierBold();
+  return pw.TextStyle(
+    font: bold,
+    fontBold: bold,
+    fontSize: fontSize,
+    fontWeight: pw.FontWeight.bold,
+  );
+}
+
+/// `OBSERVAÇÕES DO CARRETO` de um pedido: caixa com borda, titulo e linhas
+/// em negrito e caixa alta. Vazio quando a venda nao tem observacao digitada.
+List<pw.Widget> pwBlocoObservacoesCarreto({
+  required Venda venda,
+  required bool bobina,
+}) {
+  final linhas = ObservacaoCarreto.linhasImpressao(venda);
+  if (linhas.isEmpty) return const [];
+  final fsTit = bobina ? 7.5 : 11.0;
+  final fsLin = bobina ? 7.0 : 10.5;
+  return [
+    pw.Container(
+      width: double.infinity,
+      margin: pw.EdgeInsets.symmetric(vertical: bobina ? 2 : 3),
+      padding: pw.EdgeInsets.all(bobina ? 3 : 5),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: bobina ? 1.0 : 1.4),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            ObservacaoCarreto.tituloImpressao,
+            style: _estiloObsCarreto(fsTit),
+          ),
+          pw.SizedBox(height: bobina ? 1.5 : 2),
+          ...linhas.map(
+            (l) => pw.Text('> $l', style: _estiloObsCarreto(fsLin)),
+          ),
+        ],
+      ),
+    ),
+  ];
+}
+
+/// Folha de separacao do patio: observacoes de cada pedido da carga
+/// (a tabela consolidada soma produtos e perde o vinculo com o pedido).
+List<pw.Widget> pwObservacoesCarretoDosPedidos({
+  required List<Venda> vendas,
+  required bool bobina,
+}) {
+  final comObs = [
+    for (final v in vendas)
+      if (ObservacaoCarreto.linhasImpressao(v).isNotEmpty) v,
+  ];
+  if (comObs.isEmpty) return const [];
+  final fsTit = bobina ? 7.5 : 11.0;
+  final fsLin = bobina ? 7.0 : 10.5;
+  return [
+    pw.Container(
+      width: double.infinity,
+      margin: pw.EdgeInsets.only(top: bobina ? 2 : 4),
+      padding: pw.EdgeInsets.all(bobina ? 3 : 5),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: bobina ? 1.0 : 1.4),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            ObservacaoCarreto.tituloImpressao,
+            style: _estiloObsCarreto(fsTit),
+          ),
+          for (final v in comObs) ...[
+            pw.SizedBox(height: bobina ? 2 : 3),
+            pw.Text(
+              VendaDocumentoRotuloHelper.rotuloPedidoEntrega(v).toUpperCase(),
+              style: _estiloObsCarreto(fsLin),
+            ),
+            ...ObservacaoCarreto.linhasImpressao(v).map(
+              (l) => pw.Text('> $l', style: _estiloObsCarreto(fsLin)),
+            ),
+          ],
+        ],
+      ),
+    ),
+  ];
 }
 
 /// Tabela da carga consolidada (PDF) — impressao unica do total do carro.

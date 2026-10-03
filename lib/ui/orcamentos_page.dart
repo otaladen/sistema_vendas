@@ -17,6 +17,7 @@ import '../model/venda.dart';
 import '../services/esc_pos_orcamento_builder.dart';
 import '../services/esc_pos_printer_service.dart';
 import '../services/orcamento_pdf_service.dart';
+import '../services/orcamento_proposta_pdf.dart';
 import '../services/print_service.dart';
 import 'orcamento_pdv_navigation.dart';
 import 'relatorios/relatorio_orcamentos_abertos_page.dart';
@@ -173,15 +174,25 @@ class OrcamentosPage extends StatelessWidget {
         return;
       }
 
-      final pdf = await OrcamentoPdfService.gerar(
-        venda: venda,
-        itens: carregado.itens,
-        empresa: config,
-        validadeDias: _validadeOrcamentoDias,
-        cliente: cliente,
-        vendedor: vendedor,
-        produtosPorItem: carregado.produtos,
-      );
+      final pdf = config.modeloPdf == 'a4'
+          ? await OrcamentoPropostaPdf.gerar(
+              venda: venda,
+              itens: carregado.itens,
+              empresa: config,
+              validadeDias: _validadeOrcamentoDias,
+              cliente: cliente,
+              vendedor: vendedor,
+              produtosPorItem: carregado.produtos,
+            )
+          : await OrcamentoPdfService.gerar(
+              venda: venda,
+              itens: carregado.itens,
+              empresa: config,
+              validadeDias: _validadeOrcamentoDias,
+              cliente: cliente,
+              vendedor: vendedor,
+              produtosPorItem: carregado.produtos,
+            );
       final printer = await printService.resolverImpressoraPorNome(
         config.impressoraPadrao,
       );
@@ -268,7 +279,7 @@ class OrcamentosPage extends StatelessWidget {
         return;
       }
 
-      final pdf = await OrcamentoPdfService.gerar(
+      final pdf = await OrcamentoPropostaPdf.gerar(
         venda: venda,
         itens: carregado.itens,
         empresa: config,

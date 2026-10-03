@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../config/fiscal_config.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/entregas/observacao_carreto.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
 
@@ -281,6 +282,51 @@ class CupomPdfLayout {
         ),
       ),
       divisoriaSecao(layout: layout, destaque: true),
+    ];
+  }
+
+  /// `OBSERVAÇÕES DO CARRETO` em caixa com borda; corpo ja em caixa alta.
+  static List<pw.Widget> blocoObservacoesCarreto({
+    required ConfigLayoutImpressao layout,
+    required List<String> linhas,
+  }) {
+    if (linhas.isEmpty) return const [];
+    final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    final bold = _fontePdfBold(layout);
+    pw.TextStyle negrito(double size) => pw.TextStyle(
+          font: bold,
+          fontBold: bold,
+          fontSize: size,
+          fontWeight: pw.FontWeight.bold,
+        );
+    return [
+      pw.Container(
+        width: larguraUtilConteudoMm(layout) * PdfPageFormat.mm,
+        margin: pw.EdgeInsets.symmetric(
+          vertical: _espacoBloco(layout) * 0.3 * PdfPageFormat.mm,
+        ),
+        padding: const pw.EdgeInsets.all(1.2 * PdfPageFormat.mm),
+        decoration: pw.BoxDecoration(border: pw.Border.all(width: 1.2)),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Center(
+              child: pw.Text(
+                ObservacaoCarreto.tituloImpressao,
+                textAlign: pw.TextAlign.center,
+                style: negrito(fs + 1),
+              ),
+            ),
+            pw.SizedBox(height: 0.8 * PdfPageFormat.mm),
+            ...linhas.map(
+              (linha) => pw.Text(
+                textoTermicoAscii(linha),
+                style: negrito(fs),
+              ),
+            ),
+          ],
+        ),
+      ),
     ];
   }
 
