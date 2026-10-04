@@ -480,6 +480,37 @@ class LanApiClient {
   Future<Map<String, dynamic>> obterEmpresaFiscal() =>
       _getJson('/api/empresa/fiscal');
 
+  /// GET `/api/empresa/logo` — bytes PNG/JPEG da logomarca no PC servidor.
+  Future<List<int>?> downloadEmpresaLogo() async {
+    if (!configurado) return null;
+    try {
+      final r = await http
+          .get(
+            _uri('/api/empresa/logo'),
+            headers: _headers(json: false),
+          )
+          .timeout(const Duration(seconds: 60));
+      if (r.statusCode == 404) return null;
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
+      final ct = r.headers['content-type'] ?? '';
+      if (ct.contains('application/json')) return null;
+      onSucessoRede?.call();
+      return r.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> uploadEmpresaLogo(List<int> bytes) => _postJson(
+        '/api/empresa/logo',
+        {'contentBase64': base64Encode(bytes)},
+      );
+
+  Future<Map<String, dynamic>> removerEmpresaLogo() => _postJson(
+        '/api/empresa/logo',
+        {'remover': true},
+      );
+
   /// Login contra o banco de usuarios do PC servidor.
   /// Retorna null se usuario/senha invalidos (nao e falha de rede).
   Future<Map<String, dynamic>?> authLogin({

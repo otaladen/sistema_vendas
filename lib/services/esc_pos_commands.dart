@@ -177,6 +177,30 @@ abstract final class EscPosCommands {
     }
     return out;
   }
+
+  /// Imagem raster (GS v 0) — [rasterData] ja empacotado MSB-first por linha.
+  static Uint8List rasterBitImage({
+    required int widthPx,
+    required int heightPx,
+    required Uint8List rasterData,
+  }) {
+    final xBytes = (widthPx + 7) ~/ 8;
+    final xL = xBytes & 0xFF;
+    final xH = (xBytes >> 8) & 0xFF;
+    final yL = heightPx & 0xFF;
+    final yH = (heightPx >> 8) & 0xFF;
+    return Uint8List.fromList([
+      0x1D,
+      0x76,
+      0x30,
+      0x00,
+      xL,
+      xH,
+      yL,
+      yH,
+      ...rasterData,
+    ]);
+  }
 }
 
 /// Largura tipica da bobina em colunas de fonte normal.

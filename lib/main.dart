@@ -53,6 +53,7 @@ import 'services/entrega_pod_retencao_service.dart';
 import 'services/lan_servidor_bootstrap.dart';
 import 'services/lan_servidor_headless_service.dart';
 import 'services/configuracoes_service.dart';
+import 'services/empresa_logo_sync_service.dart';
 import 'services/servidor_config_service.dart';
 import 'services/print_service.dart';
 import 'ui/configuracoes/configuracoes_scope.dart';
@@ -977,6 +978,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   Future<void> _hidratarEmpresaConfigTerminal(LanApiClient? client) async {
     widget.configuracoesService.vincularLanApiClient(client);
     await widget.configuracoesService.carregarGlobalDoServidor();
+    await EmpresaLogoSyncService(
+      configRepository: widget.configuracoesService.repository,
+    ).sincronizarArquivoSeNecessario();
   }
 
   Future<void> _sair() async {

@@ -54,6 +54,14 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // F10 ou Alt soltos ativam o "modo menu" do Windows (SC_KEYMENU), que engole
+  // a proxima tecla: atalhos do PDV precisavam ser pressionados duas vezes.
+  // Alt+Espaco (menu do sistema) continua liberado.
+  if (message == WM_SYSCOMMAND && (wparam & 0xFFF0) == SC_KEYMENU &&
+      lparam != VK_SPACE) {
+    return 0;
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

@@ -12,6 +12,8 @@ import '../model/cliente.dart';
 import '../model/item_venda.dart';
 import '../model/vendedor.dart';
 import '../services/brasil_api_cep_service.dart';
+import '../services/viacep_endereco_service.dart';
+import 'widgets/buscar_cep_por_endereco_dialog.dart';
 import 'widgets/cliente_endereco_ibge_selector.dart';
 import '../services/brasil_api_cnpj_service.dart';
 import '../model/venda.dart';
@@ -160,7 +162,9 @@ class _ClientesPageState extends State<ClientesPage>
   bool _carregandoClienteNoFormulario = false;
   bool _consultaCnpjEmAndamento = false;
   bool _consultaCepEmAndamento = false;
+  bool _buscaCepPorEnderecoEmAndamento = false;
   TextEditingController? _cepControllerEmConsulta;
+  TextEditingController? _alvoEnderecoBuscaCep;
   final ScrollController _scrollFormulario = ScrollController();
   final ScrollController _scrollRelacionamento = ScrollController();
   late final TabController _tabController;
@@ -928,6 +932,117 @@ class _ClientesPageState extends State<ClientesPage>
     }
     _debounceConsultaCep?.cancel();
     unawaited(_executarConsultaCep(alvo));
+  }
+
+  void _aplicarResultadoBuscaPorEndereco(
+    _AlvoPreenchimentoCep alvo,
+    ViaCepEnderecoResultado dados,
+  ) {
+    setState(() {
+      alvo.endereco.text = dados.logradouro;
+      alvo.bairro.text = dados.bairro;
+      alvo.cidade.text = dados.cidade;
+      alvo.uf.text = dados.uf;
+      alvo.cep.text = dados.cep;
+      final ibge = dados.codigoIbge.replaceAll(RegExp(r'\D'), '');
+      if (alvo.codigoIbge != null && ibge.length == 7) {
+        alvo.codigoIbge!.text = ibge;
+      }
+    });
+    alvo.cep.value = _cepFormatter.formatEditUpdate(
+      const TextEditingValue(),
+      TextEditingValue(text: alvo.cep.text),
+    );
+  }
+
+  Future<void> _buscarCepPorEndereco(_AlvoPreenchimentoCep alvo) async {
+    if (_buscaCepPorEnderecoEmAndamento) return;
+    final uf = alvo.uf.text.trim();
+    final cidade = alvo.cidade.text.trim();
+    final logradouro = alvo.endereco.text.trim();
+    if (uf.length != 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Informe a UF (2 letras) para buscar o CEP pelo endereco.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (cidade.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Informe a cidade (minimo 3 letras) para buscar o CEP pelo endereco.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (logradouro.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Informe o endereco/rua (minimo 3 letras) para buscar o CEP.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _buscaCepPorEnderecoEmAndamento = true;
+      _alvoEnderecoBuscaCep = alvo.cep;
+    });
+    try {
+      final bairroFiltro = alvo.bairro.text.trim();
+      final filtrada = await ViaCepEnderecoService.buscarOpcoesParecidas(
+        uf: uf,
+        cidade: cidade,
+        logradouroReferencia: logradouro,
+        bairroReferencia: bairroFiltro,
+      );
+      if (!mounted) return;
+
+      if (filtrada.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Nenhum CEP encontrado para esse endereco. '
+              'Confira UF, cidade e nome da rua.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final escolhido = await mostrarSelecaoCepPorEnderecoDialog(
+        context,
+        opcoes: filtrada,
+        enderecoReferencia: logradouro,
+        bairroReferencia: bairroFiltro,
+      );
+      if (!mounted || escolhido == null) return;
+      _aplicarResultadoBuscaPorEndereco(alvo, escolhido);
+    } on ArgumentError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message?.toString() ?? e.toString())),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Falha ao buscar CEP por endereco: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _buscaCepPorEnderecoEmAndamento = false;
+          _alvoEnderecoBuscaCep = null;
+        });
+      }
+    }
   }
 
   void _editarCliente(Cliente c) {
@@ -2657,6 +2772,8 @@ class _ClientesPageState extends State<ClientesPage>
     );
     final cepConsultando = _consultaCepEmAndamento &&
         identical(_cepControllerEmConsulta, cepController);
+    final buscaPorRua = _buscaCepPorEnderecoEmAndamento &&
+        identical(_alvoEnderecoBuscaCep, cepController);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2741,6 +2858,8 @@ class _ClientesPageState extends State<ClientesPage>
                 decoration: const InputDecoration(
                   labelText: 'Endereço',
                   isDense: true,
+                  helperText: 'Sem CEP? Preencha rua, cidade e UF e busque abaixo',
+                  helperMaxLines: 2,
                 ),
               ),
             ),
@@ -2757,6 +2876,21 @@ class _ClientesPageState extends State<ClientesPage>
               ),
             ),
           ],
+        );
+
+        final botaoBuscarPorRua = OutlinedButton.icon(
+          style: _estiloBotaoContornoCompacto,
+          onPressed: buscaPorRua || cepConsultando
+              ? null
+              : () => unawaited(_buscarCepPorEndereco(alvoCep)),
+          icon: buscaPorRua
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.travel_explore, size: 18),
+          label: const Text('Buscar CEP pelo endereço'),
         );
 
         final campoBairro = TextField(
@@ -2867,6 +3001,11 @@ class _ClientesPageState extends State<ClientesPage>
                   cidadeController: cidadeController,
                 ),
               ],
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: botaoBuscarPorRua,
             ),
             const SizedBox(height: 4),
             TextField(

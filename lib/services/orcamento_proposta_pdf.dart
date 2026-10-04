@@ -230,7 +230,7 @@ pw.Widget _cabecalho({
   final endereco = empresa.endereco.trim();
   final telefone = empresa.telefone.trim();
   final contatos = <String>[
-    if (telefone.isNotEmpty) telefone,
+    if (telefone.isNotEmpty) 'Tel/WhatsApp: $telefone',
     if (cnpjFmt.isNotEmpty) 'CNPJ $cnpjFmt',
   ];
 

@@ -9,6 +9,7 @@ import '../../../model/usuario_sistema.dart';
 import '../../../services/fiscal_config_store.dart';
 import '../lan_api_deps.dart';
 import '../lan_api_json.dart';
+import 'empresa_logo_routes.dart';
 
 /// Autenticacao e cadastro de usuarios / config de loja do PC servidor.
 void registerAuthRoutes(Router router, LanApiDeps d) {
@@ -212,4 +213,6 @@ void registerAuthRoutes(Router router, LanApiDeps d) {
       return lanApiJson({'error': '$e'}, status: 500);
     }
   });
+
+  registerEmpresaLogoRoutes(router, notificar: d.notificar);
 }

@@ -15,7 +15,9 @@ import '../model/venda.dart';
 import '../model/vendedor.dart';
 import 'cupom_nao_fiscal_venda_pdf.dart';
 import 'cupom_pdf_layout.dart';
+import '../model/config_layout_impressao.dart';
 import 'esc_pos_commands.dart';
+import 'esc_pos_image.dart';
 import 'esc_pos_text_layout.dart';
 import 'fiscal_config_store.dart';
 import 'impressoes_service.dart';
@@ -73,6 +75,8 @@ abstract final class EscPosCupomBuilder {
     bool cortar = true,
     bool abrirGaveta = false,
     int gavetaPino = 0,
+    Uint8List? logoBytes,
+    ConfigLayoutImpressao? layoutCupom,
   }) {
     final cols = largura.colunas;
     final out = BytesBuilder(copy: false);
@@ -112,6 +116,10 @@ abstract final class EscPosCupomBuilder {
               emissao: emissao,
             ),
           );
+
+    final layout =
+        layoutCupom ?? ImpressoesService.layoutCupomEfetivo(config);
+    EscPosLogoCabecalho.adicionar(out, logoBytes, layout.exibirLogo, largura);
 
     // --- Cabecalho ---
     out.add(EscPosCommands.alignCenter);
@@ -544,4 +552,5 @@ abstract final class EscPosCupomBuilder {
     }
     return '$esquerda${total.padLeft(espaco)}';
   }
+
 }

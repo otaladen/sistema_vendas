@@ -2,7 +2,9 @@ import 'dart:typed_data';
 
 import '../data/app_config_repository.dart';
 import 'configuracoes_service.dart';
+import 'empresa_logo_service.dart';
 import 'esc_pos_commands.dart';
+import 'impressoes_service.dart';
 import 'esc_pos_cupom_builder.dart';
 import 'esc_pos_fechamento_caixa_builder.dart';
 import 'esc_pos_orcamento_builder.dart';
@@ -46,12 +48,16 @@ class EscPosPrinterService {
       final dadosFiscal = dados.fiscalEmitente != null
           ? dados
           : dados.comFiscal(fiscal);
+      final logoBytes = await EmpresaLogoService.lerLogoEfetiva(config);
+      final layoutCupom = ImpressoesService.layoutCupomEfetivo(config);
       final bytes = EscPosCupomBuilder.montar(
         dadosFiscal,
         largura: EscPosLarguraBobina.fromConfig(config.escPosLargura),
         cortar: cortar,
         abrirGaveta: gaveta,
         gavetaPino: config.gavetaPino,
+        logoBytes: logoBytes,
+        layoutCupom: layoutCupom,
       );
       await EscPosTransport.enviar(
         EscPosDestino.fromConfig(
@@ -100,10 +106,14 @@ class EscPosPrinterService {
       final dadosFiscal = dados.fiscalEmitente != null
           ? dados
           : dados.comFiscal(fiscal);
+      final logoBytes = await EmpresaLogoService.lerLogoEfetiva(config);
+      final layoutOrc = ImpressoesService.layoutOrcamentoEfetivo(config);
       final bytes = EscPosOrcamentoBuilder.montar(
         dadosFiscal,
         largura: EscPosLarguraBobina.fromConfig(config.escPosLargura),
         cortar: cortar,
+        logoBytes: logoBytes,
+        layoutOrcamento: layoutOrc,
       );
       await EscPosTransport.enviar(
         EscPosDestino.fromConfig(

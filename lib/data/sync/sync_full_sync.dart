@@ -28,6 +28,7 @@ import '../vendedor_repository.dart';
 import '../../domain/recado_loja_helper.dart';
 import '../../domain/produto_estoque_sync.dart';
 import '../../domain/saldo_retirada_item.dart';
+import '../../services/empresa_logo_sync_service.dart';
 import '../../domain/sync/fornecedor_nfe_sync_merge.dart';
 import 'sync_conflict_log.dart';
 import 'sync_cursor_storage.dart';
@@ -1781,6 +1782,10 @@ class SyncFullSync {
     // Token/impressora/rede local ja sao preservados no merge do codec.
     // Nao pede "Aceitar remoto" — so limpa dirty se houver.
     await SyncDirtyOutbox.remover(entity: 'empresa_config', entityId: 1);
+    unawaited(
+      EmpresaLogoSyncService(configRepository: _configRepository)
+          .sincronizarArquivoSeNecessario(),
+    );
   }
 
   Future<void> _aplicarUsuarios(Map<String, dynamic> payload) async {

@@ -239,9 +239,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// com o modal (Esc, F10...).
   bool _carretoObservacaoDialogAberto = false;
 
-  /// O modal abre sozinho uma vez por venda, quando o frete e escolhido.
-  bool _carretoObservacaoSugeridaNaVenda = false;
-
   /// Dialogo "Orcamento salvo" (imprimir/PDF) — bloqueia F10 do PDV.
   bool _dialogoOrcamentoSalvoAberto = false;
 
@@ -461,16 +458,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   void _alternarTipoEntregaLinhaCarrinho(int index) {
     if (index < 0 || index >= _carrinho.length) return;
-    final tinhaCarreto = _carrinhoTemItemCarreto;
     final tipoAnterior = EntregaVendaHelper.normalizarTipoItem(
       _carrinho[index].tipoEntregaItem,
     );
     final tipoNovo = EntregaVendaHelper.proximoTipoItem(tipoAnterior);
     _carrinho[index].tipoEntregaItem = tipoNovo;
     _notificarUiCarrinho();
-    if (!tinhaCarreto && _carrinhoTemItemCarreto) {
-      _sugerirObservacaoCarretoAposFrete();
-    }
   }
 
   void _alternarTabelaPrecoLinhaCarrinho(int index) {
@@ -841,7 +834,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _configPadrao.pdvExigirClienteRetiradaFutura;
 
   /// `percentual` | `valor` — desconto sempre limitado ao configurado (% sobre subtotal).
-  String _tipoDescontoPdV = 'percentual';
+  String _tipoDescontoPdV = 'valor';
   final _descontoPdVController = TextEditingController();
   bool _descontoAcimaTetoAutorizadoPdv = false;
   String? _descontoAutorizadoPorPdV;
@@ -1915,6 +1908,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   /// Teclas globais do PDV (F7 checkout; seta baixo na busca entra no carrinho).
   bool _handlerTeclasHardwarePdv(KeyEvent event) {
     if (!mounted) return false;
+    // Aba oculta no IndexedStack continua registrada no HardwareKeyboard.
+    if (_abaPdvAtivaAnterior == false) return false;
     if (_dialogoSelecionarVendedorPdvAberto) {
       if (_tratarTeclaDialogoVendedorPdv(event)) return true;
       return false;
@@ -2113,15 +2108,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _voltarFocoParaPesquisa();
   }
 
-  /// Venda com carreto: observacoes do carreto. Sem carreto: carrinho vazio
-  /// abre consulta (F4); com itens, foco no campo de busca do PDV.
+  /// Carrinho vazio: abre consulta (F4). Com itens: foco no campo de busca do PDV.
   void _atalhoF8Pdv() {
-    if (_carrinhoTemItemCarreto ||
-        EntregaVendaHelper.normalizarTipoItem(_tipoEntregaSelecionada) ==
-            EntregaVendaHelper.tipoEntregaLoja) {
-      unawaited(_abrirObservacaoCarretoPdv());
-      return;
-    }
     if (_carrinho.isEmpty) {
       unawaited(_abrirConsultaProdutos());
       return;
@@ -4274,46 +4262,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     return enderecos.first.resumo();
   }
 
-  String _montarObservacaoEntregaCliente(Cliente cliente) {
-    final enderecos = cliente.listarEnderecos();
-    if (enderecos.isEmpty) return '';
-    return enderecos.first.referencia.trim();
-  }
-
-  String _resumoEntrega() {
-    if (_entregaSomenteCotacao &&
-        _enderecoEntregaController.text.trim().isEmpty) {
-      return 'Cotacao — endereco e agenda a definir.';
-    }
-    final endereco = _enderecoEntregaController.text.trim();
-    final obs = _observacaoEntregaController.text.trim();
-    final partes = <String>[];
-    if (endereco.isNotEmpty) {
-      partes.add(endereco);
-    }
-    if (obs.isNotEmpty) {
-      partes.add('Obs: $obs');
-    }
-    if (_cargasEntrega.length >= 2) {
-      final datas = _cargasEntrega
-          .map(
-            (c) => 'carga ${c.numero}: '
-                '${c.data == null ? 'sem data' : DateFormat('dd/MM/yyyy').format(c.data!)}',
-          )
-          .join(', ');
-      partes.add('${_cargasEntrega.length} cargas ($datas)');
-    } else if (_dataEntregaMarcada != null) {
-      partes.add(
-        'Data marcada: ${DateFormat('dd/MM/yyyy').format(_dataEntregaMarcada!)}',
-      );
-    } else if (_carrinhoTemItemCarreto && _entregaSemDataCombinada) {
-      partes.add('Data: cliente ainda não definiu');
-    }
-    return partes.isEmpty
-        ? 'Sem dados de entrega informados.'
-        : partes.join(' | ');
-  }
-
   /// Abre a agenda de carretos sem exigir cliente, endereco, frete ou
   /// salvamento do orcamento. [somenteConsulta] nao devolve/grava data.
   Future<DateTime?> _abrirAgendaCarretosPdv({
@@ -4507,15 +4455,15 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           (c) => c.data == null ? '?' : DateFormat('dd/MM').format(c.data!),
         )
         .join(', ');
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
         onPressed: () => unawaited(_abrirDividirCargas(setDialogState)),
-        icon: const Icon(Icons.local_shipping_outlined),
+        icon: const Icon(Icons.call_split, size: 18),
         label: Text(
           dividido
               ? '${_cargasEntrega.length} cargas ($datas) — editar'
-              : 'Nao cabe em um carreto? Dividir em cargas',
+              : 'Não cabe em um carreto? Dividir em cargas',
         ),
       ),
     );
@@ -4528,9 +4476,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     final enderecoInicial = _enderecoEntregaController.text.trim().isNotEmpty
         ? _enderecoEntregaController.text.trim()
         : _montarEnderecoEntregaCliente(cliente);
-    final obsInicial = _observacaoEntregaController.text.trim().isNotEmpty
-        ? _observacaoEntregaController.text.trim()
-        : _montarObservacaoEntregaCliente(cliente);
     return showDialog<_EntregaDialogResult>(
       context: context,
       barrierDismissible: false,
@@ -4540,7 +4485,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           enderecosDisponiveis: enderecos,
           indiceEnderecoInicial: _indiceEnderecoSelecionado,
           enderecoInicial: enderecoInicial,
-          observacaoInicial: obsInicial,
         );
       },
     );
@@ -4966,19 +4910,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         );
       }
     }
-    if (tipo == EntregaVendaHelper.tipoEntregaLoja) {
-      _sugerirObservacaoCarretoAposFrete();
-    }
-  }
-
-  /// Frete escolhido no PDV: abre o modal de observacoes uma vez por venda.
-  void _sugerirObservacaoCarretoAposFrete() {
-    if (_carretoObservacaoSugeridaNaVenda || _entregaSomenteCotacao) return;
-    _carretoObservacaoSugeridaNaVenda = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      unawaited(_abrirObservacaoCarretoPdv());
-    });
   }
 
   /// Modal de observacoes do carreto (F8 ou botao no fechamento). O texto
@@ -6059,7 +5990,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
 
   Future<void> _abrirPassoFechamentoVenda() async {
     _descontoPdVController.clear();
-    _tipoDescontoPdV = 'percentual';
+    _tipoDescontoPdV = 'valor';
     _descontoAcimaTetoAutorizadoPdv = false;
     _descontoAutorizadoPorPdV = null;
     if (_carrinho.isEmpty) {
@@ -6369,338 +6300,403 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     required StateSetter setDialogState,
     ScrollController? scrollCheckout,
   }) {
+    final theme = Theme.of(context);
     return _buildSecaoCheckoutDialog(
       titulo: 'Entrega',
       icone: Icons.local_shipping_outlined,
+      subtitulo: _resumoEntregaItensCarrinho.isEmpty
+          ? 'Sem itens com entrega definida'
+          : _resumoEntregaItensCarrinho,
+      acaoTitulo: _carrinhoTemItemCarreto
+          ? _buildCampoFreteCheckout(setDialogState)
+          : null,
       children: [
-        Text(
-          _resumoEntregaItensCarrinho.isEmpty
-              ? 'Sem itens com entrega definida'
-              : _resumoEntregaItensCarrinho,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        if (_carrinhoEntregaMista) ...[
-          const SizedBox(height: 4),
+        if (_carrinhoEntregaMista)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Venda com tipos de entrega mistos',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        if (_carrinhoTemItemCarreto && _entregaSomenteCotacao) ...[
           Text(
-            'Venda com tipos de entrega mistos',
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
+            'Só cotação — Consumidor Final. Informe o frete estimado; '
+            'endereço e data da entrega ficam para depois. '
+            'A agenda pode ser consultada a qualquer momento, sem gravar o orçamento.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildBotaoAgendaCarretosCheckout(
+            setDialogState: setDialogState,
+            somenteConsulta: true,
+          ),
+        ],
+        if (_carrinhoTemItemCarreto && !_entregaSomenteCotacao) ...[
+          _buildBlocoOndeEntregaCheckout(setDialogState),
+          const Divider(height: 24),
+          _buildBlocoQuandoEntregaCheckout(setDialogState),
+          const Divider(height: 24),
+          _buildBlocoObservacoesCarretoCheckout(setDialogState),
+          const SizedBox(height: 6),
+          _buildBotaoDividirCargasCheckout(setDialogState: setDialogState),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCampoFreteCheckout(StateSetter setDialogState) {
+    return SizedBox(
+      width: 150,
+      child: TextField(
+        controller: _valorFreteController,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        textAlign: TextAlign.end,
+        decoration: InputDecoration(
+          labelText: _entregaSomenteCotacao ? 'Frete estimado' : 'Frete',
+          hintText: '0,00',
+          prefixText: 'R\$ ',
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 10,
+          ),
+        ),
+        onChanged: (_) => _atualizarCheckoutFechamento(setDialogState, () {}),
+      ),
+    );
+  }
+
+  Widget _buildTituloBlocoEntregaCheckout(
+    String titulo,
+    IconData icone, {
+    Widget? acao,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(icone, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              titulo.toUpperCase(),
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          ?acao,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBlocoOndeEntregaCheckout(StateSetter setDialogState) {
+    final theme = Theme.of(context);
+    final enderecos = _clienteSelecionado() == null
+        ? const <EnderecoCliente>[]
+        : _enderecosClienteSelecionado();
+    final partes = _enderecoEntregaController.text
+        .split('|')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildTituloBlocoEntregaCheckout(
+          'Onde',
+          Icons.place_outlined,
+          acao: Focus(
+            focusNode: _focusEditarEntregaPdV,
+            child: TextButton.icon(
+              onPressed: () =>
+                  unawaited(_editarEnderecoEntregaCheckout(setDialogState)),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: Text(partes.isEmpty ? 'Informar endereço' : 'Editar'),
+            ),
+          ),
+        ),
+        if (enderecos.length > 1) ...[
+          DropdownButtonFormField<int>(
+            isExpanded: true,
+            initialValue: _indiceEnderecoSelecionado.clamp(
+              0,
+              enderecos.length - 1,
+            ),
+            decoration: const InputDecoration(
+              labelText: 'Endereço do cliente',
+              isDense: true,
+            ),
+            items: List.generate(enderecos.length, (index) {
+              final endereco = enderecos[index];
+              final rotulo = endereco.tituloExibicao();
+              final resumo = endereco.resumo();
+              return DropdownMenuItem<int>(
+                value: index,
+                child: Text(
+                  resumo.isEmpty ? rotulo : '$rotulo — $resumo',
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                ),
+              );
+            }),
+            selectedItemBuilder: (context) => [
+              for (final endereco in enderecos)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    endereco.tituloExibicao(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              final cliente = _clienteSelecionado();
+              if (cliente == null) return;
+              _atualizarCheckoutFechamento(setDialogState, () {
+                _aplicarEnderecoSelecionadoDoCliente(cliente, value);
+                _entregaSomenteCotacao = false;
+              });
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (partes.isEmpty)
+          Text(
+            'Nenhum endereço informado.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.error,
+              fontWeight: FontWeight.w600,
+            ),
+          )
+        else ...[
+          Text(
+            partes.first,
+            style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w700,
             ),
           ),
-        ],
-        if (_carrinhoTemItemCarreto) ...[
-          if (_entregaSomenteCotacao) ...[
-            const SizedBox(height: 10),
+          if (partes.length > 1)
             Text(
-              'Só cotação — Consumidor Final. Informe o frete estimado; '
-              'endereço e data da entrega ficam para depois. '
-              'A agenda pode ser consultada a qualquer momento, sem gravar o orçamento.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            _buildBotaoAgendaCarretosCheckout(
-              setDialogState: setDialogState,
-              somenteConsulta: true,
-            ),
-          ],
-          if (!_entregaSomenteCotacao &&
-              _clienteSelecionado() != null &&
-              _enderecosClienteSelecionado().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            DropdownButtonFormField<int>(
-              isExpanded: true,
-              initialValue: _indiceEnderecoSelecionado.clamp(
-                0,
-                _enderecosClienteSelecionado().length - 1,
+              partes.skip(1).join(' · '),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-              decoration: const InputDecoration(
-                labelText: 'Endereco para entrega',
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildBlocoQuandoEntregaCheckout(StateSetter setDialogState) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildTituloBlocoEntregaCheckout('Quando', Icons.event_outlined),
+        Row(
+          children: [
+            Expanded(
+              child: _buildBotaoAgendaCarretosCheckout(
+                setDialogState: setDialogState,
+                somenteConsulta: false,
               ),
-              selectedItemBuilder: (context) {
-                final enderecos = _enderecosClienteSelecionado();
-                return List.generate(enderecos.length, (index) {
-                  final endereco = enderecos[index];
-                  final rotulo = endereco.tituloExibicao();
-                  final resumo = endereco.resumo();
-                  final texto = resumo.isEmpty ? rotulo : '$rotulo — $resumo';
-                  return Tooltip(
-                    message: texto,
-                    waitDuration: const Duration(milliseconds: 400),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text(
-                        texto,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        softWrap: false,
-                      ),
-                    ),
-                  );
-                });
-              },
-              items: List.generate(_enderecosClienteSelecionado().length, (
-                index,
-              ) {
-                final endereco = _enderecosClienteSelecionado()[index];
-                final rotulo = endereco.tituloExibicao();
-                final resumo = endereco.resumo();
-                return DropdownMenuItem<int>(
-                  value: index,
-                  child: Text(
-                    resumo.isEmpty ? rotulo : '$rotulo — $resumo',
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 2,
-                  ),
-                );
-              }),
-              onChanged: (value) {
-                if (value == null) return;
-                final cliente = _clienteSelecionado();
-                if (cliente == null) return;
+            ),
+            const SizedBox(width: 8),
+            FilterChip(
+              label: const Text('Sem data'),
+              tooltip: 'Cliente ainda não definiu a data',
+              selected: _entregaSemDataCombinada,
+              onSelected: (v) {
                 _atualizarCheckoutFechamento(setDialogState, () {
-                  _aplicarEnderecoSelecionadoDoCliente(cliente, value);
-                  _entregaSomenteCotacao = false;
-                });
-              },
-            ),
-          ],
-          if (!_entregaSomenteCotacao) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _prioridadeEntregaSelecionada,
-                  decoration: const InputDecoration(
-                    labelText: 'Prioridade da entrega',
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'normal', child: Text('Normal')),
-                    DropdownMenuItem(value: 'urgente', child: Text('Urgente')),
-                    DropdownMenuItem(
-                      value: 'agendada',
-                      child: Text('Agendada'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    _atualizarCheckoutFechamento(setDialogState, () {
-                      _prioridadeEntregaSelecionada = value;
-                      if (_prioridadeEntregaSelecionada == 'agendada' &&
-                          _janelaEntregaSelecionada == 'nao_definida') {
-                        _janelaEntregaSelecionada = 'manha';
-                      }
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _janelaEntregaSelecionada,
-                  decoration: const InputDecoration(labelText: 'Janela'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'nao_definida',
-                      child: Text('Nao definida'),
-                    ),
-                    DropdownMenuItem(value: 'manha', child: Text('Manha')),
-                    DropdownMenuItem(value: 'tarde', child: Text('Tarde')),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    _atualizarCheckoutFechamento(
-                      setDialogState,
-                      () => _janelaEntregaSelecionada = value,
-                    );
-                  },
-                ),
-              ),
-            ],
-            ),
-            const SizedBox(height: 8),
-            _buildBotaoAgendaCarretosCheckout(
-              setDialogState: setDialogState,
-              somenteConsulta: false,
-            ),
-            const SizedBox(height: 4),
-            _buildBotaoDividirCargasCheckout(setDialogState: setDialogState),
-            const SizedBox(height: 2),
-            InkWell(
-              onTap: () {
-                _atualizarCheckoutFechamento(setDialogState, () {
-                  _entregaSemDataCombinada = !_entregaSemDataCombinada;
+                  _entregaSemDataCombinada = v;
                   if (_entregaSemDataCombinada) {
                     _dataEntregaMarcada = null;
                     _cargasEntrega = const [];
                   }
                 });
               },
-              child: Row(
-                children: [
-                  SizedBox(
-                    height: 28,
-                    width: 28,
-                    child: Checkbox(
-                      visualDensity: VisualDensity.compact,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      value: _entregaSemDataCombinada,
-                      onChanged: (v) {
-                        _atualizarCheckoutFechamento(setDialogState, () {
-                          _entregaSemDataCombinada = v == true;
-                          if (_entregaSemDataCombinada) {
-                            _dataEntregaMarcada = null;
-                            _cargasEntrega = const [];
-                          }
-                        });
-                      },
-                    ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: _janelaEntregaSelecionada,
+                decoration: const InputDecoration(
+                  labelText: 'Janela',
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'nao_definida',
+                    child: Text('Não definida'),
                   ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      'Cliente ainda não definiu a data',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
+                  DropdownMenuItem(value: 'manha', child: Text('Manhã')),
+                  DropdownMenuItem(value: 'tarde', child: Text('Tarde')),
                 ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  _atualizarCheckoutFechamento(
+                    setDialogState,
+                    () => _janelaEntregaSelecionada = value,
+                  );
+                },
               ),
             ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerLowest,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: _prioridadeEntregaSelecionada,
+                decoration: const InputDecoration(
+                  labelText: 'Prioridade',
+                  isDense: true,
                 ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Entrega configurada',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _resumoEntrega(),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Focus(
-                      focusNode: _focusEditarEntregaPdV,
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final cliente = _clienteSelecionado();
-                          if (cliente == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Selecione um cliente para editar a entrega.',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-                          final entrega = await _abrirDialogEntregaCliente(
-                            cliente: cliente,
-                          );
-                          if (!mounted || entrega == null) return;
-                          _atualizarCheckoutFechamento(setDialogState, () {
-                            final tiposNoCarrinho = _carrinho
-                                .map(
-                                  (e) =>
-                                      EntregaVendaHelper.normalizarTipoItem(
-                                    e.tipoEntregaItem,
-                                  ),
-                                )
-                                .toSet();
-                            final carrinhoMisto = tiposNoCarrinho.length > 1;
-                            if (!carrinhoMisto && !_carrinhoTemItemCarreto) {
-                              _atualizarEntregaCarrinhoComTipo(
-                                EntregaVendaHelper.tipoEntregaLoja,
-                              );
-                            }
-                            if (!_entregaSemDataCombinada) {
-                              _dataEntregaMarcada ??= DateTime.now();
-                            }
-                            _enderecoEntregaController.text = entrega.endereco;
-                            _observacaoEntregaController.text =
-                                entrega.observacao;
-                            _indiceEnderecoSelecionado =
-                                entrega.indiceEnderecoSelecionado;
-                            _entregaSomenteCotacao = false;
-                          });
-                          if (_carrinhoEntregaMista && mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Endereco atualizado. Tipos por linha '
-                                  'preservados (venda mista).',
-                                ),
-                                duration: Duration(seconds: 3),
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Editar dados da entrega'),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      onPressed: () => unawaited(
-                        _abrirObservacaoCarretoPdv(
-                          setDialogState: setDialogState,
-                        ),
-                      ),
-                      icon: const Icon(Icons.sticky_note_2_outlined),
-                      label: Text(
-                        ObservacaoCarreto.linhasDigitadas(
-                          _observacaoEntregaController.text,
-                        ).isEmpty
-                            ? 'Observações do carreto (F8)'
-                            : 'Editar observações do carreto (F8)',
-                      ),
-                    ),
-                  ),
+                items: const [
+                  DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                  DropdownMenuItem(value: 'urgente', child: Text('Urgente')),
+                  DropdownMenuItem(value: 'agendada', child: Text('Agendada')),
                 ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  _atualizarCheckoutFechamento(setDialogState, () {
+                    _prioridadeEntregaSelecionada = value;
+                    if (_prioridadeEntregaSelecionada == 'agendada' &&
+                        _janelaEntregaSelecionada == 'nao_definida') {
+                      _janelaEntregaSelecionada = 'manha';
+                    }
+                  });
+                },
               ),
             ),
           ],
-          const SizedBox(height: 10),
-          TextField(
-            controller: _valorFreteController,
-            keyboardType: const TextInputType.numberWithOptions(
-              decimal: true,
-            ),
-            decoration: InputDecoration(
-              labelText: 'Valor do frete',
-              hintText: 'Ex.: 35,00',
-              isDense: true,
-              helperText: _entregaSomenteCotacao
-                  ? 'Frete estimado na cotacao — somado ao total'
-                  : 'Somado ao total da nota',
-            ),
-            onChanged: (_) =>
-                _atualizarCheckoutFechamento(setDialogState, () {}),
-          ),
-        ],
+        ),
       ],
     );
+  }
+
+  Widget _buildBlocoObservacoesCarretoCheckout(StateSetter setDialogState) {
+    final theme = Theme.of(context);
+    final linhas = ObservacaoCarreto.linhasDigitadas(
+      _observacaoEntregaController.text,
+    );
+    void abrir() =>
+        unawaited(_abrirObservacaoCarretoPdv(setDialogState: setDialogState));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildTituloBlocoEntregaCheckout(
+          'Observações do carreto',
+          Icons.sticky_note_2_outlined,
+          acao: TextButton.icon(
+            onPressed: abrir,
+            icon: Icon(
+              linhas.isEmpty ? Icons.add : Icons.edit_outlined,
+              size: 18,
+            ),
+            label: Text(linhas.isEmpty ? 'Adicionar (F8)' : 'Editar (F8)'),
+          ),
+        ),
+        InkWell(
+          onTap: abrir,
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: linhas.isEmpty
+                    ? theme.colorScheme.outlineVariant
+                    : theme.colorScheme.onSurface,
+                width: linhas.isEmpty ? 1 : 1.4,
+              ),
+            ),
+            child: linhas.isEmpty
+                ? Text(
+                    'Nenhuma observação. Ex.: portão azul, ligar antes de sair.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontStyle: FontStyle.italic,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final l in linhas)
+                        Text(
+                          '> ${l.toUpperCase()}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editarEnderecoEntregaCheckout(
+    StateSetter setDialogState,
+  ) async {
+    final cliente = _clienteSelecionado();
+    if (cliente == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Selecione um cliente para editar a entrega.'),
+        ),
+      );
+      return;
+    }
+    final entrega = await _abrirDialogEntregaCliente(cliente: cliente);
+    if (!mounted || entrega == null) return;
+    _atualizarCheckoutFechamento(setDialogState, () {
+      final tiposNoCarrinho = _carrinho
+          .map((e) => EntregaVendaHelper.normalizarTipoItem(e.tipoEntregaItem))
+          .toSet();
+      final carrinhoMisto = tiposNoCarrinho.length > 1;
+      if (!carrinhoMisto && !_carrinhoTemItemCarreto) {
+        _atualizarEntregaCarrinhoComTipo(EntregaVendaHelper.tipoEntregaLoja);
+      }
+      if (!_entregaSemDataCombinada) {
+        _dataEntregaMarcada ??= DateTime.now();
+      }
+      _enderecoEntregaController.text = entrega.endereco;
+      final referencia = entrega.referenciaNovoEndereco;
+      if (referencia != null) {
+        _observacaoEntregaController.text = ObservacaoCarreto.mesclar(
+          _observacaoEntregaController.text,
+          referencia,
+        );
+      }
+      _indiceEnderecoSelecionado = entrega.indiceEnderecoSelecionado;
+      _entregaSomenteCotacao = false;
+    });
+    if (_carrinhoEntregaMista && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Endereço atualizado. Tipos por linha preservados (venda mista).',
+          ),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   double _valorEntraCaixaAgoraPdV() {
@@ -6713,6 +6709,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     required String titulo,
     required IconData icone,
     required List<Widget> children,
+    String? subtitulo,
+    Widget? acaoTitulo,
   }) {
     final theme = Theme.of(context);
     return Container(
@@ -6731,12 +6729,31 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             children: [
               Icon(icone, size: 20, color: theme.colorScheme.primary),
               const SizedBox(width: 8),
-              Text(
-                titulo,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    text: titulo,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                    children: [
+                      if (subtitulo != null && subtitulo.isNotEmpty)
+                        TextSpan(
+                          text: '  ·  $subtitulo',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (acaoTitulo != null) ...[
+                const SizedBox(width: 8),
+                acaoTitulo,
+              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -7240,12 +7257,11 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _valorFreteController.clear();
       _enderecoEntregaController.clear();
       _observacaoEntregaController.clear();
-      _carretoObservacaoSugeridaNaVenda = false;
       _orcamentoEmEdicaoId = null;
       _orcamentoEmEdicaoNumero = null;
       _idempotencyKeyOrcamentoPendente = null;
       _descontoPdVController.clear();
-      _tipoDescontoPdV = 'percentual';
+      _tipoDescontoPdV = 'valor';
       _resetarAutorizacaoDescontoAcimaTetoPdV();
       _pesquisaController.clear();
       _precoListaAtivo = _precoListaPadraoPdv;
@@ -8723,17 +8739,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         SingleActivator(LogicalKeyboardKey.f8):
             PdvFocarPesquisaProdutosIntent(),
         SingleActivator(LogicalKeyboardKey.f10): PdvSalvarOrcamentoIntent(),
-        SingleActivator(LogicalKeyboardKey.f11): PdvToggleCalculadoraIntent(),
-        SingleActivator(LogicalKeyboardKey.f12):
-            PdvToggleObraCalculadoraIntent(),
         SingleActivator(LogicalKeyboardKey.keyS, control: true):
             PdvSalvarOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyO, control: true):
             PdvLerOrcamentoIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, control: true):
             PdvLimparPesquisaIntent(),
-        SingleActivator(LogicalKeyboardKey.keyE, alt: true):
-            PdvConsultarAgendaCarretoIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -8807,27 +8818,6 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
               return null;
             },
           ),
-          PdvToggleCalculadoraIntent:
-              CallbackAction<PdvToggleCalculadoraIntent>(
-                onInvoke: (_) {
-                  _toggleCalculadoraPdv();
-                  return null;
-                },
-              ),
-          PdvToggleObraCalculadoraIntent:
-              CallbackAction<PdvToggleObraCalculadoraIntent>(
-                onInvoke: (_) {
-                  _toggleObraCalculadoraPdv();
-                  return null;
-                },
-              ),
-          PdvConsultarAgendaCarretoIntent:
-              CallbackAction<PdvConsultarAgendaCarretoIntent>(
-                onInvoke: (_) {
-                  _consultarAgendaCarretosPdv();
-                  return null;
-                },
-              ),
         },
         child: FocusTraversalGroup(
           policy: OrderedTraversalPolicy(),
@@ -10064,13 +10054,16 @@ class _DividirLinhaCarrinhoDialogState
 class _EntregaDialogResult {
   const _EntregaDialogResult({
     required this.endereco,
-    required this.observacao,
     required this.indiceEnderecoSelecionado,
+    this.referenciaNovoEndereco,
   });
 
   final String endereco;
-  final String observacao;
   final int indiceEnderecoSelecionado;
+
+  /// Referencia do cadastro quando outro endereco foi escolhido no dialogo;
+  /// `null` mantem as observacoes do carreto como estao.
+  final String? referenciaNovoEndereco;
 }
 
 class _EntregaClienteDialog extends StatefulWidget {
@@ -10079,14 +10072,12 @@ class _EntregaClienteDialog extends StatefulWidget {
     required this.enderecosDisponiveis,
     required this.indiceEnderecoInicial,
     required this.enderecoInicial,
-    required this.observacaoInicial,
   });
 
   final String clienteNome;
   final List<EnderecoCliente> enderecosDisponiveis;
   final int indiceEnderecoInicial;
   final String enderecoInicial;
-  final String observacaoInicial;
 
   @override
   State<_EntregaClienteDialog> createState() => _EntregaClienteDialogState();
@@ -10094,15 +10085,14 @@ class _EntregaClienteDialog extends StatefulWidget {
 
 class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
   late final TextEditingController _enderecoController;
-  late final TextEditingController _obsController;
   late int _indiceEnderecoSelecionado;
+  String? _referenciaNovoEndereco;
   String? _erroEndereco;
 
   @override
   void initState() {
     super.initState();
     _enderecoController = TextEditingController(text: widget.enderecoInicial);
-    _obsController = TextEditingController(text: widget.observacaoInicial);
     _indiceEnderecoSelecionado = widget.enderecosDisponiveis.isEmpty
         ? 0
         : widget.indiceEnderecoInicial.clamp(
@@ -10114,7 +10104,6 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
   @override
   void dispose() {
     _enderecoController.dispose();
-    _obsController.dispose();
     super.dispose();
   }
 
@@ -10122,15 +10111,15 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
     final endereco = _enderecoController.text.trim();
     if (endereco.isEmpty) {
       setState(() {
-        _erroEndereco = 'Informe o endereco de entrega para continuar.';
+        _erroEndereco = 'Informe o endereço de entrega para continuar.';
       });
       return;
     }
     Navigator.of(context).pop(
       _EntregaDialogResult(
         endereco: endereco,
-        observacao: _obsController.text.trim(),
         indiceEnderecoSelecionado: _indiceEnderecoSelecionado,
+        referenciaNovoEndereco: _referenciaNovoEndereco,
       ),
     );
   }
@@ -10208,7 +10197,7 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
                         _indiceEnderecoSelecionado = value;
                         final endereco = widget.enderecosDisponiveis[value];
                         _enderecoController.text = endereco.resumo();
-                        _obsController.text = endereco.referencia.trim();
+                        _referenciaNovoEndereco = endereco.referencia.trim();
                       });
                     },
                   ),
@@ -10219,19 +10208,12 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
                   maxLines: 3,
                   minLines: 1,
                   decoration: InputDecoration(
-                    labelText: 'Endereco de entrega',
+                    labelText: 'Endereço de entrega',
                     errorText: _erroEndereco,
+                    helperText:
+                        'Referências e instruções: use Observações do carreto (F8).',
                   ),
                   onChanged: (_) => setState(() => _erroEndereco = null),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _obsController,
-                  maxLines: 3,
-                  minLines: 1,
-                  decoration: const InputDecoration(
-                    labelText: 'Observacoes da entrega',
-                  ),
                 ),
               ],
             ),
@@ -10567,18 +10549,6 @@ class PdvLerOrcamentoIntent extends Intent {
 
 class PdvLimparPesquisaIntent extends Intent {
   const PdvLimparPesquisaIntent();
-}
-
-class PdvToggleCalculadoraIntent extends Intent {
-  const PdvToggleCalculadoraIntent();
-}
-
-class PdvToggleObraCalculadoraIntent extends Intent {
-  const PdvToggleObraCalculadoraIntent();
-}
-
-class PdvConsultarAgendaCarretoIntent extends Intent {
-  const PdvConsultarAgendaCarretoIntent();
 }
 
 class _OrcamentoItemDraft implements PromocaoCarrinhoLinha {

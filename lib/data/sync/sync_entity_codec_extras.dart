@@ -685,6 +685,7 @@ class SyncEntityCodecExtras {
         'obraCalcTelhasPorM2': c.obraCalcTelhasPorM2,
         'obraCalcInclinacaoTelhadoPct': c.obraCalcInclinacaoTelhadoPct,
         'obraCalcUsarSubstitutoEstoqueZero': c.obraCalcUsarSubstitutoEstoqueZero,
+        'logoHash': c.logoHash,
       };
 
   static EmpresaConfig empresaConfigDeMap(
@@ -882,6 +883,7 @@ class SyncEntityCodecExtras {
       obraCalcUsarSubstitutoEstoqueZero:
           m['obraCalcUsarSubstitutoEstoqueZero'] as bool? ??
               base.obraCalcUsarSubstitutoEstoqueZero,
+      logoHash: (m['logoHash'] ?? base.logoHash).toString(),
     );
   }
 

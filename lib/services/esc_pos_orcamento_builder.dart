@@ -15,7 +15,9 @@ import '../model/item_venda.dart';
 import '../model/produto.dart';
 import '../model/venda.dart';
 import '../model/vendedor.dart';
+import '../model/config_layout_impressao.dart';
 import 'esc_pos_commands.dart';
+import 'esc_pos_image.dart';
 import 'esc_pos_text_layout.dart';
 import 'fiscal_config_store.dart';
 import 'impressoes_service.dart';
@@ -70,6 +72,8 @@ abstract final class EscPosOrcamentoBuilder {
     OrcamentoEscPosDados dados, {
     EscPosLarguraBobina largura = EscPosLarguraBobina.mm80,
     bool cortar = true,
+    Uint8List? logoBytes,
+    ConfigLayoutImpressao? layoutOrcamento,
   }) {
     final cols = largura.colunas;
     final out = BytesBuilder(copy: false);
@@ -81,6 +85,10 @@ abstract final class EscPosOrcamentoBuilder {
 
     out.add(EscPosCommands.init);
     out.add(EscPosCommands.codePage850);
+
+    final layout =
+        layoutOrcamento ?? ImpressoesService.layoutOrcamentoEfetivo(config);
+    EscPosLogoCabecalho.adicionar(out, logoBytes, layout.exibirLogo, largura);
 
     // --- Cabecalho ---
     // Sem double-height: na TM-T20 corta o nome no meio da palavra.

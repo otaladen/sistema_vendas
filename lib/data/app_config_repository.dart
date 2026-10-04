@@ -49,6 +49,7 @@ class EmpresaConfig {
     this.rodapeNota = 'Documento nao fiscal',
     this.rodapeOrcamento = 'Este orcamento nao possui valor fiscal.',
     this.logoPath = '',
+    this.logoHash = '',
     this.limiteDivergenciaCaixa = 20,
     this.mostrarCampoDescontoCaixa = true,
     this.exibirBuscaRapidaOrcamentoCaixa = true,
@@ -177,6 +178,9 @@ class EmpresaConfig {
   final String rodapeNota;
   final String rodapeOrcamento;
   final String logoPath;
+
+  /// SHA-256 da imagem no servidor (sincronizado na rede); vazio = sem logo.
+  final String logoHash;
   final double limiteDivergenciaCaixa;
 
   /// Quando falso, o painel de desconto rapido some na tela do Caixa.
@@ -322,6 +326,7 @@ class EmpresaConfig {
     String? rodapeNota,
     String? rodapeOrcamento,
     String? logoPath,
+    String? logoHash,
     double? limiteDivergenciaCaixa,
     bool? mostrarCampoDescontoCaixa,
     bool? exibirBuscaRapidaOrcamentoCaixa,
@@ -402,6 +407,7 @@ class EmpresaConfig {
       rodapeNota: rodapeNota ?? this.rodapeNota,
       rodapeOrcamento: rodapeOrcamento ?? this.rodapeOrcamento,
       logoPath: logoPath ?? this.logoPath,
+      logoHash: logoHash ?? this.logoHash,
       limiteDivergenciaCaixa:
           limiteDivergenciaCaixa ?? this.limiteDivergenciaCaixa,
       mostrarCampoDescontoCaixa:
@@ -575,6 +581,7 @@ class AppConfigRepository {
   static const _kRodapeNota = 'config_rodape_nota';
   static const _kRodapeOrcamento = 'config_rodape_orcamento';
   static const _kLogoPath = 'config_logo_path';
+  static const _kLogoHash = 'config_logo_hash';
   static const _kLimiteDivergenciaCaixa = 'config_limite_divergencia_caixa';
   static const _kMostrarCampoDescontoCaixa =
       'config_mostrar_campo_desconto_caixa';
@@ -689,6 +696,7 @@ class AppConfigRepository {
           prefs.getString(_kRodapeOrcamento) ??
           'Este orcamento nao possui valor fiscal.',
       logoPath: prefs.getString(_kLogoPath) ?? '',
+      logoHash: prefs.getString(_kLogoHash) ?? '',
       limiteDivergenciaCaixa: prefs.getDouble(_kLimiteDivergenciaCaixa) ?? 20,
       mostrarCampoDescontoCaixa:
           prefs.getBool(_kMostrarCampoDescontoCaixa) ?? true,
@@ -885,6 +893,7 @@ class AppConfigRepository {
     await prefs.setString(_kRodapeOrcamento, rodapeOrcamento);
     await prefs.setString(_kRodapeDocumento, rodapeNota);
     await prefs.setString(_kLogoPath, config.logoPath.trim());
+    await prefs.setString(_kLogoHash, config.logoHash.trim());
     await prefs.setDouble(
       _kLimiteDivergenciaCaixa,
       config.limiteDivergenciaCaixa < 0 ? 0 : config.limiteDivergenciaCaixa,

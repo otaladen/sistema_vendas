@@ -196,7 +196,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
   static const _navegacao = <_PdvAtalhoItem>[
     (tecla: 'Tab', descricao: 'vendedor → entrega → cliente', destaque: false),
     (tecla: 'F6', descricao: 'foco no carrinho', destaque: false),
-    (tecla: 'F8', descricao: 'foco na busca (sem carreto)', destaque: false),
+    (tecla: 'F8', descricao: 'foco na busca', destaque: false),
     (tecla: '↓', descricao: 'busca entra no carrinho', destaque: false),
     (tecla: '↑', descricao: '1º item volta à busca', destaque: false),
   ];
@@ -212,9 +212,7 @@ class PdvAtalhosAjudaPesquisa extends StatelessWidget {
 
   static const _consulta = <_PdvAtalhoItem>[
     (tecla: 'F4', descricao: 'consulta de produtos', destaque: true),
-    (tecla: 'Alt+E', descricao: 'consultar agenda de carretos', destaque: true),
-    (tecla: 'F8', descricao: 'observações do carreto', destaque: true),
-    (tecla: 'Enter', descricao: 'abre consulta', destaque: false),
+    (tecla: 'Alt+E', descricao: 'consultar agenda de carretos', destaque: true),    (tecla: 'Enter', descricao: 'abre consulta', destaque: false),
     (tecla: 'F5', descricao: 'recarrega cadastros', destaque: false),
     (tecla: 'Ctrl+K', descricao: 'limpa busca', destaque: false),
   ];

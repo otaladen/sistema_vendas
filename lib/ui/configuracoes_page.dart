@@ -3,8 +3,6 @@ import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -23,6 +21,9 @@ import 'configuracoes/config_secao.dart';
 import 'configuracoes/config_section_card.dart';
 import 'configuracoes/config_controles.dart';
 import 'configuracoes/config_barra_salvar.dart';
+import 'configuracoes/empresa_logo_config_card.dart';
+import '../services/empresa_logo_service.dart';
+import '../services/empresa_logo_sync_service.dart';
 import '../services/impressoes_service.dart';
 import '../data/objectbox.dart';
 import '../data/sync/lan_sync_scheduler.dart';
@@ -115,6 +116,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   String _impressoraPadrao = '';
   bool _pdvAutoImpressaoAoFinalizarVenda = false;
   String _logoPath = '';
+  bool _logoAlterada = false;
   bool _salvando = false;
   bool _prefsEmpresaAplicadas = false;
   DateTime _agoraSistema = DateTime.now();
@@ -640,26 +642,41 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     );
     if (result == null || result.files.single.path == null) return;
     final sourcePath = result.files.single.path!;
-    final baseDir = Platform.isWindows
-        ? await getApplicationSupportDirectory()
-        : await getApplicationDocumentsDirectory();
-    final logosDir = Directory(p.join(baseDir.path, 'logos'));
-    if (!logosDir.existsSync()) {
-      logosDir.createSync(recursive: true);
-    }
-    final ext = p.extension(sourcePath);
-    final destPath = p.join(logosDir.path, 'logo_loja$ext');
-    await File(sourcePath).copy(destPath);
+    final destPath = await EmpresaLogoService.importarDeArquivo(sourcePath);
     if (!mounted) return;
     setState(() {
       _logoPath = destPath;
+      _logoAlterada = true;
+      _gruposSujos.add(_ConfigGrupo.empresa);
     });
   }
 
   void _removerLogo() {
     setState(() {
       _logoPath = '';
+      _logoAlterada = true;
+      _gruposSujos.add(_ConfigGrupo.empresa);
     });
+  }
+
+  Future<void> _persistirLogoEmpresaSeAlterada() async {
+    if (!_logoAlterada || widget.terminalLeve) return;
+    final cfg = await widget.configuracoesService.carregarEfetiva();
+    final modoServidor =
+        cfg.redeModoServidor || !cfg.redeSincronizacaoAtiva;
+    Uint8List? bytes;
+    if (_logoPath.trim().isNotEmpty) {
+      bytes = await File(_logoPath).readAsBytes();
+    }
+    await EmpresaLogoSyncService().publicar(
+      bytes: bytes,
+      modoServidor: modoServidor,
+    );
+    _logoAlterada = false;
+    final atualizado = await widget.configuracoesService.carregarEfetiva();
+    if (mounted) {
+      setState(() => _logoPath = atualizado.logoPath);
+    }
   }
 
   /// Aplica ao que esta no disco somente os campos do grupo salvo, para que dois
@@ -761,7 +778,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           pastaPadraoPdf: _pastaPadraoPdfController.text,
           impressoraPadrao: _impressoraPadrao,
           pdvAutoImpressaoAoFinalizarVenda: _pdvAutoImpressaoAoFinalizarVenda,
-          logoPath: _logoPath,
         );
       case _ConfigGrupo.podFoto:
         return disco.copyWith(podFotoRetencaoDias: _podFotoRetencaoDias);
@@ -899,6 +915,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     }
     setState(() => _salvando = true);
     try {
+      if (grupo == _ConfigGrupo.empresa) {
+        await _persistirLogoEmpresaSeAlterada();
+      }
       final disco = await widget.configuracoesService.carregarEfetiva();
       final atualizado = _aplicarGrupo(disco, grupo);
 
@@ -1209,6 +1228,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               ),
             ],
           ),
+        ),
+        EmpresaLogoConfigCard(
+          logoPath: _logoPath,
+          somenteLeitura: widget.terminalLeve,
+          onEscolher: _escolherLogo,
+          onRemover: _removerLogo,
         ),
       ],
       secao: ConfigSecoes.todas[0],
@@ -2515,35 +2540,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 onChanged: (v) =>
                     setState(() => _pdvAutoImpressaoAoFinalizarVenda = v),
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _escolherLogo,
-                      icon: const Icon(Icons.image_outlined),
-                      label: Text(
-                        _logoPath.isEmpty ? 'Logo neste PC' : 'Trocar logo local',
-                      ),
-                    ),
-                  ),
-                  if (_logoPath.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: _removerLogo,
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Remover'),
-                    ),
-                  ],
-                ],
-              ),
-              if (_logoPath.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Logo neste terminal: ${p.basename(_logoPath)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
               const SizedBox(height: 12),
               ConfigSaveButton(
                 salvando: _salvando,

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import '../data/app_config_repository.dart';
 import '../data/api/lan_api_client.dart';
 import '../data/sync/sync_entity_codec_extras.dart';
 import '../model/configuracao_terminal_local.dart';
+import '../services/empresa_logo_sync_service.dart';
 import '../services/fiscal_config_store.dart';
 
 /// Campos de [EmpresaConfig] que entram no payload `empresa_config` (servidor).
@@ -69,6 +72,7 @@ abstract final class ConfiguracaoEscopo {
     'obraCalcTelhasPorM2',
     'obraCalcInclinacaoTelhadoPct',
     'obraCalcUsarSubstitutoEstoqueZero',
+    'logoHash',
   };
 }
 
@@ -200,6 +204,10 @@ class ConfiguracoesService {
         await _repository.salvarEmpresaConfig(
           mesclado,
           propagarRede: false,
+        );
+        unawaited(
+          EmpresaLogoSyncService(configRepository: _repository)
+              .sincronizarArquivoSeNecessario(),
         );
       }
       return mesclado;
