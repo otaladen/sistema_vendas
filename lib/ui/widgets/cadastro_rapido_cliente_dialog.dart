@@ -13,8 +13,10 @@ Future<Cliente?> mostrarCadastroRapidoClienteDialog(
 }) async {
   final nomeController = TextEditingController();
   final documentoController = TextEditingController();
+  final telefoneController = TextEditingController();
   final cpfFormatter = CpfInputFormatter();
   final cnpjFormatter = CnpjInputFormatter();
+  final telefoneFormatter = TelefoneInputFormatter();
   final nomeFocus = FocusNode();
   var tipoPessoa = 'fisica';
 
@@ -94,6 +96,16 @@ Future<Cliente?> mostrarCadastroRapidoClienteDialog(
                       ),
                       onSubmitted: (_) => Navigator.pop(ctx, true),
                     ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: telefoneController,
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [telefoneFormatter],
+                      decoration: const InputDecoration(
+                        labelText: 'Telefone / WhatsApp',
+                      ),
+                      onSubmitted: (_) => Navigator.pop(ctx, true),
+                    ),
                   ],
                 ),
               ),
@@ -114,19 +126,31 @@ Future<Cliente?> mostrarCadastroRapidoClienteDialog(
     },
   );
 
-  if (salvar != true) {
+  void liberarControllers() {
     nomeFocus.dispose();
     nomeController.dispose();
     documentoController.dispose();
+    telefoneController.dispose();
+  }
+
+  void liberarControllersAposAnimacaoDialog() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        liberarControllers();
+      });
+    });
+  }
+
+  if (salvar != true) {
+    liberarControllersAposAnimacaoDialog();
     return null;
   }
 
   final nome = nomeController.text.trim();
   final documento = somenteDigitos(documentoController.text);
+  final telefone = somenteDigitos(telefoneController.text);
   final tipo = tipoPessoa;
-  nomeFocus.dispose();
-  nomeController.dispose();
-  documentoController.dispose();
+  liberarControllersAposAnimacaoDialog();
 
   if (nome.isEmpty) {
     if (context.mounted) {
@@ -174,6 +198,7 @@ Future<Cliente?> mostrarCadastroRapidoClienteDialog(
     tipoPessoa: tipo,
     nomeRazao: nome,
     documento: documento,
+    telefone: telefone,
     segmento: 'consumidor',
     origemCadastro: 'balcao',
     ativo: true,
