@@ -66,6 +66,7 @@ Future<int> contarArquivosRecursivo(
   if (!origem.existsSync()) return 0;
   var n = 0;
   await for (final entidade in origem.list(recursive: false)) {
+    if (!await _entidadeAindaExiste(entidade)) continue;
     final nome = p.basename(entidade.path);
     if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
     if (entidade is File) {
@@ -87,6 +88,7 @@ Future<int> contarBytesArquivosRecursivo(
   if (!origem.existsSync()) return 0;
   var total = 0;
   await for (final entidade in origem.list(recursive: false)) {
+    if (!await _entidadeAindaExiste(entidade)) continue;
     final nome = p.basename(entidade.path);
     if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
     if (entidade is File) {
@@ -123,11 +125,25 @@ Future<void> copiarObjectBoxSomenteBanco({
   );
 }
 
+Future<bool> _entidadeAindaExiste(FileSystemEntity entidade) async {
+  try {
+    return await entidade.exists();
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<void> _criarPastaPaiArquivoDestino(File destino) async {
+  await destino.parent.create(recursive: true);
+}
+
 Future<void> copiarArquivoComProgressoBytes({
   required File origem,
   required File destino,
   void Function(int bytesCopiados, int bytesTotal)? onProgressoBytes,
 }) async {
+  if (!await _entidadeAindaExiste(origem)) return;
+  await _criarPastaPaiArquivoDestino(destino);
   final total = await origem.length();
   if (total <= 0) {
     await origem.copy(destino.path);
@@ -243,6 +259,7 @@ Future<void> copiarDiretorioRecursivo({
   var copiados = bytesCopiadosAcumulado;
   final totalPrevisto = bytesTotalPrevisto;
   await for (final entidade in origem.list(recursive: false)) {
+    if (!await _entidadeAindaExiste(entidade)) continue;
     final nome = p.basename(entidade.path);
     if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
     final destinoPath = p.join(destino.path, nome);
@@ -257,27 +274,56 @@ Future<void> copiarDiretorioRecursivo({
         bytesTotalPrevisto: totalPrevisto,
       );
     } else if (entidade is File) {
-      final tamanho = await _tamanhoArquivo(entidade);
-      if (onProgressoBytes != null && totalPrevisto != null && totalPrevisto > 0) {
-        await copiarArquivoComProgressoBytes(
-          origem: entidade,
-          destino: File(destinoPath),
-          onProgressoBytes: (parcial, _) {
-            onProgressoBytes(copiados + parcial, totalPrevisto);
-          },
-        );
-        copiados += tamanho;
-        onProgressoBytes(copiados, totalPrevisto);
-      } else {
-        await entidade.copy(destinoPath);
-        copiados += tamanho;
-        if (onProgressoBytes != null && totalPrevisto != null && totalPrevisto > 0) {
-          onProgressoBytes(copiados, totalPrevisto);
-        }
-      }
-      onArquivoCopiado?.call();
+      copiados = await _copiarArquivoEntrada(
+        origem: entidade,
+        destinoPath: destinoPath,
+        copiadosAcumulado: copiados,
+        totalPrevisto: totalPrevisto,
+        onArquivoCopiado: onArquivoCopiado,
+        onProgressoBytes: onProgressoBytes,
+      );
     }
   }
+}
+
+Future<int> _copiarArquivoEntrada({
+  required File origem,
+  required String destinoPath,
+  required int copiadosAcumulado,
+  required int? totalPrevisto,
+  void Function()? onArquivoCopiado,
+  void Function(int bytesCopiados, int bytesTotal)? onProgressoBytes,
+}) async {
+  if (!await _entidadeAindaExiste(origem)) return copiadosAcumulado;
+  var copiados = copiadosAcumulado;
+  final tamanho = await _tamanhoArquivo(origem);
+  try {
+    if (onProgressoBytes != null && totalPrevisto != null && totalPrevisto > 0) {
+      await copiarArquivoComProgressoBytes(
+        origem: origem,
+        destino: File(destinoPath),
+        onProgressoBytes: (parcial, _) {
+          onProgressoBytes(copiados + parcial, totalPrevisto);
+        },
+      );
+      copiados += tamanho;
+      onProgressoBytes(copiados, totalPrevisto);
+    } else {
+      await _criarPastaPaiArquivoDestino(File(destinoPath));
+      await origem.copy(destinoPath);
+      copiados += tamanho;
+      if (onProgressoBytes != null && totalPrevisto != null && totalPrevisto > 0) {
+        onProgressoBytes(copiados, totalPrevisto);
+      }
+    }
+    onArquivoCopiado?.call();
+  } on FileSystemException catch (e) {
+    if (e is PathNotFoundException || !await _entidadeAindaExiste(origem)) {
+      return copiadosAcumulado;
+    }
+    rethrow;
+  }
+  return copiados;
 }
 
 Future<int> _copiarSubdiretorioComProgresso({
@@ -289,13 +335,15 @@ Future<int> _copiarSubdiretorioComProgresso({
   required int bytesCopiadosAcumulado,
   required int? bytesTotalPrevisto,
 }) async {
+  if (!await _entidadeAindaExiste(origem)) return bytesCopiadosAcumulado;
+  destino.createSync(recursive: true);
   var copiados = bytesCopiadosAcumulado;
   await for (final entidade in origem.list(recursive: false)) {
+    if (!await _entidadeAindaExiste(entidade)) continue;
     final nome = p.basename(entidade.path);
     if (_entidadeIgnoradaNaCopia(nome, ignorarNomes)) continue;
     final destinoPath = p.join(destino.path, nome);
     if (entidade is Directory) {
-      destino.createSync(recursive: true);
       copiados = await _copiarSubdiretorioComProgresso(
         origem: entidade,
         destino: Directory(destinoPath),
@@ -306,24 +354,14 @@ Future<int> _copiarSubdiretorioComProgresso({
         bytesTotalPrevisto: bytesTotalPrevisto,
       );
     } else if (entidade is File) {
-      final tamanho = await _tamanhoArquivo(entidade);
-      if (onProgressoBytes != null &&
-          bytesTotalPrevisto != null &&
-          bytesTotalPrevisto > 0) {
-        await copiarArquivoComProgressoBytes(
-          origem: entidade,
-          destino: File(destinoPath),
-          onProgressoBytes: (parcial, _) {
-            onProgressoBytes(copiados + parcial, bytesTotalPrevisto);
-          },
-        );
-        copiados += tamanho;
-        onProgressoBytes(copiados, bytesTotalPrevisto);
-      } else {
-        await entidade.copy(destinoPath);
-        copiados += tamanho;
-      }
-      onArquivoCopiado?.call();
+      copiados = await _copiarArquivoEntrada(
+        origem: entidade,
+        destinoPath: destinoPath,
+        copiadosAcumulado: copiados,
+        totalPrevisto: bytesTotalPrevisto,
+        onArquivoCopiado: onArquivoCopiado,
+        onProgressoBytes: onProgressoBytes,
+      );
     }
   }
   return copiados;
