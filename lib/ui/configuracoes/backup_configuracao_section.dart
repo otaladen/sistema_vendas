@@ -32,6 +32,8 @@ import '../../domain/backup_status_helper.dart';
 import '../../services/auditoria_registrar.dart';
 import '../produtos/importar_chacal_backup_flow.dart';
 import '../produtos/zerar_cadastro_produtos_flow.dart';
+import 'backup_controller.dart';
+import 'backup_dialog_feedback.dart';
 
 class BackupConfiguracaoSection extends StatefulWidget {
   const BackupConfiguracaoSection({
@@ -892,10 +894,15 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
     setState(() {
       _backupEmAndamento = true;
       _progresso = 0;
-      _etapaProgresso = 'Iniciando…';
+      _etapaProgresso = BackupManualProgressoTextos.aguarde;
     });
-    _progressoUi.value = const _ProgressoBackupUi(valor: 0, etapa: 'Iniciando…');
-    await _abrirDialogoProgresso(titulo: 'Backup em andamento');
+    _progressoUi.value = const _ProgressoBackupUi(
+      valor: 0,
+      etapa: BackupManualProgressoTextos.aguarde,
+    );
+    await _abrirDialogoProgresso(
+      titulo: BackupManualProgressoTextos.tituloDialogo,
+    );
     try {
       final resultado = await LocalBackupService.executar(
         destinoRaiz: Directory(destinoRaiz),
@@ -938,52 +945,27 @@ class _BackupConfiguracaoSectionState extends State<BackupConfiguracaoSection> {
 
       if (!mounted) return false;
       await _recarregar();
-      final mensagemSucesso = escopo == LocalBackupEscopo.cadastroProdutos
-          ? 'Backup de cadastro concluido com '
-              '${resultado.quantidadeProdutos ?? 0} produto(s).\n\n'
-              'Pasta:\n${resultado.pastaBackup.path}'
-          : 'Backup ${escopo.rotulo.toLowerCase()} concluido com sucesso.\n\n'
-              'Pasta:\n${resultado.pastaBackup.path}';
       if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 6),
-          content: Text(
-            escopo == LocalBackupEscopo.cadastroProdutos
-                ? 'Backup de cadastro (${resultado.quantidadeProdutos ?? 0} '
-                    'produto(s)) concluido.'
-                : 'Backup ${escopo.rotulo.toLowerCase()} concluido.',
-          ),
-        ),
-      );
-      if (!mounted) return false;
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Backup concluido'),
-          content: SelectableText(mensagemSucesso),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
+      await mostrarDialogoSucessoBackupManual(
+        context,
+        info: BackupManualConclusaoInfo.fromResult(
+          resultado,
+          formatadorDataHora: _dataHora,
         ),
       );
       return true;
     } on LocalBackupInvalidoException catch (e) {
       if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: Colors.red.shade700,
-        ),
+      await mostrarDialogoErroBackupManual(
+        context,
+        mensagem: BackupController.mensagemErroAmigavel(e),
       );
       return false;
     } catch (e) {
       if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Falha ao criar backup: $e')),
+      await mostrarDialogoErroBackupManual(
+        context,
+        mensagem: BackupController.mensagemErroAmigavel(e),
       );
       return false;
     } finally {
