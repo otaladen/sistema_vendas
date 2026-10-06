@@ -493,23 +493,25 @@ class EntregaVendaHelper {
     );
   }
 
-  /// Campo Qtd aceita decimais quando o saldo usa milésimos (M², etc.).
+  /// Campo Qtd aceita decimais quando o saldo pendente usa milésimos (M², etc.).
+  ///
+  /// Usa a mesma escala de [textoEntradaQuantidadeRetirada] / rótulo pendente —
+  /// nunca [ProdutoEmbalagem.estoqueUsaEscalaFracionada] sozinho (evita tratar
+  /// `1` SC literal como `1,000` milésimos).
   static bool retiradaEntradaFracionada(
     ItemVenda item, {
     required int quantidadeArmazenadaReferencia,
     Produto? Function(int id)? obterProduto,
   }) {
-    if (item.quantidadeEmMilesimosPersistida == true) return true;
     final p = produtoItemEntrega(item, obterProduto: obterProduto);
-    if (p == null) return false;
-    if (ProdutoEmbalagem.leituraUsaEscalaFracionada(
-      p,
-      quantidadeArmazenadaReferencia,
-    )) {
-      return true;
-    }
-    return ProdutoEmbalagem.estoqueUsaEscalaFracionada(p);
+    return ProdutoEmbalagem.leituraArmazenadaEmMilesimos(
+      produto: p,
+      quantidadeArmazenada: quantidadeArmazenadaReferencia,
+      emMilesimos: item.quantidadeEmMilesimosPersistida,
+    );
   }
+
+  static const double _toleranciaQuantidadeRetirada = 0.0001;
 
   /// Converte texto do campo Qtd para valor persistido ([ItemVenda.quantidade]).
   /// Retorna `null` se vazio, invalido ou acima de [pendenteArmazenado].
@@ -541,7 +543,20 @@ class EntregaVendaHelper {
     final armazenado = fracionada
         ? QuantidadeVendaUtil.paraArmazenamento(v, fracionada: true)
         : v.round();
-    if (armazenado <= 0 || armazenado > pendenteArmazenado) return null;
+    if (armazenado <= 0) return null;
+
+    final pendenteExibicao = QuantidadeVendaUtil.valorExibicao(
+      pendenteArmazenado,
+      fracionada: fracionada,
+    );
+    if (v > pendenteExibicao + _toleranciaQuantidadeRetirada) return null;
+
+    if (armazenado > pendenteArmazenado) {
+      if (v >= pendenteExibicao - _toleranciaQuantidadeRetirada) {
+        return pendenteArmazenado;
+      }
+      return null;
+    }
     return armazenado;
   }
 

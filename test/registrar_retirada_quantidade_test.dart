@@ -145,4 +145,139 @@ void main() {
     );
     expect(q, QuantidadeVendaUtil.paraArmazenamento(2.5, fracionada: true));
   });
+
+  Produto produtoCimentoSc() => Produto(
+        codigoInterno: '939',
+        nome: 'Cimento Poty 50kg',
+        unidade: 'SC',
+        quantidadeMinima: 0,
+        precoCusto: 40,
+        precoVenda: 55,
+      );
+
+  ItemVenda itemSc({
+    required int quantidadeArmazenada,
+    int escalaQuantidade = ItemVenda.escalaQuantidadeLegado,
+  }) {
+    final item = ItemVenda(
+      nomeProduto: 'Cimento Poty 50kg',
+      quantidade: quantidadeArmazenada,
+      precoUnitario: 55,
+      precoCustoUnitario: 40,
+      tipoEntregaItem: EntregaVendaHelper.tipoRetiradaFutura,
+      escalaQuantidade: escalaQuantidade,
+    )..produto.target = produtoCimentoSc();
+    return item;
+  }
+
+  test('1 SC pendente inteiro confirma entrada 1, 1,0 e 1.0', () {
+    const pendenteLiteral = 1;
+    final item = itemSc(
+      quantidadeArmazenada: pendenteLiteral,
+      escalaQuantidade: ItemVenda.escalaQuantidadeLiteral,
+    );
+    expect(
+      EntregaVendaHelper.textoQuantidadeRetiradaComUnidade(
+        item,
+        quantidadeArmazenada: pendenteLiteral,
+      ),
+      '1 SC',
+    );
+    expect(
+      EntregaVendaHelper.retiradaEntradaFracionada(
+        item,
+        quantidadeArmazenadaReferencia: pendenteLiteral,
+      ),
+      isFalse,
+    );
+    for (final texto in ['1', '1,0', '1.0']) {
+      expect(
+        EntregaVendaHelper.parseQuantidadeRetiradaEntrada(
+          item,
+          texto: texto,
+          pendenteArmazenado: pendenteLiteral,
+        ),
+        pendenteLiteral,
+        reason: 'texto=$texto',
+      );
+    }
+    final sugerido = EntregaVendaHelper.textoEntradaQuantidadeRetirada(
+      item,
+      quantidadeArmazenada: pendenteLiteral,
+    );
+    expect(
+      EntregaVendaHelper.parseQuantidadeRetiradaEntrada(
+        item,
+        texto: sugerido,
+        pendenteArmazenado: pendenteLiteral,
+      ),
+      pendenteLiteral,
+    );
+  });
+
+  test('1 SC em milésimos (1000) aceita retirar tudo com texto sugerido', () {
+    const pendenteMilesimos = 1000;
+    final item = itemSc(
+      quantidadeArmazenada: pendenteMilesimos,
+      escalaQuantidade: ItemVenda.escalaQuantidadeMilesimos,
+    );
+    expect(
+      EntregaVendaHelper.textoQuantidadeRetiradaComUnidade(
+        item,
+        quantidadeArmazenada: pendenteMilesimos,
+      ),
+      '1 SC',
+    );
+    final sugerido = EntregaVendaHelper.textoEntradaQuantidadeRetirada(
+      item,
+      quantidadeArmazenada: pendenteMilesimos,
+    );
+    expect(sugerido, '1');
+    expect(
+      EntregaVendaHelper.parseQuantidadeRetiradaEntrada(
+        item,
+        texto: sugerido,
+        pendenteArmazenado: pendenteMilesimos,
+      ),
+      pendenteMilesimos,
+    );
+  });
+
+  test('estoque fracionado no cadastro nao forca milésimos em saldo literal', () {
+    final produto = Produto(
+      codigoInterno: 'KG-SC',
+      nome: 'Produto KG/SC',
+      unidade: 'KG',
+      unidadeCompra: 'SC',
+      quantidadePorEmbalagem: 50,
+      permiteQuantidadeFracionada: true,
+      quantidadeMinima: 0,
+      precoCusto: 1,
+      precoVenda: 2,
+    );
+    const pendente = 1;
+    final item = ItemVenda(
+      nomeProduto: 'Produto KG/SC',
+      quantidade: pendente,
+      precoUnitario: 2,
+      precoCustoUnitario: 1,
+      tipoEntregaItem: EntregaVendaHelper.tipoRetiradaFutura,
+    )..produto.target = produto;
+
+    expect(
+      EntregaVendaHelper.retiradaEntradaFracionada(
+        item,
+        quantidadeArmazenadaReferencia: pendente,
+      ),
+      isFalse,
+    );
+    expect(
+      EntregaVendaHelper.parseQuantidadeRetiradaEntrada(
+        item,
+        texto: '1',
+        pendenteArmazenado: pendente,
+      ),
+      pendente,
+    );
+  });
 }
