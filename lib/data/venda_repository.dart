@@ -1314,6 +1314,9 @@ class VendaRepository {
     }
 
     orPartes.add(
+      Venda_.observacaoNota.contains(lower, caseSensitive: false),
+    );
+    orPartes.add(
       Venda_.nfceNumero.contains(tb, caseSensitive: false),
     );
     orPartes.add(
@@ -2477,6 +2480,7 @@ class VendaRepository {
     double descontoEmReais = 0,
     bool permitirVendaSemEstoque = false,
     String? uuidLocal,
+    String observacaoNota = '',
   }) {
     return registrarOrcamentoIdempotente(
       itensInput,
@@ -2487,6 +2491,7 @@ class VendaRepository {
       descontoEmReais: descontoEmReais,
       permitirVendaSemEstoque: permitirVendaSemEstoque,
       uuidLocal: uuidLocal,
+      observacaoNota: observacaoNota,
     ).id;
   }
 
@@ -2503,6 +2508,7 @@ class VendaRepository {
     double descontoEmReais = 0,
     bool permitirVendaSemEstoque = false,
     String? uuidLocal,
+    String observacaoNota = '',
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
@@ -2548,6 +2554,7 @@ class VendaRepository {
         uuidLocal: key,
       );
       _aplicarDadosEntregaOrcamentoNaVenda(venda, entrega, itensInput);
+      venda.observacaoNota = observacaoNota.trim();
       if (clienteId != null) {
         final cliente = _db.clienteBox.get(clienteId);
         if (cliente != null) {
@@ -3007,6 +3014,7 @@ class VendaRepository {
     int? vendedorId,
     double descontoEmReais = 0,
     bool permitirVendaSemEstoque = false,
+    String observacaoNota = '',
   }) {
     if (itensInput.isEmpty) {
       throw ArgumentError('O orcamento deve conter ao menos um item.');
@@ -3029,6 +3037,7 @@ class VendaRepository {
       }
 
       _aplicarDadosEntregaOrcamentoNaVenda(venda, entrega, itensInput);
+      venda.observacaoNota = observacaoNota.trim();
 
       if (clienteId == null) {
         venda.cliente.target = null;

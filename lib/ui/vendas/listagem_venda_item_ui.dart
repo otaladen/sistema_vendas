@@ -20,6 +20,8 @@ class ListagemVendaItemUi {
     this.statusDetalhe,
     this.alertas = const [],
     this.temDevolucaoTroca = false,
+    this.observacaoNota = '',
+    this.observacaoNotaResumo = '',
   });
 
   final Venda venda;
@@ -38,4 +40,10 @@ class ListagemVendaItemUi {
   final String? statusDetalhe;
   final List<String> alertas;
   final bool temDevolucaoTroca;
+
+  /// Texto completo (PDV / nota fiscal).
+  final String observacaoNota;
+
+  /// Uma linha para card/tabela; vazio se nao houver observacao.
+  final String observacaoNotaResumo;
 }

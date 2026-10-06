@@ -6,6 +6,7 @@ import '../data/app_config_repository.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/entregas/observacao_carreto.dart';
+import '../domain/observacao_nota.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
@@ -281,9 +282,18 @@ abstract final class EscPosCupomBuilder {
       out.add(EscPosCommands.boldOff);
     }
 
+    final linhasObservacaoVenda = ObservacaoNota.linhasRodapeCupom(venda);
+    adicionarBlocoObservacaoVendaCupomDanfe(
+      out,
+      cols: cols,
+      linhas: linhasObservacaoVenda,
+    );
+
     // Cupom dinheiro (sem NFC-e SEFAZ): aviso de contingencia visual LDV.
     if (!temNfceReal) {
-      out.add(EscPosCommands.separator(cols));
+      if (linhasObservacaoVenda.isEmpty) {
+        out.add(EscPosCommands.separator(cols));
+      }
       out.add(EscPosCommands.alignCenter);
       out.add(EscPosCommands.boldOn);
       for (final l in EscPosTextLayout.wrap(
@@ -429,21 +439,73 @@ abstract final class EscPosCupomBuilder {
     );
   }
 
+  /// Orcamento / documentos internos: bloco destacado (nao usar no DANFE).
+  static void adicionarBlocoObservacoesNota(
+    BytesBuilder out, {
+    required int cols,
+    required List<String> linhas,
+  }) =>
+      _adicionarBlocoObservacoesTitulo(
+        out,
+        cols: cols,
+        titulo: ObservacaoNota.tituloImpressao,
+        linhas: linhas,
+      );
+
+  /// Entre pagamento/troco e bloco fiscal (contingencia, chave, QR).
+  static void adicionarBlocoObservacaoVendaCupomDanfe(
+    BytesBuilder out, {
+    required int cols,
+    required List<String> linhas,
+  }) {
+    if (linhas.isEmpty) return;
+    out.add(EscPosCommands.alignLeft);
+    out.add(EscPosCommands.separator(cols, '-'));
+    out.add(EscPosCommands.boldOn);
+    for (final l in EscPosTextLayout.wrap(
+      ObservacaoNota.tituloCupomDanfe,
+      cols,
+    )) {
+      out.add(EscPosCommands.line(l));
+    }
+    out.add(EscPosCommands.boldOff);
+    for (final linha in linhas) {
+      for (final l in EscPosTextLayout.wrap(linha, cols)) {
+        out.add(EscPosCommands.line(l));
+      }
+    }
+    out.add(EscPosCommands.separator(cols, '-'));
+  }
+
   /// Bloco `OBSERVAÇÕES DO CARRETO`: titulo em altura dupla e corpo em
   /// negrito, caixa alta (patio e motorista leem de longe).
   static void adicionarBlocoObservacoesCarreto(
     BytesBuilder out, {
     required int cols,
     required List<String> linhas,
+  }) =>
+      _adicionarBlocoObservacoesTitulo(
+        out,
+        cols: cols,
+        titulo: ObservacaoCarreto.tituloImpressao,
+        linhas: linhas,
+        tituloAlturaDupla: true,
+      );
+
+  static void _adicionarBlocoObservacoesTitulo(
+    BytesBuilder out, {
+    required int cols,
+    required String titulo,
+    required List<String> linhas,
+    bool tituloAlturaDupla = false,
   }) {
     if (linhas.isEmpty) return;
     out.add(EscPosCommands.alignCenter);
     out.add(EscPosCommands.boldOn);
-    out.add(EscPosCommands.doubleHeightOn);
-    for (final l in EscPosTextLayout.wrap(
-      ObservacaoCarreto.tituloImpressao,
-      cols,
-    )) {
+    if (tituloAlturaDupla) {
+      out.add(EscPosCommands.doubleHeightOn);
+    }
+    for (final l in EscPosTextLayout.wrap(titulo, cols)) {
       out.add(EscPosCommands.line(l));
     }
     out.add(EscPosCommands.normalSize);

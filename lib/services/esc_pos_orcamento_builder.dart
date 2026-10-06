@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../data/app_config_repository.dart';
 import '../domain/fiscal/fiscal_regime_padrao.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/observacao_nota.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/orcamento_totais_impressao.dart';
 import '../domain/plano_fiado.dart';
@@ -17,6 +18,7 @@ import '../model/venda.dart';
 import '../model/vendedor.dart';
 import '../model/config_layout_impressao.dart';
 import 'esc_pos_commands.dart';
+import 'esc_pos_cupom_builder.dart';
 import 'esc_pos_image.dart';
 import 'esc_pos_text_layout.dart';
 import 'fiscal_config_store.dart';
@@ -174,6 +176,12 @@ abstract final class EscPosOrcamentoBuilder {
       venda: venda,
       cliente: cliente,
       itens: itens,
+    );
+
+    EscPosCupomBuilder.adicionarBlocoObservacoesNota(
+      out,
+      cols: cols,
+      linhas: ObservacaoNota.linhasImpressao(venda),
     );
 
     out.add(EscPosCommands.separator(cols));

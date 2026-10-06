@@ -22,6 +22,7 @@ abstract final class LanServidorBootstrap {
 
   static bool _emAndamento = false;
   static bool _ok = false;
+  static String? _ultimoSyncToken;
   static String? ultimoErro;
   static DateTime? iniciadoEm;
   static VoidCallback? _listenerEstoqueLanApi;
@@ -40,6 +41,16 @@ abstract final class LanServidorBootstrap {
     try {
       final config = await configRepository.carregarEmpresaConfig();
       if (!config.redeSincronizacaoAtiva || !config.redeModoServidor) {
+        return;
+      }
+
+      final syncToken = config.redeSyncToken;
+      // API ja sobe na tela de login (main.dart). Re-subir no pos-login derruba
+      // todos os WebSocket dos terminais leves por ~2s — use [reiniciar] se
+      // precisar recriar rotas ou trocar token.
+      if (LanApiServerHub.instance.ativo &&
+          _ok &&
+          _ultimoSyncToken == syncToken) {
         return;
       }
 
@@ -91,6 +102,7 @@ abstract final class LanServidorBootstrap {
 
       _ok = LanApiServerHub.instance.ativo;
       if (_ok) {
+        _ultimoSyncToken = syncToken;
         iniciadoEm = DateTime.now();
         debugPrint(
           'LanServidorBootstrap: API ERP completa na porta '
@@ -116,6 +128,7 @@ abstract final class LanServidorBootstrap {
     required AppConfigRepository configRepository,
   }) async {
     _ok = false;
+    _ultimoSyncToken = null;
     await LanApiServerHub.instance.parar();
     await garantirAtivo(
       objectBox: objectBox,

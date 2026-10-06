@@ -140,6 +140,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         descontoEmReais: (body?['descontoEmReais'] as num?)?.toDouble() ?? 0,
         permitirVendaSemEstoque: body?['permitirVendaSemEstoque'] == true,
         uuidLocal: idempotencyKeyOrcamento(r, body),
+        observacaoNota: (body?['observacaoNota'] ?? '').toString(),
       );
       final id = idResult.id;
       final venda = d.vendaRepository.obterPorId(id);
@@ -233,6 +234,7 @@ void registerVendasRoutes(Router router, LanApiDeps d) {
         vendedorId: (body?['vendedorId'] as num?)?.toInt(),
         descontoEmReais: (body?['descontoEmReais'] as num?)?.toDouble() ?? 0,
         permitirVendaSemEstoque: body?['permitirVendaSemEstoque'] == true,
+        observacaoNota: (body?['observacaoNota'] ?? '').toString(),
       );
       final venda = d.vendaRepository.obterPorId(vendaId);
       d.notificar('venda');

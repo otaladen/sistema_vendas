@@ -544,7 +544,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1373149988303506096),
     name: 'Venda',
-    lastPropertyId: const obx_int.IdUid(72, 1942812125760673226),
+    lastPropertyId: const obx_int.IdUid(73, 6187588625153725584),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -984,6 +984,12 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(72, 1942812125760673226),
         name: 'cargasEntregaJson',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(73, 6187588625153725584),
+        name: 'observacaoNota',
         type: 9,
         flags: 0,
       ),
@@ -5150,7 +5156,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final cargasEntregaJsonOffset = fbb.writeString(
           object.cargasEntregaJson,
         );
-        fbb.startTable(73);
+        final observacaoNotaOffset = fbb.writeString(object.observacaoNota);
+        fbb.startTable(74);
         fbb.addInt64(0, object.id);
         fbb.addInt64(1, object.data.millisecondsSinceEpoch);
         fbb.addFloat64(2, object.total);
@@ -5225,6 +5232,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addFloat64(69, object.valorTrocoCaixa);
         fbb.addInt64(70, object.numeroControle);
         fbb.addOffset(71, cargasEntregaJsonOffset);
+        fbb.addOffset(72, observacaoNotaOffset);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -5333,6 +5341,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final observacaoEntregaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 32, '');
+        final observacaoNotaParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 148, '');
         final motoristaEntregaParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGet(buffer, rootOffset, 60, '');
@@ -5562,6 +5573,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
           valorFrete: valorFreteParam,
           enderecoEntrega: enderecoEntregaParam,
           observacaoEntrega: observacaoEntregaParam,
+          observacaoNota: observacaoNotaParam,
           motoristaEntrega: motoristaEntregaParam,
           statusEntrega: statusEntregaParam,
           prioridadeEntrega: prioridadeEntregaParam,
@@ -10752,6 +10764,11 @@ class Venda_ {
   /// See [Venda.cargasEntregaJson].
   static final cargasEntregaJson = obx.QueryStringProperty<Venda>(
     _entities[2].properties[70],
+  );
+
+  /// See [Venda.observacaoNota].
+  static final observacaoNota = obx.QueryStringProperty<Venda>(
+    _entities[2].properties[71],
   );
 
   /// see [Venda.itens]

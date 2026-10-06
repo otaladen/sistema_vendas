@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/api/venda_api_repository.dart';
 import '../../data/venda_repository.dart';
 import '../../domain/operacao_permissao_guard.dart';
+import '../../domain/venda_documento_rotulo_helper.dart';
 import '../../model/usuario_sistema.dart';
 import '../../model/venda.dart';
 import '../../services/venda_fiscal_service.dart';
@@ -16,10 +17,18 @@ enum CancelarVendaUiResultado {
   erro,
 }
 
-/// Rotulo amigavel da venda (numero do orcamento ou ID interno).
+/// Rotulo da venda no cancelamento — alinhado à coluna # / documento da listagem.
 String rotuloVendaParaUsuario(Venda v) {
-  if (v.numeroOrcamento > 0) return 'Venda ${v.numeroOrcamento}';
-  return 'Venda ${v.id}';
+  if (v.status == 'orcamento') {
+    return VendaDocumentoRotuloHelper.rotuloOrcamento(v);
+  }
+  final controle = VendaDocumentoRotuloHelper.numeroControleInterno(v);
+  if (controle > 0) return 'Venda #$controle';
+  final nfce = v.nfceNumero.trim();
+  if (v.nfceEmitida && nfce.isNotEmpty) return 'NFC-e $nfce';
+  if (v.numeroOrcamento > 0) return 'Venda #${v.numeroOrcamento}';
+  if (v.id > 0) return 'Venda #${v.id}';
+  return 'Venda';
 }
 
 /// Fluxo completo de cancelamento (autorizacao, fiscal SEFAZ, ERP).
@@ -185,7 +194,7 @@ class CancelarVendaUi {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Cancelar ${rotuloVendaParaUsuario(vendaAtual)}?'),
+                Text('Cancelar ${rotuloVendaParaUsuario(venda)}?'),
                 if (exigeFiscal) ...[
                   const SizedBox(height: 10),
                   Text(

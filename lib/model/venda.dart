@@ -24,6 +24,7 @@ class Venda {
     this.valorFrete = 0,
     this.enderecoEntrega = '',
     this.observacaoEntrega = '',
+    this.observacaoNota = '',
     this.motoristaEntrega = '',
     this.statusEntrega = 'nao_aplicavel',
     this.prioridadeEntrega = 'normal',
@@ -113,6 +114,11 @@ class Venda {
   double valorFrete;
   String enderecoEntrega;
   String observacaoEntrega;
+
+  /// Instrucoes comerciais da venda (material, cor, pedido do cliente).
+  /// Vai para cupom/orcamento e informacoes adicionais da NFC-e/NF-e.
+  String observacaoNota;
+
   String motoristaEntrega;
   String statusEntrega;
   String prioridadeEntrega;

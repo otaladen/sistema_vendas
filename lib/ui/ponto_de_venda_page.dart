@@ -89,6 +89,9 @@ import 'pdv_consulta_produtos_page.dart';
 import 'pdv/agenda_carreto_pdv_dialog.dart';
 import 'pdv/dividir_cargas_pdv_dialog.dart';
 import 'vendas/carreto_observacao_dialog.dart';
+import 'vendas/enviar_caixa_entrega_ui.dart';
+import 'vendas/nota_observacao_dialog.dart';
+import '../domain/observacao_nota.dart';
 import 'widgets/cadastro_rapido_cliente_dialog.dart';
 import 'widgets/anotar_lista_compra_dialog.dart';
 import 'pdv_pesquisa_comando.dart';
@@ -325,6 +328,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   final _valorFreteController = TextEditingController();
   final _enderecoEntregaController = TextEditingController();
   final _observacaoEntregaController = TextEditingController();
+  final _observacaoNotaController = TextEditingController();
   final NumberFormat _currency = NumberFormat('#,##0.00', 'pt_BR');
   late final dynamic _kitOrcamentoRepo;
   late final ProdutoSugestaoVendaRepository? _sugestaoVendaRepo;
@@ -359,6 +363,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
   static const int _parcelasMaximasCheckoutPdV = 12;
   int? _clienteSelecionadoId;
   int _indiceEnderecoSelecionado = 0;
+  /// Ponto de referencia do endereco (cadastro); nao vai em observacao do carreto.
+  String _pontoReferenciaEnderecoCheckout = '';
   int? _vendedorSelecionadoId;
 
   /// Tipo de entrega do carrinho (Ctrl+F1–F3: padrao; em carrinho uniforme
@@ -430,6 +436,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _cargasEntrega = const [];
     _enderecoEntregaController.clear();
     _observacaoEntregaController.clear();
+    _pontoReferenciaEnderecoCheckout = '';
   }
 
   void _aplicarEnderecoCarretoDoClienteSeVazio() {
@@ -1379,6 +1386,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     _valorFreteController.dispose();
     _enderecoEntregaController.dispose();
     _observacaoEntregaController.dispose();
+    _observacaoNotaController.dispose();
     _disposeLinhasPagamentoMisto();
     _carrinhoUiEpoch.dispose();
     super.dispose();
@@ -1988,6 +1996,12 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           _carrinhoTemItemCarreto) {
         unawaited(
           _abrirObservacaoCarretoPdv(setDialogState: _checkoutDialogSetState),
+        );
+        return true;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.f9) {
+        unawaited(
+          _abrirObservacaoNotaPdv(setDialogState: _checkoutDialogSetState),
         );
         return true;
       }
@@ -3355,14 +3369,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     if (enderecos.isEmpty) {
       _indiceEnderecoSelecionado = 0;
       _enderecoEntregaController.clear();
-      _observacaoEntregaController.clear();
+      _pontoReferenciaEnderecoCheckout = '';
       return;
     }
     final indiceSeguro = indice.clamp(0, enderecos.length - 1);
     final endereco = enderecos[indiceSeguro];
     _indiceEnderecoSelecionado = indiceSeguro;
     _enderecoEntregaController.text = endereco.resumo();
-    _observacaoEntregaController.text = endereco.referencia.trim();
+    _pontoReferenciaEnderecoCheckout = endereco.referencia.trim();
   }
 
   String _rotuloCurtoClientePdV(Cliente? cliente) {
@@ -3877,6 +3891,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           _entregaSemDataCombinada = true;
           _enderecoEntregaController.clear();
           _observacaoEntregaController.clear();
+          _pontoReferenciaEnderecoCheckout = '';
         } else {
           _atualizarEntregaCarrinhoComTipo(EntregaVendaHelper.tipoRetirada);
           _prioridadeEntregaSelecionada = 'normal';
@@ -3887,6 +3902,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           _valorFreteController.clear();
           _enderecoEntregaController.clear();
           _observacaoEntregaController.clear();
+          _pontoReferenciaEnderecoCheckout = '';
         }
         _precoListaAtivo = _precoListaPadraoPdv;
         _atualizarPrecosCarrinhoPreservandoTabelas();
@@ -4954,6 +4970,26 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       }
     } finally {
       _carretoObservacaoDialogAberto = false;
+    }
+  }
+
+  Future<void> _abrirObservacaoNotaPdv({
+    StateSetter? setDialogState,
+  }) async {
+    if (!mounted) return;
+    final digitado = await mostrarNotaObservacaoDialog(
+      context,
+      observacaoInicial: _observacaoNotaController.text,
+    );
+    if (!mounted || digitado == null) return;
+    void aplicar() {
+      _observacaoNotaController.text = digitado;
+    }
+
+    if (setDialogState != null) {
+      _atualizarCheckoutFechamento(setDialogState, aplicar);
+    } else {
+      setState(aplicar);
     }
   }
 
@@ -6495,6 +6531,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+          EnviarCaixaPontoReferenciaLinha(
+            referencia: _pontoReferenciaEnderecoCheckout,
+          ),
         ],
       ],
     );
@@ -6588,28 +6627,32 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
     );
   }
 
-  Widget _buildBlocoObservacoesCarretoCheckout(StateSetter setDialogState) {
+  Widget _buildCheckoutSecaoObservacaoNota(StateSetter setDialogState) {
+    return _buildSecaoCheckoutDialog(
+      titulo: 'Observações da nota (F9)',
+      icone: Icons.description_outlined,
+      children: [_buildBlocoObservacoesNotaCheckout(setDialogState)],
+    );
+  }
+
+  Widget _buildBlocoObservacoesNotaCheckout(StateSetter setDialogState) {
     final theme = Theme.of(context);
-    final linhas = ObservacaoCarreto.linhasDigitadas(
-      _observacaoEntregaController.text,
+    final linhas = ObservacaoNota.linhasDigitadas(
+      _observacaoNotaController.text,
     );
     void abrir() =>
-        unawaited(_abrirObservacaoCarretoPdv(setDialogState: setDialogState));
+        unawaited(_abrirObservacaoNotaPdv(setDialogState: setDialogState));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildTituloBlocoEntregaCheckout(
-          'Observações do carreto',
-          Icons.sticky_note_2_outlined,
-          acao: TextButton.icon(
-            onPressed: abrir,
-            icon: Icon(
-              linhas.isEmpty ? Icons.add : Icons.edit_outlined,
-              size: 18,
-            ),
-            label: Text(linhas.isEmpty ? 'Adicionar (F8)' : 'Editar (F8)'),
+        Text(
+          'Material, cor, tipo ou recado do cliente — vai no cupom, orçamento '
+          'e NFC-e/NF-e. Não confundir com observações do carreto (F8).',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
+        const SizedBox(height: 8),
         InkWell(
           onTap: abrir,
           borderRadius: BorderRadius.circular(6),
@@ -6627,7 +6670,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             ),
             child: linhas.isEmpty
                 ? Text(
-                    'Nenhuma observação. Ex.: portão azul, ligar antes de sair.',
+                    'Nenhuma observação. Ex.: cor RAL 9003, telha colonial.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       fontStyle: FontStyle.italic,
                       color: theme.colorScheme.onSurfaceVariant,
@@ -6638,16 +6681,47 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                     children: [
                       for (final l in linhas)
                         Text(
-                          '> ${l.toUpperCase()}',
+                          '> $l',
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                     ],
                   ),
           ),
         ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: abrir,
+            icon: Icon(
+              linhas.isEmpty ? Icons.add : Icons.edit_outlined,
+              size: 18,
+            ),
+            label: Text(linhas.isEmpty ? 'Adicionar (F9)' : 'Editar (F9)'),
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildBlocoObservacoesCarretoCheckout(StateSetter setDialogState) {
+    final linhas = ObservacaoCarreto.linhasDigitadas(
+      _observacaoEntregaController.text,
+    );
+    void abrir() =>
+        unawaited(_abrirObservacaoCarretoPdv(setDialogState: setDialogState));
+    return EnviarCaixaObservacoesCarretoResumo(
+      observacaoGravada: _observacaoEntregaController.text,
+      onTap: abrir,
+      acaoTitulo: TextButton.icon(
+        onPressed: abrir,
+        icon: Icon(
+          linhas.isEmpty ? Icons.add : Icons.edit_outlined,
+          size: 18,
+        ),
+        label: Text(linhas.isEmpty ? 'Adicionar (F8)' : 'Editar (F8)'),
+      ),
     );
   }
 
@@ -6677,14 +6751,16 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         _dataEntregaMarcada ??= DateTime.now();
       }
       _enderecoEntregaController.text = entrega.endereco;
-      final referencia = entrega.referenciaNovoEndereco;
-      if (referencia != null) {
-        _observacaoEntregaController.text = ObservacaoCarreto.mesclar(
-          _observacaoEntregaController.text,
-          referencia,
-        );
-      }
       _indiceEnderecoSelecionado = entrega.indiceEnderecoSelecionado;
+      final enderecos = cliente.listarEnderecos();
+      if (entrega.referenciaEndereco != null) {
+        _pontoReferenciaEnderecoCheckout = entrega.referenciaEndereco!.trim();
+      } else if (enderecos.isNotEmpty &&
+          entrega.indiceEnderecoSelecionado >= 0 &&
+          entrega.indiceEnderecoSelecionado < enderecos.length) {
+        _pontoReferenciaEnderecoCheckout =
+            enderecos[entrega.indiceEnderecoSelecionado].referencia.trim();
+      }
       _entregaSomenteCotacao = false;
     });
     if (_carrinhoEntregaMista && mounted) {
@@ -6974,6 +7050,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           ),
         ],
         _buildCheckoutSecaoDesconto(setDialogState),
+        const SizedBox(height: 12),
+        _buildCheckoutSecaoObservacaoNota(setDialogState),
       ],
     );
 
@@ -7257,6 +7335,8 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
       _valorFreteController.clear();
       _enderecoEntregaController.clear();
       _observacaoEntregaController.clear();
+      _pontoReferenciaEnderecoCheckout = '';
+      _observacaoNotaController.clear();
       _orcamentoEmEdicaoId = null;
       _orcamentoEmEdicaoNumero = null;
       _idempotencyKeyOrcamentoPendente = null;
@@ -7485,6 +7565,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         entregaSomenteCotacao: _entregaSomenteCotacao,
         cargasEntregaJson: cargasEntregaJson,
       );
+      final observacaoNota = _observacaoNotaController.text.trim();
       final orcamentoEdicaoId = _orcamentoEmEdicaoId;
       int orcamentoId;
       final descontoPdV = _valorDescontoReaisPdV();
@@ -7500,6 +7581,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                 vendedorId: _vendedorSelecionadoId,
                 descontoEmReais: descontoPdV,
                 permitirVendaSemEstoque: _permitirVendaSemEstoque,
+                observacaoNota: observacaoNota,
               );
         } else {
           widget.vendaRepository.atualizarOrcamento(
@@ -7511,6 +7593,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
             vendedorId: _vendedorSelecionadoId,
             descontoEmReais: descontoPdV,
             permitirVendaSemEstoque: _permitirVendaSemEstoque,
+            observacaoNota: observacaoNota,
           );
         }
         orcamentoId = orcamentoEdicaoId;
@@ -7528,6 +7611,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
                   descontoEmReais: descontoPdV,
                   permitirVendaSemEstoque: _permitirVendaSemEstoque,
                   uuidLocal: chave,
+                  observacaoNota: observacaoNota,
                 );
         try {
           orcamentoId = await enviar();
@@ -7548,6 +7632,7 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           descontoEmReais: descontoPdV,
           permitirVendaSemEstoque: _permitirVendaSemEstoque,
           uuidLocal: _idempotencyKeyOrcamentoPendente,
+          observacaoNota: observacaoNota,
         );
         _idempotencyKeyOrcamentoPendente = null;
       }
@@ -8122,6 +8207,14 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
         }
       }
     }
+    var pontoReferenciaCheckout = '';
+    if (clienteIdValido != null) {
+      final cliente = widget.clienteRepository.obterPorId(clienteIdValido);
+      final enderecos = cliente?.listarEnderecos() ?? const <EnderecoCliente>[];
+      if (indiceEndereco >= 0 && indiceEndereco < enderecos.length) {
+        pontoReferenciaCheckout = enderecos[indiceEndereco].referencia.trim();
+      }
+    }
 
     setState(() {
       _carrinho
@@ -8178,7 +8271,9 @@ class _PontoDeVendaPageState extends State<PontoDeVendaPage>
           .toStringAsFixed(2)
           .replaceAll('.', ',');
       _enderecoEntregaController.text = orcamentoCompleto.enderecoEntrega;
+      _pontoReferenciaEnderecoCheckout = pontoReferenciaCheckout;
       _observacaoEntregaController.text = orcamentoCompleto.observacaoEntrega;
+      _observacaoNotaController.text = orcamentoCompleto.observacaoNota;
       _orcamentoEmEdicaoId = orcamentoCompleto.id;
       _orcamentoEmEdicaoNumero = orcamentoCompleto.numeroOrcamento;
     });
@@ -10055,15 +10150,14 @@ class _EntregaDialogResult {
   const _EntregaDialogResult({
     required this.endereco,
     required this.indiceEnderecoSelecionado,
-    this.referenciaNovoEndereco,
+    this.referenciaEndereco,
   });
 
   final String endereco;
   final int indiceEnderecoSelecionado;
 
-  /// Referencia do cadastro quando outro endereco foi escolhido no dialogo;
-  /// `null` mantem as observacoes do carreto como estao.
-  final String? referenciaNovoEndereco;
+  /// Ponto de referencia do endereco escolhido no cadastro (bloco Onde).
+  final String? referenciaEndereco;
 }
 
 class _EntregaClienteDialog extends StatefulWidget {
@@ -10086,7 +10180,7 @@ class _EntregaClienteDialog extends StatefulWidget {
 class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
   late final TextEditingController _enderecoController;
   late int _indiceEnderecoSelecionado;
-  String? _referenciaNovoEndereco;
+  String _referenciaEndereco = '';
   String? _erroEndereco;
 
   @override
@@ -10099,6 +10193,12 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
             0,
             widget.enderecosDisponiveis.length - 1,
           );
+    if (widget.enderecosDisponiveis.isNotEmpty) {
+      _referenciaEndereco = widget
+          .enderecosDisponiveis[_indiceEnderecoSelecionado]
+          .referencia
+          .trim();
+    }
   }
 
   @override
@@ -10119,7 +10219,9 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
       _EntregaDialogResult(
         endereco: endereco,
         indiceEnderecoSelecionado: _indiceEnderecoSelecionado,
-        referenciaNovoEndereco: _referenciaNovoEndereco,
+        referenciaEndereco: _referenciaEndereco.trim().isEmpty
+            ? null
+            : _referenciaEndereco.trim(),
       ),
     );
   }
@@ -10197,7 +10299,7 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
                         _indiceEnderecoSelecionado = value;
                         final endereco = widget.enderecosDisponiveis[value];
                         _enderecoController.text = endereco.resumo();
-                        _referenciaNovoEndereco = endereco.referencia.trim();
+                        _referenciaEndereco = endereco.referencia.trim();
                       });
                     },
                   ),
@@ -10211,7 +10313,8 @@ class _EntregaClienteDialogState extends State<_EntregaClienteDialog> {
                     labelText: 'Endereço de entrega',
                     errorText: _erroEndereco,
                     helperText:
-                        'Referências e instruções: use Observações do carreto (F8).',
+                        'Ponto de referência do cadastro aparece no bloco Onde. '
+                        'Instruções ao motorista: F8.',
                   ),
                   onChanged: (_) => setState(() => _erroEndereco = null),
                 ),

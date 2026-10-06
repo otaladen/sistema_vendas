@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/entregas/observacao_carreto.dart';
+import '../domain/observacao_nota.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/produto_embalagem.dart';
 import '../domain/produto_nome_exibicao.dart';
@@ -467,6 +468,12 @@ class CupomNaoFiscalVendaPdf {
         valorPago: formatarValorNumerico(totalRecebido),
         troco: formatarValorNumerico(troco),
         linhasMisto: linhasPagamento,
+        exibirDivisoriaFinal:
+            ObservacaoNota.linhasRodapeCupom(venda).isEmpty,
+      ),
+      ...CupomPdfLayout.blocoObservacaoVendaCupomDanfe(
+        layout: layout,
+        linhas: ObservacaoNota.linhasRodapeCupom(venda),
       ),
       if (exibirAvisoContingencia)
         CupomPdfLayout.faixaContingenciaAposPagamentoLegadoLdv(layout: layout),
@@ -710,6 +717,10 @@ class CupomNaoFiscalVendaPdf {
         valor: formatarMoeda(troco),
         destaque: layout.destacarTroco,
         colunas: layout.alinharPagamentoColunas,
+      ),
+      ...CupomPdfLayout.blocoObservacaoVendaCupomDanfe(
+        layout: layout,
+        linhas: ObservacaoNota.linhasRodapeCupom(venda),
       ),
       if (homolog) _faixaHomologacaoFiscal(layout),
       CupomPdfLayout.espacoFinalDocumento(layout),

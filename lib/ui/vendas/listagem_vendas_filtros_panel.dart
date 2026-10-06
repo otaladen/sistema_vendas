@@ -69,7 +69,7 @@ class _ListagemVendasFiltrosPanelState extends State<ListagemVendasFiltrosPanel>
                   controller: widget.buscaController,
                   decoration: InputDecoration(
                     hintText:
-                        'Controle ou NFC-e (numero exato), cliente, vendedor ou produto...',
+                        'Controle, NFC-e, cliente, vendedor, produto ou obs. da nota...',
                     prefixIcon: const Icon(Icons.search),
                     isDense: true,
                     filled: true,

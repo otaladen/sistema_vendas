@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../model/venda.dart';
 import 'entregas/carga_atual_venda.dart';
+import 'observacao_nota.dart';
 
 /// Dados minimos da NF-e 55 para rotulos (evita acoplar UI ao store).
 class VendaDocumentoNfe55Resumo {
@@ -248,6 +249,10 @@ abstract final class VendaDocumentoRotuloHelper {
   /// Observacao transmitida na NFC-e / NF-e (campo infCpl / adicionais).
   static String observacaoFiscalNota(Venda venda) {
     final partes = <String>[rotuloControleInterno(venda)];
+    final obsNota = ObservacaoNota.paraCampoFiscal(venda);
+    if (obsNota.isNotEmpty) {
+      partes.add(obsNota);
+    }
     if (venda.enderecoEntrega.trim().isNotEmpty) {
       partes.add('Entrega: ${venda.enderecoEntrega.trim()}');
     }

@@ -328,6 +328,61 @@ abstract final class CategoriaImportacaoMapper {
         t.contains('basculante') ||
         t.contains('espelho')) {
       cat = 'Portas, Janelas e Vidros';
+    } else if (t.contains('botijao') ||
+        t.contains('glp') ||
+        t.contains('gas ') ||
+        t.contains(' gás') ||
+        t.contains('churrasqueira') ||
+        t.contains('grelha') ||
+        t.contains('fogao')) {
+      cat = 'Gas e Aquecimento';
+    } else if (t.contains('isolante') ||
+        t.contains('la de vidro') ||
+        t.contains('lã de vidro') ||
+        t.contains('termoacust') ||
+        t.contains('barreira de vapor')) {
+      cat = 'Isolamento Termico e Acustico';
+    } else if (t.contains('meio-fio') ||
+        t.contains('meio fio') ||
+        t.contains('paver') ||
+        t.contains('premoldad') ||
+        t.contains('pre-moldad')) {
+      cat = 'Premoldados e Concreto';
+    } else if (t.contains('chumbador') ||
+        t.contains('ancoragem') ||
+        t.contains('bucha quimica')) {
+      cat = 'Fixacao Quimica e Ancoragem';
+    } else if (t.contains('solda') ||
+        t.contains('eletrodo') ||
+        t.contains('macarico') ||
+        t.contains('maçarico')) {
+      cat = 'Soldagem e Metais';
+    } else if (t.contains('camera') ||
+        t.contains('câmera') ||
+        t.contains('alarme') ||
+        t.contains('interfone') ||
+        t.contains('cabo de rede') ||
+        t.contains('roteador')) {
+      cat = 'Automacao, Seguranca e Telecom';
+    } else if (t.contains('cortina') ||
+        t.contains('tapete') ||
+        t.contains('moveis') ||
+        t.contains('móveis') ||
+        t.contains('decoracao') ||
+        t.contains('decoração')) {
+      cat = 'Moveis e Decoracao';
+    } else if (t.contains('limpeza') ||
+        t.contains('detergente') ||
+        t.contains('desinfetante') ||
+        t.contains('papel higienico') ||
+        t.contains('lixeira') ||
+        t.contains('saco de lixo')) {
+      cat = 'Casa, Limpeza e Utilidades';
+    } else if (t.contains('piscina') ||
+        t.contains('cloro para piscina') ||
+        t.contains('hidromassagem') ||
+        t.contains('ombrelone')) {
+      cat = 'Piscina e Lazer';
     }
 
     if (cat == null) return null;

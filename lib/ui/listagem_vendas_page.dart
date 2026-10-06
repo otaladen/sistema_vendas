@@ -21,6 +21,7 @@ import '../domain/listagem_vendas_busca_relevancia.dart';
 import '../domain/listagem_vendas_dedupe.dart';
 import '../domain/sessao_caixa_referencia.dart';
 import 'vendas/sessao_caixa_picker_dialog.dart';
+import '../domain/observacao_nota.dart';
 import '../domain/venda_documento_rotulo_helper.dart';
 import '../domain/venda_finalizacao_caixa_helper.dart';
 import '../domain/pagamento_orcamento.dart';
@@ -1071,60 +1072,106 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     final venda = widget.vendaRepository.obterPorId(v.id) ?? v;
     final itens = await _itensDaVendaAsync(venda);
     if (!mounted) return;
+    final obsNota = ObservacaoNota.linhasDigitadas(venda.observacaoNota);
     await showDialog<void>(
       context: context,
       builder: (ctx) {
+        final theme = Theme.of(ctx);
+        final scheme = theme.colorScheme;
         return AlertDialog(
-          title: Text('Produtos — ${_rotuloVendaUsuario(venda)}'),
+          title: Text('Detalhe — ${_rotuloVendaUsuario(venda)}'),
           content: SizedBox(
-            width: 440,
-            child: itens.isEmpty
-                ? const Text('Nenhum item registrado nesta venda.')
-                : ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 420),
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (final item in itens)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  SizedBox(
-                                    width: 44,
-                                    child: Text(
-                                      EntregaVendaHelper.abreviacaoTipoItem(
-                                        item.tipoEntregaItem,
-                                      ),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: Theme.of(
-                                          ctx,
-                                        ).colorScheme.primary,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      '${item.quantidadeExibicaoVenda} x ${item.nomeProduto}',
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    _formatarMoeda(item.subtotal),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
+            width: 480,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 520),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (obsNota.isNotEmpty) ...[
+                      Text(
+                        'Observações da nota',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest
+                              .withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: scheme.outlineVariant,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final linha in obsNota)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Text(linha),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    Text(
+                      'Itens',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 6),
+                    if (itens.isEmpty)
+                      Text(
+                        'Nenhum item registrado nesta venda.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      )
+                    else
+                      for (final item in itens)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 44,
+                                child: Text(
+                                  EntregaVendaHelper.abreviacaoTipoItem(
+                                    item.tipoEntregaItem,
+                                  ),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: scheme.primary,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  '${item.quantidadeExibicaoVenda} x ${item.nomeProduto}',
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _formatarMoeda(item.subtotal),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+            ),
           ),
           actions: [
             TextButton(
@@ -1408,6 +1455,9 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       alertas.insert(0, _linhaRetiradaFutura(v));
     }
 
+    final obsNota = ObservacaoNota.normalizar(v.observacaoNota);
+    final obsNotaResumo = ObservacaoNota.resumoLista(obsNota);
+
     final statusCompleto = v.cancelada
         ? 'Venda cancelada'
         : _statusOperacionalLista(v, nfe55: nfe55);
@@ -1435,10 +1485,13 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
       cancelada: v.cancelada,
       alertas: alertas,
       temDevolucaoTroca: devTroca != null,
+      observacaoNota: obsNota,
+      observacaoNotaResumo: obsNotaResumo,
     );
   }
 
-  void _executarAcaoMenu(String value, Venda v) {
+  void _executarAcaoMenu(String value, ListagemVendaItemUi item) {
+    final v = item.venda;
     switch (value) {
       case 'historico':
         unawaited(_mostrarHistoricoRetirada(v));
@@ -1468,7 +1521,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
         unawaited(_segundaViaCupom(v));
         return;
       case 'cancelar':
-        unawaited(_cancelarVenda(v));
+        unawaited(_cancelarVenda(item));
         return;
     }
   }
@@ -1751,7 +1804,8 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
     );
   }
 
-  Future<void> _cancelarVenda(Venda venda) async {
+  Future<void> _cancelarVenda(ListagemVendaItemUi item) async {
+    final venda = item.venda;
     final resultado = await CancelarVendaUi.executar(
       context: context,
       vendaRepository: widget.vendaRepository,
@@ -2263,8 +2317,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 unawaited(_carregarMaisVendas()),
                             onTapItem: (item) =>
                                 _mostrarModalItensVenda(item.venda),
-                            onAcaoMenu: (acao, item) =>
-                                _executarAcaoMenu(acao, item.venda),
+                            onAcaoMenu: _executarAcaoMenu,
                             menuBuilder: (item) => _menuItensVenda(item.venda),
                           )
                         : ListagemVendasListaCards(
@@ -2275,8 +2328,7 @@ class _ListagemVendasPageState extends State<ListagemVendasPage> {
                                 unawaited(_carregarMaisVendas()),
                             onTapItem: (item) =>
                                 _mostrarModalItensVenda(item.venda),
-                            onAcaoMenu: (acao, item) =>
-                                _executarAcaoMenu(acao, item.venda),
+                            onAcaoMenu: _executarAcaoMenu,
                             menuBuilder: (item) => _menuItensVenda(item.venda),
                           ),
                   ),

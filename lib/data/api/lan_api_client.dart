@@ -3089,6 +3089,7 @@ Map<String, dynamic> montarBodyOrcamentoApi({
   double descontoEmReais = 0,
   bool permitirVendaSemEstoque = false,
   String? uuidLocal,
+  String observacaoNota = '',
 }) {
   final key = (uuidLocal ?? '').trim();
   return {
@@ -3104,6 +3105,7 @@ Map<String, dynamic> montarBodyOrcamentoApi({
     'vendedorId': vendedorId,
     'descontoEmReais': descontoEmReais,
     'permitirVendaSemEstoque': permitirVendaSemEstoque,
+    'observacaoNota': observacaoNota.trim(),
     if (key.isNotEmpty) 'uuidLocal': key,
     if (key.isNotEmpty) 'idempotencyKey': key,
   };

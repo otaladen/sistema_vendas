@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../config/fiscal_config.dart';
 import '../data/app_config_repository.dart';
 import '../domain/entrega_venda_helper.dart';
+import '../domain/observacao_nota.dart';
 import '../domain/orcamento_condicoes_pagamento.dart';
 import '../domain/orcamento_totais_impressao.dart';
 import '../domain/plano_fiado.dart';
@@ -274,6 +275,10 @@ abstract final class OrcamentoPdfService {
               ...CupomPdfLayout.blocoDadosEntregaCarreto(
                 layout: layout,
                 linhas: linhasEntrega,
+              ),
+              ...CupomPdfLayout.blocoObservacoesNota(
+                layout: layout,
+                linhas: ObservacaoNota.linhasImpressao(venda),
               ),
               CupomPdfLayout.divisoriaSecao(layout: layout),
               CupomPdfLayout.tituloSecao('ITENS', layout),

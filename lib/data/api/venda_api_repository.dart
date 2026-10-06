@@ -1050,7 +1050,8 @@ class VendaApiRepository extends ChangeNotifier {
               v.numeroOrcamento > 0 ? '${v.numeroOrcamento}' : '';
           final cli = _nomeCliente(v.cliente.targetId).toLowerCase();
           final hay =
-              '$id $controle $orc ${v.nfceNumero} ${v.nfeNumero} $cli'
+              '$id $controle $orc ${v.nfceNumero} ${v.nfeNumero} $cli '
+                      '${v.observacaoNota}'
                   .toLowerCase();
           if (!hay.contains(textoBusca)) return false;
         }
@@ -2046,6 +2047,7 @@ class VendaApiRepository extends ChangeNotifier {
     double descontoEmReais = 0,
     bool permitirVendaSemEstoque = false,
     String? uuidLocal,
+    String observacaoNota = '',
   }) async {
     _exigirServidorOnline();
     final body = montarBodyOrcamentoApi(
@@ -2083,6 +2085,7 @@ class VendaApiRepository extends ChangeNotifier {
       descontoEmReais: descontoEmReais,
       permitirVendaSemEstoque: permitirVendaSemEstoque,
       uuidLocal: uuidLocal,
+      observacaoNota: observacaoNota,
     );
     final id = await _client.criarOrcamento(body);
     final v = await _client.obterVenda(id);
@@ -2135,6 +2138,7 @@ class VendaApiRepository extends ChangeNotifier {
     int? vendedorId,
     double descontoEmReais = 0,
     bool permitirVendaSemEstoque = false,
+    String observacaoNota = '',
   }) async {
     _exigirServidorOnline();
     final body = montarBodyOrcamentoApi(
@@ -2171,6 +2175,7 @@ class VendaApiRepository extends ChangeNotifier {
       vendedorId: vendedorId,
       descontoEmReais: descontoEmReais,
       permitirVendaSemEstoque: permitirVendaSemEstoque,
+      observacaoNota: observacaoNota,
     );
     await _client.atualizarOrcamento(vendaId, body);
     final v = await _client.obterVenda(vendaId);

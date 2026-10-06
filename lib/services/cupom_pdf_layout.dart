@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../config/fiscal_config.dart';
 import '../domain/entrega_venda_helper.dart';
 import '../domain/entregas/observacao_carreto.dart';
+import '../domain/observacao_nota.dart';
 import '../model/cliente.dart';
 import '../model/config_layout_impressao.dart';
 
@@ -285,10 +286,61 @@ class CupomPdfLayout {
     ];
   }
 
+  /// `OBSERVAÇÕES DA NOTA` em caixa com borda; corpo ja em caixa alta.
+  static List<pw.Widget> blocoObservacoesNota({
+    required ConfigLayoutImpressao layout,
+    required List<String> linhas,
+  }) =>
+      _blocoObservacoesCaixa(
+        layout: layout,
+        linhas: linhas,
+        titulo: ObservacaoNota.tituloImpressao,
+      );
+
+  /// Bloco entre pagamento e fiscal no DANFE NFC-e (cupom termico/PDF).
+  static List<pw.Widget> blocoObservacaoVendaCupomDanfe({
+    required ConfigLayoutImpressao layout,
+    required List<String> linhas,
+  }) {
+    if (linhas.isEmpty) return const [];
+    final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
+    final bold = _fontePdfBold(layout);
+    return [
+      divisoriaSecao(layout: layout, compacta: true),
+      pw.Text(
+        textoTermicoAscii(ObservacaoNota.tituloCupomDanfe),
+        style: pw.TextStyle(
+          font: bold,
+          fontBold: bold,
+          fontSize: fs,
+          fontWeight: pw.FontWeight.bold,
+        ),
+      ),
+      ...linhas.map(
+        (linha) => pw.Text(
+          textoTermicoAscii(linha),
+          style: pw.TextStyle(fontSize: fs),
+        ),
+      ),
+      divisoriaSecao(layout: layout, compacta: true),
+    ];
+  }
+
   /// `OBSERVAÇÕES DO CARRETO` em caixa com borda; corpo ja em caixa alta.
   static List<pw.Widget> blocoObservacoesCarreto({
     required ConfigLayoutImpressao layout,
     required List<String> linhas,
+  }) =>
+      _blocoObservacoesCaixa(
+        layout: layout,
+        linhas: linhas,
+        titulo: ObservacaoCarreto.tituloImpressao,
+      );
+
+  static List<pw.Widget> _blocoObservacoesCaixa({
+    required ConfigLayoutImpressao layout,
+    required List<String> linhas,
+    required String titulo,
   }) {
     if (linhas.isEmpty) return const [];
     final fs = layout.tamanhoFonteCorpo.fontSizeCorpo;
@@ -312,7 +364,7 @@ class CupomPdfLayout {
           children: [
             pw.Center(
               child: pw.Text(
-                ObservacaoCarreto.tituloImpressao,
+                titulo,
                 textAlign: pw.TextAlign.center,
                 style: negrito(fs + 1),
               ),
@@ -1799,6 +1851,7 @@ class CupomPdfLayout {
     required String valorPago,
     required String troco,
     List<({String forma, String valor})> linhasMisto = const [],
+    bool exibirDivisoriaFinal = true,
   }) {
     final fs = layout.tamanhoFonteTotais.fontSizeTotais;
     final forma = formaPagamento.trim().toUpperCase();
@@ -1845,7 +1898,8 @@ class CupomPdfLayout {
         fontWeightValor:
             layout.destacarTroco ? pw.FontWeight.bold : pw.FontWeight.normal,
       ),
-      divisoriaSecao(layout: layout, compacta: true),
+      if (exibirDivisoriaFinal)
+        divisoriaSecao(layout: layout, compacta: true),
     ]);
 
     return pw.Column(
